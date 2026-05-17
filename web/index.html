@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GRlite — Stage 1: scalar wave</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; background: #111; color: #ddd; font: 14px system-ui, sans-serif; }
+      header { padding: 10px 16px; background: #1a1a1a; border-bottom: 1px solid #222; }
+      header h1 { margin: 0; font-size: 15px; font-weight: 500; color: #eee; }
+      main { display: flex; flex-direction: column; align-items: center; padding: 24px; gap: 12px; }
+      canvas { background: #000; image-rendering: pixelated; border: 1px solid #333; }
+      #status { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; color: #999; }
+      .controls { display: flex; gap: 8px; }
+      button { background: #222; color: #ddd; border: 1px solid #444; padding: 4px 12px; font-size: 12px; cursor: pointer; }
+      button:hover { background: #2a2a2a; }
+    </style>
+  </head>
+  <body>
+    <header><h1>GRlite — Stage 1: scalar wave propagation (Phi_grav)</h1></header>
+    <main>
+      <canvas id="view" width="512" height="512"></canvas>
+      <div class="controls">
+        <button id="reset">reset pulse</button>
+        <button id="pause">pause</button>
+      </div>
+      <div id="status">initializing&hellip;</div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

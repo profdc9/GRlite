@@ -24,6 +24,7 @@
 *.wasm.map
 core/build/
 core/dist/
+web/public/grlite/
 
 # Emscripten
 *.js.mem
