@@ -15,6 +15,7 @@ const C_EFF = 1.0;
 const CFL = 1.0 / Math.sqrt(2);          // 2D stability limit, §9.2 eq:cfl
 const PULSE_SIGMA = 4.0 * DX;
 const PULSE_AMP = 1.0;
+const N_DAMPING = 16;                     // §9.6 absorbing layer thickness (Stage 2)
 const STEPS_PER_FRAME = 4;
 const DISPLAY_SCALE = 8.0;                // visual gain on |phi| so the wavefront is visible
 
@@ -26,6 +27,7 @@ interface SimAPI {
     stepN: (sim: number, n: number) => void;
     fieldPtr: (sim: number, which: number) => number;
     loadScenario: (sim: number, name: string, paramsPtr: number, n: number) => number;
+    setDamping: (sim: number, nDamping: number) => void;
     stepCount: (sim: number) => number;
     simTime: (sim: number) => number;
 }
@@ -54,12 +56,18 @@ function bindApi(M: GRliteModule): SimAPI {
     const loadScenario = M.cwrap('gr_sim_load_scenario', 'number',
         ['number', 'string', 'number', 'number']) as
         (sim: number, name: string, paramsPtr: number, n: number) => number;
+    const setDamping = M.cwrap('gr_sim_set_damping', null, ['number', 'number']) as
+        (sim: number, nDamping: number) => void;
     const stepCount = M.cwrap('gr_sim_step_count', 'number', ['number']) as
         (sim: number) => number;
     const simTime = M.cwrap('gr_sim_time', 'number', ['number']) as (sim: number) => number;
 
     const sim = create(GRID_W, GRID_H, DX, C_EFF, CFL);
     if (!sim) throw new Error('gr_sim_create returned NULL');
+
+    // Enable the §9.6 absorbing damping layer so the pulse exits cleanly
+    // instead of reflecting off the grid walls (Stage 2).
+    setDamping(sim, N_DAMPING);
 
     // Marshal Gaussian-pulse params via the WASM heap.
     const params = new Float32Array([PULSE_SIGMA, PULSE_AMP]);
@@ -69,7 +77,8 @@ function bindApi(M: GRliteModule): SimAPI {
     M._free(paramsPtr);
     if (rc !== 0) throw new Error(`load_scenario failed: rc=${rc}`);
 
-    return { sim, create, destroy, step, stepN, fieldPtr, loadScenario, stepCount, simTime };
+    return { sim, create, destroy, step, stepN, fieldPtr, loadScenario,
+             setDamping, stepCount, simTime };
 }
 
 /* WebGL2 setup: one fullscreen quad, one R32F texture, diverging colormap fragment shader. */

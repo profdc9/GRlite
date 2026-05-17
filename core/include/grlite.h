@@ -64,6 +64,19 @@ int   gr_sim_height(const gr_sim_t* sim);
 float* gr_sim_field_ptr(gr_sim_t* sim, gr_field_id_t which);
 
 /* ----------------------------------------------------------------------------
+ * Absorbing damping layer (Stage 2)
+ *
+ * Install (or remove) a quadratic-profile absorbing layer of n_damping cells
+ * on each grid edge. Per gr_sandbox_v32.tex §9.6 sec:abc eq:damp_profile:
+ *   sigma(x) = sigma_max * (x/L)^2,  L = n_damping * dx,
+ *   sigma_max = 21 * c_eff / (2 * L)  =>  round-trip reflection R ~ 1e-3.
+ * Pass n_damping = 0 to disable (no per-cell multiply will occur).
+ * Default after gr_sim_create: no damping (Stage 1 behavior).
+ * --------------------------------------------------------------------------*/
+void gr_sim_set_damping(gr_sim_t* sim, int n_damping);
+int  gr_sim_damping_layers(const gr_sim_t* sim);
+
+/* ----------------------------------------------------------------------------
  * Scenario registry
  *
  * Scenarios are the single source of truth shared between tests and the web

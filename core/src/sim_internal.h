@@ -25,6 +25,14 @@ struct gr_sim {
     float* phi_prev;   /* Phi^{n-1} */
     float* phi_curr;   /* Phi^n     */
     float* phi_next;   /* Phi^{n+1} (scratch) */
+
+    /* Damping layer (Stage 2, gr_sandbox_v32.tex §9.6).
+     *   n_damping       : layer thickness on each edge (0 = no damping)
+     *   damping_d       : precomputed d_{i,j} = max(d_x(i), d_y(j)) array (NULL if disabled)
+     * Applied per step as Phi^{n+1}_{i,j} <- Phi^{n+1}_{i,j} * (1 - d_{i,j}) inside the
+     * leapfrog kernel — see eq:damp_profile and the implementation block below it. */
+    int    n_damping;
+    float* damping_d;
 };
 
 /* Defined in field.c — fills sim->phi_next from sim->phi_curr and sim->phi_prev. */

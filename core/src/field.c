@@ -33,19 +33,37 @@ void gr_field_leapfrog_step(struct gr_sim* sim) {
     const float* prev = sim->phi_prev;
     const float* curr = sim->phi_curr;
     float* next       = sim->phi_next;
+    const float* damp = sim->damping_d;  /* may be NULL (Stage 1) */
 
-    for (int j = 1; j < H - 1; j++) {
-        const int row = j * W;
-        for (int i = 1; i < W - 1; i++) {
-            const int k    = row + i;
-            const float lap = (curr[k - 1] + curr[k + 1] + curr[k - W] + curr[k + W]
-                              - 4.0f * curr[k]) * inv_dx2;
-            next[k] = 2.0f * curr[k] - prev[k] + c2dt2 * lap;
+    if (damp) {
+        /* Eq. (eq:leapfrog_field) with absorbing layer (eq:damp_profile, §9.6):
+         * Phi^{n+1} = (2 Phi^n - Phi^{n-1} + (c dt)^2 Lap) * (1 - d_{i,j}) */
+        for (int j = 1; j < H - 1; j++) {
+            const int row = j * W;
+            for (int i = 1; i < W - 1; i++) {
+                const int k    = row + i;
+                const float lap = (curr[k - 1] + curr[k + 1] + curr[k - W] + curr[k + W]
+                                  - 4.0f * curr[k]) * inv_dx2;
+                next[k] = (2.0f * curr[k] - prev[k] + c2dt2 * lap) * (1.0f - damp[k]);
+            }
+        }
+    } else {
+        for (int j = 1; j < H - 1; j++) {
+            const int row = j * W;
+            for (int i = 1; i < W - 1; i++) {
+                const int k    = row + i;
+                const float lap = (curr[k - 1] + curr[k + 1] + curr[k - W] + curr[k + W]
+                                  - 4.0f * curr[k]) * inv_dx2;
+                next[k] = 2.0f * curr[k] - prev[k] + c2dt2 * lap;
+            }
         }
     }
 
-    /* Zero-Dirichlet boundary (Stage 1: hard wall — pulse reflection beyond
-     * the measurement window is tolerated). */
+    /* Zero-Dirichlet boundary. With the damping layer engaged this wall sits at
+     * the outer edge of the absorber, where residual amplitude is ~R ~ 1e-3 of
+     * incident — small enough that the reflection re-attenuates on its return
+     * trip (§9.6). Without the damping layer (Stage 1) the wall is a perfect
+     * reflector; tests must size their measurement window accordingly. */
     for (int i = 0; i < W; i++) {
         next[i] = 0.0f;
         next[(H - 1) * W + i] = 0.0f;

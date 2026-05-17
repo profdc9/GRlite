@@ -8,8 +8,8 @@ This README covers how to build and run what's currently implemented.
 
 ## Status
 
-**Stage 1** of 16 — scalar wave equation, free propagation
-(§12.1 of the design doc). All other stages pending.
+**Stage 2** of 16 — absorbing damping layer added on top of Stage 1
+(§§12.1–12.2 of the design doc). All later stages pending.
 
 ## Repo layout
 
