@@ -1,15 +1,20 @@
 # GRlite
 
 A 2D linearized General Relativity sandbox for interactive pedagogical use.
-The full design is in [`docs/gr_sandbox_v32.tex`](docs/gr_sandbox_v32.tex);
-the staged build plan is in §12 of that document.
+The current authoritative spec is [`docs/gr_sandbox_v33.tex`](docs/gr_sandbox_v33.tex)
+(v32 is preserved as the original); the staged build plan is in §12.
 
 This README covers how to build and run what's currently implemented.
 
 ## Status
 
-**Stage 2** of 16 — absorbing damping layer added on top of Stage 1
-(§§12.1–12.2 of the design doc). All later stages pending.
+Of the 17 stages in v33's §12:
+
+- **Stage 1** — scalar wave equation, free propagation ✓
+- **Stage 2** — absorbing damping layer ✓
+- **Stage 6** — sampled background field arrays ✓ (built ahead of Stages 3–5
+  so single-particle dynamics tests can be written against a prescribed background)
+- Stages 3–5, 7–17 — pending
 
 ## Repo layout
 

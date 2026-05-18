@@ -1,0 +1,2357 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage[expansion=false]{microtype}
+\usepackage{parskip}
+\usepackage{listings}
+\usepackage{mdframed}
+
+\geometry{margin=2.5cm}
+
+\definecolor{deepblue}{RGB}{31,56,100}
+\definecolor{midblue}{RGB}{46,84,150}
+\definecolor{codebg}{RGB}{245,247,250}
+\definecolor{coderule}{RGB}{200,210,225}
+
+\titleformat{\section}{\large\bfseries\color{deepblue}}{{\thesection}}{1em}{}
+\titleformat{\subsection}{\normalsize\bfseries\color{midblue}}{{\thesubsection}}{1em}{}
+\titleformat{\subsubsection}{\normalsize\bfseries}{{\thesubsubsection}}{1em}{}
+
+\lstset{
+  backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{coderule},
+  framesep=6pt,
+  xleftmargin=8pt,
+  xrightmargin=8pt,
+  aboveskip=8pt,
+  belowskip=8pt,
+}
+
+\newmdenv[
+  backgroundcolor=codebg,
+  linecolor=coderule,
+  linewidth=0.5pt,
+  innerleftmargin=10pt,
+  innerrightmargin=10pt,
+  innertopmargin=8pt,
+  innerbottommargin=8pt,
+  skipabove=8pt,
+  skipbelow=8pt,
+]{eqbox}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{gray}Linearized GR Sandbox}
+\fancyhead[R]{\small\color{gray}Design Document\,---\,v33}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\newcommand{\vv}[1]{\mathbf{#1}}
+\newcommand{\Bg}{B_g}
+\newcommand{\Phig}{\Phi_g}
+\newcommand{\Ag}{\vv{A}_g}
+\newcommand{\uEM}{u_{\mathrm{EM}}}
+\newcommand{\order}[1]{\mathcal{O}(#1)}
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\half}{\tfrac{1}{2}}
+
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+
+% Numbered algorithm steps with consistent formatting
+\newlist{algsteps}{enumerate}{1}
+\setlist[algsteps]{label=\textbf{Step \arabic*.},
+                   leftmargin=*,
+                   labelwidth=5em,
+                   itemsep=6pt}
+
+%--------------------------------------------------------------------
+\begin{document}
+%--------------------------------------------------------------------
+
+\begin{titlepage}
+  \centering
+  \vspace*{3cm}
+  {\Huge\bfseries\color{deepblue} General Relativity Sandbox\par}
+  \vspace{0.8cm}
+  {\large\itshape Design and Implementation of a Linearized GR\,+\,Electromagnetism Simulation\par}
+  \vspace{0.4cm}
+  {\normalsize\color{gray} Comparing Full Linearized Einstein--Maxwell vs.\ GEM/EM Approaches\par}
+  \vspace{1.2cm}
+  {\large\bfseries\color{midblue} Revision v33\par}
+  \vspace{0.2cm}
+  {\small\color{gray} Adds sampled-background stage; clarifies §\ref{sec:abc} realized reflection.\par}
+  \vspace{1.5cm}
+  \hrule
+\end{titlepage}
+
+\tableofcontents
+\newpage
+
+%====================================================================
+\section*{Changes from v32}
+%====================================================================
+
+This revision makes two changes to the v32 document:
+
+\begin{enumerate}
+  \item \textbf{Implementation plan, §\ref{sec:impl}}: a new stage is inserted between the original Stages 5 and 6, introducing \emph{sampled background field arrays} as a prerequisite for the particle-dynamics tests.  All subsequent stages are renumbered (old Stages 6--16 become new Stages 7--17).  The motivation is testability: with sampled backgrounds available before the perturbation-source tests, a single test particle can be placed in any prescribed background (Keplerian orbit around a softened point mass, gyroscope in a frame-dragging field, charge in an external Coulomb potential, etc.) without first having to set up a second body and the FDTD source-deposition path.  The full background-modes coverage formerly in old Stage 14 (Schwarzschild, Kerr, Reissner--Nordstr\"om, Kerr--Newman, binary) remains in the new Stage 15, where it expands the library of generators introduced in the new Stage 6.
+  \item \textbf{§\ref{sec:abc} clarification}: the round-trip reflection $R\approx10^{-3}$ derived there is the plane-wave normal-incidence limit; the realized in-interior residual for a 2D circular wavefront is observed to be several percent due to two effects --- the $(1-\sigma\,\dd t)$ linearization differing from $\exp(-\sigma\,\dd t)$ at the $\sigma_{\max}\,\dd t\sim0.46$ used in practice, and oblique-incidence waves into the grid corners being weakly damped by the axis-aligned $d_{i,j}=\max(d_x,d_y)$ profile.  Both effects would be mitigated by a PML; for the qualitative pedagogical purpose of the sandbox, the simple damping layer is adequate.  See the new paragraph at the end of §\ref{sec:abc} for the empirical figures.
+\end{enumerate}
+
+All physics chapters (§\ref{sec:gem_metric} through §\ref{sec:abc} and beyond) are unchanged from v32.  Cross-references to \texttt{eq:} labels remain valid.
+
+\newpage
+
+%====================================================================
+\section{Project Goal}
+%====================================================================
+
+The aim is to build an interactive general relativity sandbox that runs in real time on a desktop computer.  A full numerical relativity simulation using the ADM (Arnowitt--Deser--Misner) framework with a Cauchy boundary is computationally infeasible for this purpose, as it typically requires supercomputer resources.  Instead, the simulation is based on \emph{linearized} general relativity, which captures the most physically interesting effects while remaining tractable.
+
+In the linearized theory, the metric perturbation satisfies a wave equation---the d'Alembert equation---which can be time-stepped efficiently on a grid.  Massive particles and charged test particles then follow trajectories determined by the geodesic equation in this perturbed spacetime, with electromagnetic forces added via the standard Lorentz force.
+
+The sandbox also incorporates electromagnetism, using the full coupled Einstein--Maxwell system in the linearized limit.  This means the electromagnetic field contributes to the gravitational field via its stress-energy tensor, and the gravitational field in turn affects the propagation of electromagnetic waves.
+
+%====================================================================
+\section{Physical Framework}
+%====================================================================
+
+\subsection{Linearized General Relativity}
+
+In linearized GR, the metric is written as a small perturbation around flat (Minkowski) spacetime:
+\begin{equation}
+  g_{\mu\nu} = \eta_{\mu\nu} + h_{\mu\nu}, \qquad |h_{\mu\nu}| \ll 1.
+\end{equation}
+In the Lorenz gauge, the trace-reversed perturbation $\bar{h}^{\mu\nu} \equiv h^{\mu\nu} - \tfrac{1}{2}\eta^{\mu\nu}h$ satisfies a wave equation sourced by the full stress-energy tensor:
+\begin{equation}
+  \Box\,\bar{h}^{\mu\nu} = -\frac{16\pi G}{c^4}\,T^{\mu\nu}_{\mathrm{total}}.
+\end{equation}
+This is structurally identical to the wave equation for the electromagnetic four-potential, so FDTD methods from computational electromagnetics apply directly.
+
+\subsection{The GEM Metric}
+\label{sec:gem_metric}
+
+In the Lorenz gauge, choosing the GEM potentials $\Phig$ and $\Ag$ to represent the relevant components of $\bar{h}^{\mu\nu}$, the full linearized metric perturbation is:
+\begin{equation}
+\label{eq:gem_metric}
+  h_{00} = -\frac{2\Phig}{c^2}, \qquad
+  h_{0i} = h_{i0} = \frac{2A_{g,i}}{c}, \qquad
+  h_{ij} = -\frac{2\Phig}{c^2}\,\delta_{ij},
+\end{equation}
+giving the line element:
+\begin{equation}
+\label{eq:gem_line_element}
+  \dd s^2 = -\!\left(1+\frac{2\Phig}{c^2}\right)c^2\dd t^2
+            + \frac{4}{c}\,\Ag\cdot\dd\vv{x}\,\dd t
+            + \left(1-\frac{2\Phig}{c^2}\right)\!\left(\dd x^2+\dd y^2+\dd z^2\right).
+\end{equation}
+The trace-reversed perturbation $\bar{h}_{\mu\nu} = h_{\mu\nu} - \tfrac{1}{2}\eta_{\mu\nu}h$ has components:
+\begin{equation}
+  \bar{h}_{00} = -\frac{4\Phig}{c^2}, \qquad
+  \bar{h}_{0i} = \frac{4A_{g,i}}{c}, \qquad
+  \bar{h}_{ij} = 0,
+\end{equation}
+which is why the GEM wave equations decouple cleanly: $\Box\Phig \propto \rho$ and $\Box\Ag \propto \vv{J}$, with no spatial stress sourcing the spatial metric at this order.
+
+\subsubsection*{What each metric component produces}
+
+Each of the three distinct components of the metric in Eq.~(\ref{eq:gem_metric}) is responsible for a different class of physical effects:
+
+\paragraph{$h_{00} = -2\Phig/c^2$ (time-time component):}
+This is the Newtonian gravitational potential in relativistic clothing.  It is the only component present for a static non-rotating mass.  Its physical consequences include:
+\begin{itemize}
+  \item \textbf{Gravitational attraction}: the gradient $-\nabla\Phig$ gives the Newtonian force.
+  \item \textbf{Gravitational time dilation}: clocks in a gravitational well ($\Phig < 0$) run slow by factor $\sqrt{1+2\Phig/c^2}$, contributing $+\Phig/c^2$ to $\dd\tau/\dd t$ at first order.
+  \item \textbf{Shapiro delay}: light (and any massless signal) is slowed in a gravitational potential, producing the delay $\Delta t = -2\int\Phig\,\dd\ell/c^3$.
+  \item \textbf{Half of light bending}: the $h_{00}$ component alone would deflect light by $2GM/(c^2 b)$ --- the Newtonian result.
+\end{itemize}
+
+\paragraph{$h_{ij} = -2\Phig/c^2\,\delta_{ij}$ (spatial diagonal components):}
+The spatial metric is isotropic and also proportional to $\Phig$ --- the same scalar as the time-time component.  This component has no Newtonian analogue and is invisible to slow particles ($v\ll c$), but has important consequences for relativistic motion:
+\begin{itemize}
+  \item \textbf{Second half of light bending}: the spatial metric contributes an equal and opposite deflection to $h_{00}$, doubling the total to $4GM/(c^2 b)$ --- the correct GR result.  This is why Newtonian gravity predicts half the correct deflection.
+  \item \textbf{Post-Newtonian force corrections}: the $(v^2/c^2)\vv{g}$ and $4(\vv{v}\cdot\vv{g})\vv{v}/c^2$ terms in the geodesic expansion (Section~\ref{sec:relcorr}) arise from $h_{ij}$ contracting with the spatial velocity.
+  \item \textbf{Perihelion precession}: the post-Newtonian force corrections from $h_{ij}$ are responsible for the extra orbital precession beyond the Newtonian result.
+  \item \textbf{ISCO}: the additional attractive force from $h_{ij}$ at high velocities removes the minimum from the effective potential at small radii, producing the innermost stable circular orbit.
+\end{itemize}
+
+\paragraph{$h_{0i} = 2A_{g,i}/c$ (off-diagonal time-space components):}
+These components are nonzero only for rotating or moving masses, arising from the mass current $\vv{J}_{\mathrm{matter}}$ sourcing $\Ag$.  They have no Newtonian analogue.  Their physical consequences are:
+\begin{itemize}
+  \item \textbf{Gravitomagnetic force}: the off-diagonal metric produces the $4\vv{v}\times\vv{B}_g$ term in the GEM Lorentz force, responsible for Lense--Thirring orbital plane precession and the factor-of-4 difference from the EM analogy.
+  \item \textbf{Gyroscope precession}: a spinning test body in a gravitomagnetic field precesses at rate $\boldsymbol{\Omega}_{\mathrm{LT}} = \nabla\times\Ag$, the Lense--Thirring effect.
+  \item \textbf{Gravitomagnetic time dilation}: the $h_{0i}$ component contributes $4\Ag\cdot\vv{v}/c^2$ to the proper time rate (Section~\ref{sec:proptime}), with opposite sign for co- and counter-rotating orbits --- the gravitomagnetic clock effect.
+  \item \textbf{Frame dragging}: the dragging of inertial frames by a rotating mass is entirely encoded in $h_{0i}$; the ergosphere of the Kerr metric is the region where $h_{0i}$ terms dominate and nothing can remain stationary.
+\end{itemize}
+
+The three contributions are independent in the sense that $h_{00}$ and $h_{ij}$ are present for any mass regardless of rotation, while $h_{0i}$ requires a mass current.  Setting $\Ag = 0$ (non-rotating background) eliminates all gravitomagnetic effects and leaves only the Newtonian potential and its relativistic corrections.  The simulation can therefore interpolate between the Newtonian regime ($v\ll c$, $\Ag = 0$), the post-Newtonian regime ($v^2/c^2$ corrections from $h_{ij}$), and the full gravitomagnetic regime (all three metric components active).
+
+\subsection{Gravitoelectromagnetism (GEM)}
+
+In the slow-motion, weak-field limit the linearized GR equations reduce to a form mathematically identical to Maxwell's equations.  The gravitoelectric field $\vv{g}$ (analogous to $\vv{E}$) and gravitomagnetic field $\vv{B}_g$ (analogous to $\vv{B}$) satisfy:
+\begin{align}
+  \nabla\cdot\vv{g}   &= -4\pi G\rho, \\
+  \nabla\cdot\vv{B}_g &= 0, \\
+  \nabla\times\vv{g}  &= -\frac{\partial\vv{B}_g}{\partial t}, \\
+  \nabla\times\vv{B}_g &= -\frac{4\pi G}{c^2}\vv{J} + \frac{1}{c^2}\frac{\partial\vv{g}}{\partial t}.
+\end{align}
+The GEM Lorentz force on a test particle with rest mass $m$ and electric charge $q$ is, in terms of the derived fields:
+\begin{equation}
+  \vv{F} = m\!\left(\vv{g} + 4\vv{v}\times\vv{B}_g\right) + q\!\left(\vv{E} + \vv{v}\times\vv{B}\right).
+\end{equation}
+The factor of 4 in the gravitomagnetic term arises from the spin-2 nature of the graviton and is responsible for the Lense--Thirring precession rate differing from a naive EM analogy.
+
+Since the simulation stores potentials rather than fields, it is useful to have the equivalent expression directly in terms of potentials.  Substituting $\vv{g} = -\nabla\Phig - \partial_t\Ag$, $\vv{B}_g = \nabla\times\Ag$, $\vv{E} = -\nabla\phi - \partial_t\vv{A}$, $\vv{B} = \nabla\times\vv{A}$ and using the vector identity $\vv{v}\times(\nabla\times\vv{A}) = \nabla(\vv{v}\cdot\vv{A}) - (\vv{v}\cdot\nabla)\vv{A}$:
+\begin{align}
+  \vv{F}_{\mathrm{GEM}} &= m\!\left(-\nabla\Phig - \partial_t\Ag
+    + 4\nabla(\vv{v}\cdot\Ag) - 4(\vv{v}\cdot\nabla)\Ag\right), \label{eq:force_gem_pot} \\
+  \vv{F}_{\mathrm{EM}}  &= q\!\left(-\nabla\phi - \partial_t\vv{A}
+    + \nabla(\vv{v}\cdot\vv{A}) - (\vv{v}\cdot\nabla)\vv{A}\right). \label{eq:force_em_pot}
+\end{align}
+These expressions involve only the potentials and their spatial and temporal derivatives evaluated at the particle position.  No curl operation over the full grid is required.  The physical force is gauge-invariant: the apparent gauge dependence of the individual potential terms cancels exactly when all terms are combined, as can be verified by applying a gauge transformation $\phi\to\phi-\partial_t\Lambda$, $\vv{A}\to\vv{A}+\nabla\Lambda$ and confirming $\delta\vv{F}=0$.
+
+\subsection{Particle Properties: Mass and Electric Charge}
+
+Each particle carries two \emph{independent} intrinsic properties: a rest mass $m$ and an electric charge $q$.  They couple to entirely separate fields:
+\begin{itemize}
+  \item \textbf{Rest mass $m$} sources the GEM field via $\rho_{\mathrm{matter}} = \sum_i \gamma m_i\,\delta(\vv{x}-\vv{x}_i)$ and $\vv{J}_{\mathrm{matter}} = \sum_i \gamma m_i\vv{v}_i\,\delta(\vv{x}-\vv{x}_i)$.  It also determines the inertial response through $\vv{p} = \gamma m\vv{v}$.
+  \item \textbf{Electric charge $q$} sources the EM field via $\rho_q = \sum_i q_i\,\delta(\vv{x}-\vv{x}_i)$ and $\vv{J}_q = \sum_i q_i\vv{v}_i\,\delta(\vv{x}-\vv{x}_i)$.  It determines the response to the electromagnetic Lorentz force $q(\vv{E}+\vv{v}\times\vv{B})$.
+\end{itemize}
+A particle with both $m\neq 0$ and $q\neq 0$ contributes simultaneously to all four potentials $(\Phig,\Ag,\phi,\vv{A})$ and experiences forces from all four fields.
+
+\subsection{Relativistic Particle Integration}
+
+Particles are integrated relativistically via the 3-momentum $\vv{p} = \gamma m\vv{v}$.  The basic update scheme is:
+\begin{equation}
+  \vv{p} \;\leftarrow\; \vv{p} + \vv{F}_{\mathrm{total}}\,\dd t, \qquad
+  \vv{v} = \frac{\vv{p}}{\sqrt{m^2 + |\vv{p}|^2/c^2}}, \qquad
+  \vv{x} \;\leftarrow\; \vv{x} + \vv{v}\,\dd t.
+\end{equation}
+This correctly handles the anisotropy of relativistic inertia (longitudinal mass $\gamma^3 m$ vs.\ transverse mass $\gamma m$).  The force $\vv{F}_{\mathrm{total}}$ requires relativistic corrections at high velocities---see Section~\ref{sec:relcorr}.
+
+\subsection{Electromagnetic Stress-Energy Coupling}
+
+The total stress-energy tensor sourcing the GEM field is:
+\begin{equation}
+  T^{\mu\nu}_{\mathrm{total}} = T^{\mu\nu}_{\mathrm{matter}} + T^{\mu\nu}_{\mathrm{EM}},
+\end{equation}
+Since the simulation stores potentials rather than derived fields, it is useful to express $T^{\mu\nu}_{\mathrm{EM}}$ directly in terms of $\phi$ and $\vv{A}$ and their derivatives.  Define the shorthand combinations:
+\begin{equation}
+  \vv{P} \equiv \nabla\phi + \partial_t\vv{A}, \qquad
+  \vv{C} \equiv \nabla\times\vv{A},
+\end{equation}
+so that $\vv{E} = -\vv{P}$ and $\vv{B} = \vv{C}$.  These are not stored as grid arrays; they are computed on demand from finite differences of the potential arrays.  The EM stress-energy components in terms of $\vv{P}$ and $\vv{C}$ are:
+\begin{align}
+  T^{00}_{\mathrm{EM}} &= \frac{\varepsilon_0}{2}\!\left(|\vv{P}|^2 + c^2|\vv{C}|^2\right), \label{eq:T00_pot}\\
+  T^{0i}_{\mathrm{EM}} &= -\frac{1}{\mu_0 c}\!\left(\vv{P}\times\vv{C}\right)^i, \label{eq:T0i_pot}\\
+  T^{ij}_{\mathrm{EM}} &= \varepsilon_0\!\left(-P^i P^j + c^2\sum_k C^{ik}C^{jk}\right) - \tfrac{1}{2}\delta^{ij}\varepsilon_0\!\left(|\vv{P}|^2+c^2|\vv{C}|^2\right), \label{eq:Tij_pot}
+\end{align}
+where $C^{ij} \equiv \partial_i A_j - \partial_j A_i$ is the antisymmetric derivative tensor (the spatial components of $F_{\mu\nu}$), so that $C^i = (\nabla\times\vv{A})^i = \tfrac{1}{2}\epsilon^{ijk}C_{jk}$.  The expression $\sum_k C^{ik}C^{jk}$ in Eq.~(\ref{eq:Tij_pot}) involves only antisymmetric combinations of first derivatives of $\vv{A}$ --- no pseudovectors appear.
+
+Note that $\vv{C} = \nabla\times\vv{A}$ is the antisymmetric combination $(\partial_i A_j - \partial_j A_i)$ contracted with the Levi-Civita symbol, which is a component of the covariant field strength tensor $F_{\mu\nu}$.  It is not a grid array; it is evaluated on the fly from finite differences of edge potential values at the locations where it is needed.
+
+The GEM effective sources use only $T^{00}$ and $T^{0i}$.  Using perturbation potentials only (to avoid double-counting the background metric; see Section~\ref{sec:energy}):
+\begin{align}
+  \rho_{\mathrm{EM}} &= \frac{T^{00}_{\mathrm{EM}}}{c^2}
+    = \frac{\varepsilon_0}{2c^2}\!\left(|\nabla\phi^{\mathrm{pert}} + \partial_t\vv{A}^{\mathrm{pert}}|^2
+      + c^2|\nabla\times\vv{A}^{\mathrm{pert}}|^2\right), \label{eq:rho_em_pot}\\
+  \vv{J}_{\mathrm{EM}} &= \frac{\vv{S}_{\mathrm{EM}}}{c^2}
+    = -\frac{1}{\mu_0 c^2}\!\left(\nabla\phi^{\mathrm{pert}} + \partial_t\vv{A}^{\mathrm{pert}}\right)
+      \times\!\left(\nabla\times\vv{A}^{\mathrm{pert}}\right). \label{eq:J_em_pot}
+\end{align}
+
+In 2D, $\nabla\times\vv{A}^{\mathrm{pert}} = (\partial_x A_y^{\mathrm{pert}} - \partial_y A_x^{\mathrm{pert}})\hat{z}$ reduces to a single scalar $F_{12}^{\mathrm{pert}}$, and the cross product in Eq.~(\ref{eq:J_em_pot}) becomes a 90° rotation of the 2D vector $(\nabla\phi^{\mathrm{pert}}+\partial_t\vv{A}^{\mathrm{pert}})$ scaled by $F_{12}^{\mathrm{pert}}$.
+
+The $T^{00}$ component means EM energy density gravitates.  The $T^{0i}$ component means EM energy flux (Poynting vector) acts as an effective mass current.  The spatial stress $T^{ij}$ is not needed for the GEM source but contributes to radiation pressure and EM momentum flux if those are tracked.
+
+%====================================================================
+\section{Two Implementation Approaches}
+%====================================================================
+
+\subsection{Method~1: Full Linearized Einstein--Maxwell}
+
+This method integrates all 10 independent components of $\bar{h}^{\mu\nu}$ together with the EM wave equation in curved spacetime.
+
+\subsubsection*{Per-timestep iteration}
+\begin{enumerate}
+  \item Assemble $T^{\mu\nu}_{\mathrm{matter}}$ from particle positions, velocities, and rest masses:
+  \begin{equation}
+    T^{00} = \gamma^2\rho c^2,\quad T^{0i} = \gamma^2\rho c\,v^i,\quad T^{ij} = \gamma^2\rho\,v^i v^j.
+  \end{equation}
+
+  \item Assemble $T^{\mu\nu}_{\mathrm{EM}}$ from current field values (Section~2.5).
+
+  \item Deposit EM sources from charged particles:
+  \begin{equation}
+    \rho_q(\vv{x}) = \sum_i q_i\,\delta(\vv{x}-\vv{x}_i), \qquad
+    \vv{J}_q(\vv{x}) = \sum_i q_i\vv{v}_i\,\delta(\vv{x}-\vv{x}_i).
+  \end{equation}
+
+  \item Sum: $T^{\mu\nu}_{\mathrm{total}} = T^{\mu\nu}_{\mathrm{matter}} + T^{\mu\nu}_{\mathrm{EM}}$.
+
+  \item Step all 10 metric perturbation components:
+  \begin{equation}
+    \Box\,\bar{h}^{\mu\nu} = -\frac{16\pi G}{c^4}\,T^{\mu\nu}_{\mathrm{total}}.
+  \end{equation}
+
+  \item Step the EM wave equation in curved spacetime (with Ricci coupling):
+  \begin{equation}
+    \Box A^\mu + R^\mu{}_\nu A^\nu = \mu_0 J^\mu_q,
+  \end{equation}
+  where $R^\mu{}_\nu$ is the Ricci tensor from $\bar{h}^{\mu\nu}$.
+
+  \item Extract fields from potentials:
+  \begin{align}
+    g^i  &= -\partial_i\bar{h}^{00}, &
+    B_g^k &= \varepsilon^{ijk}\partial_i\bar{h}^{0j}, \\
+    E^i  &= -\partial_t A^i - \partial^i A^0, &
+    B^k  &= \varepsilon^{ijk}\partial_i A^j.
+  \end{align}
+
+  \item Compute geodesic acceleration using the electromagnetic field tensor $F^\mu{}_\nu$.  The Faraday tensor is defined as
+  \begin{equation}
+    F^{\mu\nu} = \partial^\mu A^\nu - \partial^\nu A^\mu,
+    \qquad
+    F^{\mu\nu} =
+    \begin{pmatrix}
+      0      & -E_x/c & -E_y/c & -E_z/c \\
+      E_x/c  &  0     & -B_z   &  B_y   \\
+      E_y/c  &  B_z   &  0     & -B_x   \\
+      E_z/c  & -B_y   &  B_x   &  0
+    \end{pmatrix},
+  \end{equation}
+  with $F^\mu{}_\nu = \eta_{\nu\alpha}F^{\mu\alpha}$.  The force term $(q/m)F^\mu{}_\nu U^\nu$ then reproduces the relativistic Lorentz force in the spatial components.  The geodesic equation is:
+  \begin{equation}
+    \frac{\dd U^\mu}{\dd\tau} = -\Gamma^\mu{}_{\alpha\beta}\,U^\alpha U^\beta + \frac{q}{m}F^\mu{}_\nu U^\nu.
+  \end{equation}
+
+  \item Update particle 4-velocities and positions.
+\end{enumerate}
+
+\subsection{Method~2: GEM + EM with Effective Sources}
+
+This method replaces the 10-component tensor equation with two scalar/vector wave equations, absorbing $T^{\mu\nu}_{\mathrm{EM}}$ into effective sources.
+
+\subsubsection*{Per-timestep iteration}
+\begin{enumerate}
+  \item Deposit matter sources:
+  \begin{equation}
+    \rho_{\mathrm{matter}} = \sum_i \gamma m_i\,\delta(\vv{x}-\vv{x}_i), \qquad
+    \vv{J}_{\mathrm{matter}} = \sum_i \gamma m_i\vv{v}_i\,\delta(\vv{x}-\vv{x}_i).
+  \end{equation}
+
+  \item Deposit EM sources from charged particles.
+
+  \item Compute EM effective GEM sources from perturbation potentials (see Eqs.~\ref{eq:rho_em_pot}--\ref{eq:J_em_pot}):
+  \begin{align}
+    \rho_{\mathrm{EM}} &= \frac{\varepsilon_0}{2c^2}\!\left(|\nabla\phi^{\mathrm{pert}} + \partial_t\vv{A}^{\mathrm{pert}}|^2
+      + c^2|\nabla\times\vv{A}^{\mathrm{pert}}|^2\right), \\
+    \vv{J}_{\mathrm{EM}} &= -\frac{1}{\mu_0 c^2}\!\left(\nabla\phi^{\mathrm{pert}} + \partial_t\vv{A}^{\mathrm{pert}}\right)
+      \times\!\left(\nabla\times\vv{A}^{\mathrm{pert}}\right).
+  \end{align}
+
+  \item Sum effective sources: $\rho_{\mathrm{eff}} = \rho_{\mathrm{matter}} + \rho_{\mathrm{EM}}$,\; $\vv{J}_{\mathrm{eff}} = \vv{J}_{\mathrm{matter}} + \vv{J}_{\mathrm{EM}}$.
+
+  \item Step GEM wave equations:
+  \begin{equation}
+    \Box\,\Phig = -4\pi G\rho_{\mathrm{eff}}, \qquad
+    \Box\,\Ag   = -\frac{4\pi G}{c^2}\vv{J}_{\mathrm{eff}}.
+  \end{equation}
+
+  \item Step EM wave equation with $c_{\mathrm{local}}(\vv{x}) = c\!\left(1 + 2\Phig(\vv{x})/c^2\right)$:
+  \begin{equation}
+    \Box_{c_{\mathrm{local}}} A^\mu = \mu_0 J^\mu_q.
+  \end{equation}
+
+  \item Compute total force on each particle directly from potentials via Eqs.~(\ref{eq:em_force_potential})--(\ref{eq:gem_force_potential}), plus on-the-fly curl for Boris rotation (Section~\ref{sec:leapfrog}).  No full-grid field extraction is performed.
+
+  \item Update momentum and position:
+  \begin{equation}
+    \vv{p} \leftarrow \vv{p} + \vv{F}_{\mathrm{total}}\,\dd t, \qquad
+    \vv{v} = \frac{\vv{p}}{\sqrt{m^2+|\vv{p}|^2/c^2}}, \qquad
+    \vv{x} \leftarrow \vv{x} + \vv{v}\,\dd t.
+  \end{equation}
+\end{enumerate}
+
+%====================================================================
+\section{Comparison of the Two Methods}
+%====================================================================
+
+\subsection{Field equations solved}
+
+\begin{center}
+\begin{tabular}{@{}L{3.2cm}L{5.0cm}L{5.0cm}@{}}
+\toprule
+\textbf{Quantity} & \textbf{Method~1 (Full Tensor)} & \textbf{Method~2 (GEM/EM)} \\
+\midrule
+Metric perturbation & All 10 components of $\bar{h}^{\mu\nu}$ & 2 potentials: $\Phig$, $\Ag$ \\[4pt]
+EM field & $\Box A^\mu + R^\mu{}_\nu A^\nu = \mu_0 J^\mu_q$ & $\Box A^\mu = \mu_0 J^\mu_q$ with $c_{\mathrm{local}}$ \\[4pt]
+EM--gravity coupling & Full $T^{\mu\nu}_{\mathrm{EM}}$ & $\rho_{\mathrm{EM}}=u_{\mathrm{EM}}/c^2$, $\vv{J}_{\mathrm{EM}}=\vv{S}/c^2$ only \\[4pt]
+Particle equation & Geodesic via $\Gamma^\mu{}_{\alpha\beta}$ and $F^\mu{}_\nu$ & 3-force with relativistic corrections \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Physical effects captured}
+
+\begin{center}
+\begin{tabular}{@{}L{4.5cm}L{3.0cm}L{5.5cm}@{}}
+\toprule
+\textbf{Effect} & \textbf{Method~1} & \textbf{Method~2} \\
+\midrule
+Newtonian gravity                     & Yes & Yes \\
+Frame dragging (Lense--Thirring)      & Yes & Yes \\
+Gravitational waves (tensor modes)    & Yes---all polarizations & Partial---scalar/vector only \\
+Gravitomagnetic Lorentz force         & Yes & Yes (factor of 4 included) \\
+EM energy gravitates                  & Yes---via $T^{00}_{\mathrm{EM}}$ & Yes---via $\rho_{\mathrm{EM}}=u_{\mathrm{EM}}/c^2$ \\
+Poynting flux as mass current         & Yes---via $T^{0i}_{\mathrm{EM}}$ & Yes---via $\vv{J}_{\mathrm{EM}}=\vv{S}/c^2$ \\
+Maxwell stress tensor sourcing metric & Yes---via $T^{ij}_{\mathrm{EM}}$ & No---dropped \\
+Gravitational lensing                 & Exact---via Ricci coupling & Approximate---via $c_{\mathrm{local}}$ \\
+Shapiro delay                         & Yes & Yes---via $c_{\mathrm{local}}$ \\
+Relativistic inertia anisotropy       & Yes---geodesic & Yes---$p$-update \\
+Velocity-dependent grav.\ force       & Yes---full $\Gamma^\mu{}_{\alpha\beta}U^\alpha U^\beta$ & Yes---Section~\ref{sec:relcorr} corrections \\
+Correct photon deflection (factor 2)  & Yes & Yes---with Section~\ref{sec:relcorr} \\
+Particles with both $m$ and $q$       & Yes & Yes \\
+Intrinsic spin                        & Yes---MPD equations & Yes---Section~\ref{sec:spin} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Approximations in Method~2}
+
+Method~2 is valid when:
+\begin{itemize}
+  \item Velocities are small compared to $c$ without Section~\ref{sec:relcorr} corrections; with those corrections, relativistic speeds are well handled.
+  \item EM fields are not so strong that $T^{ij}_{\mathrm{EM}}$ contributes significantly to the spatial metric $h^{ij}$.
+  \item The Ricci correction $R^\mu{}_\nu A^\nu$ is small---weak-field lensing is approximated by $c_{\mathrm{local}}$.
+  \item The EM field is not too directional: $|\vv{S}|/c \ll u_{\mathrm{EM}}$.
+\end{itemize}
+
+\subsection{Coupling architecture}
+
+\begin{eqbox}
+\begin{equation*}
+\begin{aligned}
+&\text{GEM solver:}\quad \Box\bar{h} = \mathrm{source}(\rho_{\mathrm{eff}},\,\vv{J}_{\mathrm{eff}}) \\
+&\hspace{4cm}\uparrow \\
+&\hspace{2cm} \rho_{\mathrm{matter}} + u_{\mathrm{EM}}/c^2 \\
+&\hspace{2cm} \vv{J}_{\mathrm{matter}} + \vv{S}_{\mathrm{Poynting}}/c^2 \\[6pt]
+&\text{EM solver:}\quad \Box A = \mathrm{source}(\vv{J}_q),\quad c\to c_{\mathrm{local}} \\[6pt]
+&\text{Particles:}\quad \dd\vv{p}/\dd t = \vv{F}_{\mathrm{GEM}} + \vv{F}_{\mathrm{EM}} + \vv{F}_{\mathrm{rel}} + \vv{F}_{\mathrm{spin}}
+\end{aligned}
+\end{equation*}
+\end{eqbox}
+
+%====================================================================
+\section{Particles with Intrinsic Spin}
+\label{sec:spin}
+%====================================================================
+
+\subsection{Overview}
+
+A particle with intrinsic angular momentum (spin) obeys the Mathisson--Papapetrou--Dixon (MPD) equations rather than the geodesic equation.  In the GEM/EM approximation these reduce to a tractable set of 3-vector equations integrated alongside the momentum update.
+
+Each spinning particle carries two additional properties beyond $m$ and $q$:
+\begin{itemize}
+  \item Spin 3-vector $\vv{S}$, with $|\vv{S}|$ conserved in the absence of radiation damping.
+  \item Electromagnetic $g$-factor $g_s$ ($g_s=2$ for a Dirac fermion, $g_s=1$ for a classical spinning charged sphere).
+\end{itemize}
+
+\subsection{The spin 4-vector constraint}
+
+The spin is carried by a 4-vector $S^\mu$ subject to the Tulczyjew--Dixon supplementary condition:
+\begin{equation}
+\label{eq:td}
+  S^{\mu\nu} p_\nu = 0,
+\end{equation}
+where $S^{\mu\nu}$ is the antisymmetric spin tensor and $p^\mu$ is the \emph{4-momentum}, not the 4-velocity $U^\mu$.  This is an important distinction.  For a free particle in flat spacetime $p^\mu = mU^\mu$ and the two are proportional, so it makes no difference.  But in the MPD equations the canonical momentum receives a spin-curvature correction:
+\begin{equation}
+  p^\mu = mU^\mu - \frac{1}{2}R^\mu{}_{\nu\alpha\beta}U^\nu S^{\alpha\beta} + \ldots
+\end{equation}
+so $p^\mu$ and $mU^\mu$ are not exactly parallel when the particle is spinning in curved spacetime.
+
+The condition $S^{\mu\nu}p_\nu = 0$ implies that in the lab frame:
+\begin{equation}
+  S^0 = \frac{\vv{S}\cdot\vv{p}}{\gamma mc},
+\end{equation}
+where $\vv{p} = \gamma m\vv{v}$ is the relativistic 3-momentum.  The timelike component $S^0$ is not an independent degree of freedom --- it is recomputed from $\vv{S}$ and $\vv{p}$ whenever needed and never evolved separately.  Using $\vv{p}$ rather than $m\vv{v}$ in this expression is exact; no linearized approximation is required.
+
+\subsection{Constraint correction}
+
+After each timestep $\vv{p}$ and $\vv{S}$ are updated independently, and $\vv{S}$ may acquire a spurious component parallel to $\vv{p}$ that violates the rest-frame orthogonality condition.  The 3+1 split of Eq.~(\ref{eq:td}) with $p^\mu = (E/c,\,\vv{p})$ and $S^\mu = (S^0,\,\vv{S})$ gives:
+\begin{equation}
+  S^0 = \frac{\vv{S}\cdot\vv{p}}{E/c} = \frac{\vv{S}\cdot\vv{p}}{\gamma mc},
+\end{equation}
+where $E = \gamma mc^2$ is the particle energy.  Since $S^0$ is never evolved independently but always reconstructed from $\vv{S}$ and $\vv{p}$, the constraint is automatically satisfied for $S^0$.  The drift accumulates entirely as a spurious component of $\vv{S}$ parallel to $\vv{p}$, which is removed by the covariant projection $S^\mu \leftarrow S^\mu - (S^\nu p_\nu/p^\alpha p_\alpha)\,p^\mu$.  Using $p^\alpha p_\alpha = -m^2c^2$ and $|\vv{p}|^2 + m^2c^2 = \gamma^2m^2c^2$, the spatial components give:
+\begin{equation}
+\label{eq:spin_correction}
+  \vv{S} \;\leftarrow\; \vv{S} - \frac{\vv{S}\cdot\vv{p}}{|\vv{p}|^2 + m^2c^2}\,\vv{p},
+  \qquad \vv{p} = \gamma m\vv{v}.
+\end{equation}
+This is the exact, covariant, single-formula correction requiring no threshold switching.  In the nonrelativistic limit $\vv{p}\approx m\vv{v}$, $\gamma\approx 1$:
+\begin{equation}
+  \vv{S} \leftarrow \vv{S} - \frac{\vv{S}\cdot\vv{v}}{c^2}\,\vv{v},
+\end{equation}
+confirming consistency.  The momentum $\vv{p} = \gamma m\vv{v}$ is available directly from the leapfrog integrator at half-integer timesteps.
+
+\subsection{Spin-curvature and spin-field forces}
+
+In 3D the spin gradient forces involve the gradient of $\vv{B}_g = \nabla\times\Ag$ and $\vv{B} = \nabla\times\vv{A}$ dotted with the spin and magnetic dipole moment:
+\begin{align}
+  \vv{F}_{\mathrm{spin,grav}} &= \nabla(\vv{S}\cdot\nabla\times\Ag), \\
+  \vv{F}_{\mathrm{spin,EM}}   &= \nabla(\boldsymbol{\mu}\cdot\nabla\times\vv{A}), \qquad \boldsymbol{\mu} = \frac{g_s q}{2m}\vv{S}.
+\end{align}
+These gradients are evaluated at the particle position using the adjoint two-tent interpolation (Section~\ref{sec:deposition}).  In 2D $\nabla\times\Ag = B_{g,z}\hat{z}$ and $\nabla\times\vv{A} = B_z\hat{z}$ are scalars, and the spin is also scalar $s$, so the forces reduce to $s\,\nabla B_{g,z}$ and $\mu\,\nabla B_z$.
+
+\subsection{Spin precession}
+
+\begin{align}
+  \boldsymbol{\Omega}_{\mathrm{grav}}   &= \nabla\times\Ag, \\
+  \boldsymbol{\Omega}_{\mathrm{EM}}     &= \frac{g_s q}{2m}\nabla\times\vv{A}, \\
+  \boldsymbol{\Omega}_{\mathrm{Thomas}} &= -\frac{\gamma^2}{\gamma+1}\,\frac{\vv{v}\times\vv{a}}{c^2},
+\end{align}
+\begin{equation}
+  \frac{\dd\vv{S}}{\dd t} = \vv{S}\times\!\left(\boldsymbol{\Omega}_{\mathrm{grav}} + \boldsymbol{\Omega}_{\mathrm{EM}} + \boldsymbol{\Omega}_{\mathrm{Thomas}}\right).
+\end{equation}
+The quantities $\nabla\times\Ag$ and $\nabla\times\vv{A}$ are evaluated on the fly at the particle position from surrounding edge potentials via the Yee curl (Eq.~\ref{eq:yee_curl}), not stored as grid arrays.
+
+\subsection{Spin as a field source}
+
+A spinning charged particle carries magnetic dipole moment $\boldsymbol{\mu} = g_s(q/2m)\vv{S}$ and a spinning massive particle carries gravitomagnetic dipole moment $\boldsymbol{\sigma} = 2\vv{S}$.  These contribute magnetization currents to the source deposition:
+\begin{align}
+  \vv{J}_q    &\mathrel{+}= \nabla\times\vv{M}(\vv{x}), \quad \vv{M}(\vv{x}) = \sum_i \boldsymbol{\mu}_i\,\delta(\vv{x}-\vv{x}_i), \\
+  \vv{J}_{\mathrm{grav}} &\mathrel{+}= \nabla\times\boldsymbol{\Sigma}(\vv{x}), \quad \boldsymbol{\Sigma}(\vv{x}) = \sum_i \boldsymbol{\sigma}_i\,\delta(\vv{x}-\vv{x}_i).
+\end{align}
+The $1/r^3$ near-field and $1/r$ radiation fall-offs of dipole fields emerge automatically from the d'Alembert operator.
+
+\subsection{Radiation from precessing dipoles}
+
+\begin{itemize}
+  \item \textbf{Conservative:} ignore radiation reaction; $|\vv{S}|$ is conserved exactly.
+  \item \textbf{Phenomenological damping:} $\dd\vv{S}/\dd t = \vv{S}\times\boldsymbol{\Omega}_{\mathrm{total}} - \alpha\vv{S}$.
+\end{itemize}
+
+\subsection{Complete algorithm including spin (Method~2)}
+\label{sec:alg_spin}
+
+The following enumeration gives the complete per-timestep algorithm for Method~2 including all spin effects developed so far, before adding the relativistic force corrections of Section~\ref{sec:relcorr}.
+
+\begin{algsteps}
+  \item \textbf{Deposit matter and charge sources.}
+  \begin{equation}
+    \rho_{\mathrm{matter}} = \sum_i \gamma m_i\,W(\vv{x}-\vv{x}_i), \quad
+    \vv{J}_{\mathrm{matter}} = \sum_i \gamma m_i\vv{v}_i\,W(\vv{x}-\vv{x}_i),
+  \end{equation}
+  \begin{equation}
+    \rho_q = \sum_i q_i\,W(\vv{x}-\vv{x}_i), \quad
+    \vv{J}_q = \sum_i q_i\vv{v}_i\,W(\vv{x}-\vv{x}_i),
+  \end{equation}
+  where $W$ is the cloud-in-cell (CIC) kernel approximating $\delta(\vv{x}-\vv{x}_i)$ (see Section~\ref{sec:numerical}).
+
+  \item \textbf{Deposit spin dipole sources.}
+  \begin{align}
+    \boldsymbol{\mu}_i   &= \frac{g_{s,i} q_i}{2m_i}\vv{S}_i, \qquad
+    \boldsymbol{\sigma}_i = 2\vv{S}_i, \\
+    \vv{J}_q             &\mathrel{+}= \nabla\times\!\left[\sum_i \boldsymbol{\mu}_i\,W_D(\vv{x}-\vv{x}_i)\right], \\
+    \vv{J}_{\mathrm{grav}} &\mathrel{+}= \nabla\times\!\left[\sum_i \boldsymbol{\sigma}_i\,W_D(\vv{x}-\vv{x}_i)\right],
+  \end{align}
+  where $W_D$ is the quadratic B-spline kernel (see Section~\ref{sec:numerical}) used for dipole deposition.
+
+  \item \textbf{Compute EM effective GEM sources} from perturbation potentials (Eqs.~\ref{eq:rho_em_pot}--\ref{eq:J_em_pot}):
+  \begin{align}
+    \rho_{\mathrm{EM}} &= \frac{\varepsilon_0}{2c^2}\!\left(|\nabla\phi^{\mathrm{pert}} + \partial_t\vv{A}^{\mathrm{pert}}|^2
+      + c^2|\nabla\times\vv{A}^{\mathrm{pert}}|^2\right), \\
+    \vv{J}_{\mathrm{EM}} &= -\frac{1}{\mu_0 c^2}\!\left(\nabla\phi^{\mathrm{pert}} + \partial_t\vv{A}^{\mathrm{pert}}\right)
+      \times\!\left(\nabla\times\vv{A}^{\mathrm{pert}}\right).
+  \end{align}
+
+  \item \textbf{Sum effective sources.}
+  \begin{equation}
+    \rho_{\mathrm{eff}} = \rho_{\mathrm{matter}} + \rho_{\mathrm{EM}}, \qquad
+    \vv{J}_{\mathrm{eff}} = \vv{J}_{\mathrm{matter}} + \vv{J}_{\mathrm{EM}}.
+  \end{equation}
+
+  \item \textbf{Step GEM wave equations.}
+  \begin{equation}
+    \Phig^{n+1} = 2\Phig^n - \Phig^{n-1} + (c\,\dd t)^2\!\left[\nabla^2\Phig^n - 4\pi G\rho_{\mathrm{eff}}^n\right],
+  \end{equation}
+  and similarly for each component of $\Ag$.
+
+  \item \textbf{Step EM wave equations} using $c_{\mathrm{local}}^n(\vv{x}) = c(1+2\Phig^n(\vv{x})/c^2)$:
+  \begin{equation}
+    \phi^{n+1} = 2\phi^n - \phi^{n-1} + (c_{\mathrm{local}}\,\dd t)^2\!\left[\nabla^2\phi^n + \rho_q^n/\varepsilon_0\right],
+  \end{equation}
+  and similarly for each component of $\vv{A}$.
+
+  \item \textbf{Compute force on each particle} from potentials directly (Eqs.~\ref{eq:force_gem_pot}--\ref{eq:force_em_pot}).  All terms involve only spatial and temporal finite differences of the potential arrays at and near the particle position, interpolated to the particle using the CIC weights.  Additionally compute $\nabla\times\Ag$ and $\nabla\times\vv{A}$ on-the-fly at the particle position for the Boris rotation and spin forces, using the Yee curl stencil evaluated at surrounding cell centers and bilinearly interpolated.  The full combined force including spin gradient terms is:
+  \begin{align}
+    \vv{F} &= m\!\left(-\nabla\Phig - \partial_t\Ag + 4\nabla(\vv{v}\cdot\Ag) - 4(\vv{v}\cdot\nabla)\Ag\right) \nonumber \\
+           &+ q\!\left(-\nabla\phi - \partial_t\vv{A} + \nabla(\vv{v}\cdot\vv{A}) - (\vv{v}\cdot\nabla)\vv{A}\right) \nonumber \\
+           &+ \nabla(\vv{S}\cdot\nabla\times\Ag) + \nabla(\boldsymbol{\mu}\cdot\nabla\times\vv{A}),
+  \end{align}
+  where the gradients of $\nabla\times\Ag$ and $\nabla\times\vv{A}$ for the spin gradient forces use the adjoint two-tent interpolation (Section~\ref{sec:deposition}).
+
+  \item \textbf{Update momentum and position} (Boris pusher; see Section~\ref{sec:numerical}):
+  \begin{equation}
+    \vv{p} \leftarrow \vv{p} + \vv{F}\,\dd t, \qquad
+    \vv{v} = \frac{\vv{p}}{\sqrt{m^2+|\vv{p}|^2/c^2}}, \qquad
+    \vv{x} \leftarrow \vv{x} + \vv{v}\,\dd t.
+  \end{equation}
+  Record $\vv{p}_{\mathrm{old}}$ and $\vv{v}_{\mathrm{old}}$ before this step for use in Step~10.
+
+  \item \textbf{Update spin.}
+  \begin{align}
+    \vv{a}                      &= (\vv{v} - \vv{v}_{\mathrm{old}})/\dd t, \\
+    \boldsymbol{\Omega}_{\mathrm{Thomas}} &= -\frac{\gamma^2}{\gamma+1}\frac{\vv{v}\times\vv{a}}{c^2}, \\
+    \boldsymbol{\Omega}_{\mathrm{total}} &= (\nabla\times\Ag)^{\mathrm{particle}} + \frac{g_s q}{2m}(\nabla\times\vv{A})^{\mathrm{particle}} + \boldsymbol{\Omega}_{\mathrm{Thomas}}, \\
+    \vv{S}                      &\leftarrow \vv{S} + (\vv{S}\times\boldsymbol{\Omega}_{\mathrm{total}})\,\dd t.
+  \end{align}
+  where $(\nabla\times\Ag)^{\mathrm{particle}}$ and $(\nabla\times\vv{A})^{\mathrm{particle}}$ are the on-the-fly Yee curl values computed at the particle position from surrounding edge potentials (already available from the force evaluation step).
+  Apply constraint correction (Eq.~\ref{eq:spin_correction}) and renormalize spin magnitude:
+  \begin{equation}
+    \vv{S} \leftarrow \vv{S} - \frac{\vv{S}\cdot\vv{p}}{|\vv{p}|^2 + m^2c^2}\,\vv{p}, \qquad
+    \vv{S} \leftarrow \vv{S}\,\frac{|\vv{S}_0|}{|\vv{S}|}.
+  \end{equation}
+\end{algsteps}
+
+%====================================================================
+\section{Relativistic Force Corrections}
+\label{sec:relcorr}
+%====================================================================
+
+\subsection{The problem with GEM at high velocities}
+
+The GEM Lorentz force is derived under the slow-motion assumption.  At relativistic speeds the spatial metric perturbation $h^{ij}$ also contributes to particle deflection.  The clearest illustration is photon deflection: the correct GR prediction is twice the Newtonian (GEM) value, with the extra factor coming from spatial Christoffel terms that GEM drops.
+
+\subsection{The linearized metric and its two metric coefficients}
+
+The full linearized metric is:
+\begin{equation}
+  \dd s^2 = -\!\left(1+\frac{2\Phig}{c^2}\right)c^2\,\dd t^2
+            + \left(1-\frac{2\Phig}{c^2}\right)\!\left(\dd x^2+\dd y^2+\dd z^2\right).
+\end{equation}
+The two coefficients act in opposite directions:
+\begin{align}
+  \text{Time:}  &\quad \left(1+\frac{2\Phig}{c^2}\right) < 1 \text{ near mass} \;\Rightarrow\; \text{clocks run slow.} \\
+  \text{Space:} &\quad \left(1-\frac{2\Phig}{c^2}\right) > 1 \text{ near mass} \;\Rightarrow\; \text{rulers stretch.}
+\end{align}
+For a slow particle only the time component matters; the spatial component is negligible.  For a photon both contribute equally, doubling the deflection relative to the Newtonian prediction.
+
+\subsection{The Shapiro delay}
+
+A photon follows a null geodesic ($\dd s^2=0$).  Solving for the coordinate speed of light:
+\begin{equation}
+  \frac{\dd x}{\dd t} \approx c\!\left(1 + \frac{2\Phig}{c^2}\right) \equiv c_{\mathrm{local}}.
+\end{equation}
+The factor of 2 in $c_{\mathrm{local}}$ comes from both metric coefficients contributing to the null condition.  The Shapiro delay is:
+\begin{equation}
+  \Delta t_{\mathrm{Shapiro}} = -\frac{2}{c^3}\int_{\mathrm{path}}\Phig\,\dd\ell.
+\end{equation}
+This is implemented in the simulator by stepping the EM wave equation with $c_{\mathrm{local}}$ rather than $c$.  The perturbation of photon paths (gravitational lensing) enters through the trajectory integration, where the same $c_{\mathrm{local}}$ modification of the wavefronts causes bending.
+
+\subsection{Expansion of the geodesic equation}
+
+Expanding the Christoffel contraction $-\Gamma^\mu{}_{\alpha\beta}U^\alpha U^\beta$ in the linearized metric and collecting by order in $v/c$:
+\begin{equation}
+\label{eq:geodesic_expansion}
+  a^i = \underbrace{g^i}_{\order{1}}
+      + \underbrace{4\varepsilon^{ijk}v_j B_{g,k}}_{\order{v/c}}
+      + \underbrace{\frac{v^2}{c^2}g^i + \frac{4(\vv{v}\cdot\vv{g})v^i}{c^2}}_{\order{v^2/c^2}}
+      + \order{v^3/c^3},
+\end{equation}
+where $g^i = -\partial_i\Phig - \partial_t A_{g,i}$ and $B_{g,k} = (\nabla\times\Ag)_k$ are evaluated on-the-fly from the potentials.  In implementation the cross-product $\varepsilon^{ijk}v_j B_{g,k}$ is replaced by its potential form $\partial_i(\vv{v}\cdot\Ag) - (\vv{v}\cdot\nabla)A_{g,i}$ via the vector identity, avoiding explicit computation of $\vv{B}_g$ as a grid array (Section~\ref{sec:force_potential}).
+
+The $\order{v^2/c^2}$ terms arise from the spatial metric coefficient $(1-2\Phig/c^2)$:
+\begin{itemize}
+  \item $(v^2/c^2)\vv{g}$: a fast particle experiences stronger gravitational deflection.  At $v=c$ this doubles the Newtonian deflection, recovering the factor-of-2 result for photons.
+  \item $4(\vv{v}\cdot\vv{g})\vv{v}/c^2$: a force along the direction of motion, responsible for perihelion precession.
+\end{itemize}
+
+\subsection{Practical implementation tiers}
+
+\begin{center}
+\begin{tabular}{@{}lL{7cm}L{2cm}@{}}
+\toprule
+\textbf{Tier} & \textbf{Gravitational force expression} & \textbf{Valid range} \\
+\midrule
+0: Newtonian & $-m\nabla\Phig$ & $v/c < 0.01$ \\
+1: GEM       & $m(-\nabla\Phig - \partial_t\Ag + 4\nabla(\vv{v}\cdot\Ag) - 4(\vv{v}\cdot\nabla)\Ag)$ & $v/c < 0.1$ \\
+2: GEM + $\order{v^2/c^2}$ & Add $(v^2/c^2)\vv{g}$ and $4(\vv{v}\cdot\vv{g})\vv{v}/c^2$ & $v/c < 0.5$ \\
+3: Full corrections & All $\order{v^2/c^2}$ terms & $v/c \leq 1$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The EM Lorentz force $q(-\nabla\phi - \partial_t\vv{A} + \nabla(\vv{v}\cdot\vv{A}) - (\vv{v}\cdot\nabla)\vv{A})$ is already exactly relativistic and requires no velocity-dependent corrections.  In all tiers the momentum update uses the relativistic $p$-update.
+
+\subsection{Where each effect enters the simulator}
+
+\begin{center}
+\begin{tabular}{@{}L{4.5cm}L{4cm}L{4cm}@{}}
+\toprule
+\textbf{Effect} & \textbf{Source} & \textbf{Simulator entry point} \\
+\midrule
+Gravitational time dilation & $(1+2\Phig/c^2)$ & Proper time update \\
+Shapiro delay / light bending & Both metric coefficients via $c_{\mathrm{local}}$ & EM wave equation \\
+Doubled photon deflection & Spatial metric $(1-2\Phig/c^2)$ & $c_{\mathrm{local}}$; $(v^2/c^2)\vv{g}$ for massive particles \\
+Perihelion precession & Spatial metric & $4(\vv{v}\cdot\vv{g})\vv{v}/c^2$ term \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Complete algorithm including spin and relativistic corrections (Method~2)}
+\label{sec:alg_rel}
+
+This enumeration extends Section~\ref{sec:alg_spin} by adding the Tier~3 relativistic force corrections.  Steps~1--7 are unchanged.  Steps~8 and~10 are modified as shown.
+
+\begin{algsteps}
+  \item \textbf{Deposit matter and charge sources.} (As in Section~\ref{sec:alg_spin}, Step~1.)
+
+  \item \textbf{Deposit spin dipole sources.} (As in Section~\ref{sec:alg_spin}, Step~2.)
+
+  \item \textbf{Compute EM effective GEM sources.} (As before.)
+
+  \item \textbf{Sum effective sources.} (As before.)
+
+  \item \textbf{Step GEM wave equations.} (As before.)
+
+  \item \textbf{Step EM wave equations} with $c_{\mathrm{local}} = c(1+2\Phig/c^2)$. (As before.)
+
+  \item \textbf{Compute total force on each particle} from potentials directly.  The gravitomagnetic cross-product terms $\vv{v}\times\vv{B}_g$ and $\vv{v}\times\vv{B}$ are folded into the potential-form force via the identity $\vv{v}\times(\nabla\times\vv{A}) = \nabla(\vv{v}\cdot\vv{A}) - (\vv{v}\cdot\nabla)\vv{A}$.  The $\vv{g}$ appearing in the relativistic correction terms $(v^2/c^2)\vv{g}$ and $4(\vv{v}\cdot\vv{g})\vv{v}/c^2$ is computed on-the-fly at the particle position as $\vv{g} = -\nabla\Phig - \partial_t\Ag$:
+  \begin{eqbox}
+  \begin{align*}
+    \vv{F}_{\mathrm{grav}}  &= m\!\left[-\nabla\Phig - \partial_t\Ag
+                                + 4\nabla(\vv{v}\cdot\Ag) - 4(\vv{v}\cdot\nabla)\Ag
+                                + \frac{v^2}{c^2}\vv{g}
+                                + \frac{4(\vv{v}\cdot\vv{g})\vv{v}}{c^2}\right], \\[4pt]
+    \vv{F}_{\mathrm{EM}}    &= q\!\left[-\nabla\phi - \partial_t\vv{A}
+                                + \nabla(\vv{v}\cdot\vv{A}) - (\vv{v}\cdot\nabla)\vv{A}\right], \\[4pt]
+    \vv{F}_{\mathrm{spin}}  &= \nabla(\vv{S}\cdot\nabla\times\Ag)
+                              + \nabla(\boldsymbol{\mu}\cdot\nabla\times\vv{A}), \\[4pt]
+    \vv{F}_{\mathrm{total}} &= \vv{F}_{\mathrm{grav}} + \vv{F}_{\mathrm{EM}} + \vv{F}_{\mathrm{spin}}.
+  \end{align*}
+  \end{eqbox}
+  The quantities $\nabla\times\Ag$ and $\nabla\times\vv{A}$ are evaluated on-the-fly at the particle position from surrounding edge potentials via the Yee curl (Eq.~\ref{eq:yee_curl}).  Evaluate $v^2/c^2$ and $\vv{v}\cdot\vv{g}$ using $\vv{v}_{n-1/2}$ from the previous half-step.
+
+  \item \textbf{Update momentum and position} (Boris pusher; see Section~\ref{sec:numerical}):
+  \begin{equation}
+    \vv{p} \leftarrow \vv{p} + \vv{F}_{\mathrm{total}}\,\dd t, \qquad
+    \vv{v} = \frac{\vv{p}}{\sqrt{m^2+|\vv{p}|^2/c^2}}, \qquad
+    \vv{x} \leftarrow \vv{x} + \vv{v}\,\dd t.
+  \end{equation}
+  Record $\vv{v}_{\mathrm{old}}$ before the update for Step~10.
+
+  \item \textbf{Update spin.} (As in Section~\ref{sec:alg_spin}, Step~10, using updated $\vv{v}$ and $\vv{a} = (\vv{v}-\vv{v}_{\mathrm{old}})/\dd t$.)
+\end{algsteps}
+
+%====================================================================
+\section{Proper Time Clocks}
+\label{sec:proptime}
+%====================================================================
+
+\subsection{Overview}
+
+Each particle carries a proper time clock $\tau_i$ accumulating the elapsed proper time along its worldline.  The clock requires no new field equations and adds negligible computational cost---one square root per particle per timestep.
+
+\subsection{Proper time in the linearized metric}
+
+For a non-rotating background the proper time rate is determined by the gravitoelectric potential and the particle velocity:
+\begin{equation}
+  \frac{\dd\tau}{\dd t} = \sqrt{\left(1+\frac{2\Phig}{c^2}\right) - \left(1-\frac{2\Phig}{c^2}\right)\frac{v^2}{c^2}}.
+\end{equation}
+For a rotating background the off-diagonal metric components $h_{0i} = 2A_{g,i}/c$ (Section~\ref{sec:gem_metric}) contribute an additional term via $g_{0i}\dd x^i\dd t = (2A_{g,i}/c)v^i\dd t^2$.  The full linearized expression is:
+\begin{equation}
+\label{eq:proper_time_full}
+  \frac{\dd\tau}{\dd t} = \sqrt{\left(1+\frac{2\Phig}{c^2}\right) - \left(1-\frac{2\Phig}{c^2}\right)\frac{v^2}{c^2} + \frac{4\Ag\cdot\vv{v}}{c^2}}.
+\end{equation}
+The $4\Ag\cdot\vv{v}/c^2$ term has opposite sign for prograde and retrograde orbits around a spinning mass (since $\vv{v}$ reverses but $\Ag$ does not), producing a proper time difference between co- and counter-rotating clocks at the same orbital radius --- the gravitomagnetic clock effect.  For a non-rotating background $\Ag = 0$ and Eq.~(\ref{eq:proper_time_full}) reduces to the simpler form.
+
+To first order:
+\begin{equation}
+  \frac{\dd\tau}{\dd t} \approx 1 + \underbrace{\frac{\Phig}{c^2}}_{\text{gravitational}} - \underbrace{\frac{v^2}{2c^2}}_{\text{kinematic}} + \underbrace{\frac{2\Ag\cdot\vv{v}}{c^2}}_{\text{gravitomagnetic}}.
+\end{equation}
+The exact expression is used in the integrator; the first-order form is shown for interpretation.
+
+\subsection{Physical interpretation}
+
+The kinematic term $-v^2/(2c^2)$ always slows the clock.  The gravitational term $\Phig/c^2$ also slows it in a well ($\Phig<0$), and speeds it up at high altitude ($\Phig$ less negative).  For GPS satellites the two terms compete: the satellite is high up (gravitational term speeds clock) but moving fast (kinematic term slows clock).  The gravitational effect wins, so GPS clocks run fast by $38\,\mu$s/day and must be corrected.
+
+The gravitomagnetic term $2\Ag\cdot\vv{v}/c^2$ is nonzero only around rotating masses.  It has opposite sign for co- and counter-rotating orbits because $\vv{v}$ reverses direction while $\Ag$ does not.  Integrating around a full orbit the difference in accumulated proper time between prograde ($+$) and retrograde ($-$) orbits is:
+\begin{equation}
+  \Delta\tau = \tau_+ - \tau_- = \frac{4}{c^2}\oint\Ag\cdot\dd\vv{x} = \frac{4}{c^2}\int(\nabla\times\Ag)\cdot\dd\vv{A} = \frac{4}{c^2}\int\vv{B}_g\cdot\dd\vv{A},
+\end{equation}
+by Stokes' theorem --- the proper time difference is proportional to the gravitomagnetic flux through the orbit.  This is the gravitomagnetic clock effect, and it is a direct consequence of the same $\Ag$ that appears in the GEM force expression.
+
+\subsection{Integration}
+
+Using the total potential $\Phig^{\mathrm{total}} = \Phig^{\mathrm{bg}} + \Phig^{\mathrm{pert}}$ and total vector potential $\Ag^{\mathrm{total}} = \Ag^{\mathrm{bg}} + \Ag^{\mathrm{pert}}$, both already evaluated during force calculation:
+\begin{equation}
+  \dd\tau_i = \dd t\,\sqrt{1 + \frac{2\Phig}{c^2} - \left(1-\frac{2\Phig}{c^2}\right)\beta^2 + \frac{4\Ag\cdot\vv{v}}{c^2}},
+  \qquad \beta^2 = v^2/c^2,
+\end{equation}
+\begin{equation}
+  \tau_i \;\leftarrow\; \tau_i + \dd\tau_i.
+\end{equation}
+The quantity $\Ag\cdot\vv{v}$ is already computed as an intermediate result in the GEM force expression $4\nabla(\vv{v}\cdot\Ag) - 4(\vv{v}\cdot\nabla)\Ag$ --- specifically it is the scalar $\vv{v}\cdot\Ag$ whose gradient appears in the force.  No additional grid interpolation is required; the same interpolated value is reused.
+
+In the leapfrog scheme, $\vv{v}$ lives at half-integer times.  A second-order accurate estimate at the integer step is $\vv{v}_n \approx \tfrac{1}{2}(\vv{v}_{n-1/2}+\vv{v}_{n+1/2})$.
+
+\subsection{Pedagogical demonstrations}
+
+\begin{center}
+\begin{tabular}{@{}L{3.5cm}L{4cm}L{5.5cm}@{}}
+\toprule
+\textbf{Demonstration} & \textbf{Setup} & \textbf{What the student sees} \\
+\midrule
+Twin paradox & One particle stationary, one on an elliptical orbit. & $\tau_{\mathrm{traveler}} < \tau_{\mathrm{stationary}}$; traveling twin is younger. \\[4pt]
+Gravitational time dilation & Two stationary particles at different radii. & Deeper clock ticks slower; purely the $\Phig/c^2$ term. \\[4pt]
+GPS effect & Circular orbiter vs.\ stationary at same radius. & Two competing effects; exact cancellation at one specific radius. \\[4pt]
+Clock in gravitational wave & Stationary particle, scalar wave passes through. & Proper time rate oscillates as $\Phig$ alternately deepens and shallows. \\[4pt]
+Gravitomagnetic clock effect & Two particles on identical circular orbits in opposite directions around a spinning background mass. & Prograde and retrograde clocks accumulate different proper time per orbit; difference grows linearly with number of orbits and is proportional to the gravitomagnetic flux $\int\vv{B}_g\cdot\dd\vv{A}$ through the orbit. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%====================================================================
+\section{Background Spacetime and the Perturbation Split}
+%====================================================================
+
+\subsection{Motivation}
+
+When one mass dominates the gravitational field, the dominant background can be precomputed once and held fixed; only the perturbation fields need to be time-stepped.  This is the background + perturbation split, used in black hole perturbation theory, restricted celestial mechanics, and QFT in curved spacetime.
+
+\subsection{The decomposition}
+
+\begin{equation}
+  \Phig(\vv{x},t) = \Phig^{\mathrm{bg}}(\vv{x}) + \Phig^{\mathrm{pert}}(\vv{x},t),
+\end{equation}
+and similarly for $\Ag$, $\phi$, $\vv{A}$.  The total force on each particle is:
+\begin{equation}
+  \vv{F}_{\mathrm{total}} = \vv{F}(\vv{g}^{\mathrm{bg}}+\vv{g}^{\mathrm{pert}},\;\vv{B}_g^{\mathrm{bg}}+\vv{B}_g^{\mathrm{pert}},\;\vv{E}^{\mathrm{bg}}+\vv{E}^{\mathrm{pert}},\;\vv{B}^{\mathrm{bg}}+\vv{B}^{\mathrm{pert}}).
+\end{equation}
+
+\subsection{Analytic background configurations}
+
+\begin{center}
+\begin{tabular}{@{}L{3.5cm}L{4.5cm}L{5cm}@{}}
+\toprule
+\textbf{Type} & \textbf{Potentials} & \textbf{Notes} \\
+\midrule
+Schwarzschild-like & $\Phig^{\mathrm{bg}} = -GM/r$ & Pure gravitoelectric \\[4pt]
+Reissner--Nordstr\"{o}m-like & $\Phig^{\mathrm{bg}} = -GM/r$,\; $\phi^{\mathrm{bg}} = Q/(4\pi\varepsilon_0 r)$ & Gravity vs.\ electrostatics \\[4pt]
+Kerr-like (2D) & $\Phig^{\mathrm{bg}} = -GM/r$,\; $A_{g,\theta}^{\mathrm{bg}} = 2GJ/(c^2 r)$ & Frame dragging \\[4pt]
+Kerr--Newman-like & All four potentials nonzero & Full background \\[4pt]
+Uniform field & $\Phig^{\mathrm{bg}} = -g_0 y$ & Equivalence principle \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Frame dragging from the Kerr-like background}
+
+A mass $M$ with angular momentum $J$ generates in 2D:
+\begin{equation}
+  A_{g,\theta}^{\mathrm{bg}} = \frac{2GJ}{c^2 r}, \qquad
+  B_{g,z}^{\mathrm{bg}} = -\frac{2GJ}{c^2 r^2}.
+\end{equation}
+A gyroscope at radius $r$ precesses at $\dd\phi/\dd t = B_{g,z}^{\mathrm{bg}}$.
+
+\subsection{Three modes of operation}
+
+\begin{center}
+\begin{tabular}{@{}L{2.5cm}L{3cm}L{3cm}L{4cm}@{}}
+\toprule
+\textbf{Mode} & \textbf{Background} & \textbf{FDTD solver} & \textbf{Use case} \\
+\midrule
+1: Pure background & Fixed analytic & Not run & Test particles; zero FDTD cost \\
+2: Background + perturbation & Fixed analytic & Perturbation fields & Few active interacting particles \\
+3: Full dynamic & None fixed & All fields & Equal-mass many-body \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+In Mode~2, the perturbation fields are sourced only by non-background particles.  The static background contributes no source to the perturbation wave equations.
+
+\subsection{Validity conditions}
+
+\begin{itemize}
+  \item $|\Phig^{\mathrm{pert}}| \ll |\Phig^{\mathrm{bg}}|$: perturbations are small.
+  \item Background approximately stationary (update adiabatically if needed).
+  \item Back-reaction on background negligible.
+  \item Background in linearized regime---exclude particles within a few Schwarzschild radii.
+\end{itemize}
+
+%====================================================================
+\section{Numerical Implementation}
+\label{sec:numerical}
+%====================================================================
+
+\subsection{Field grid}
+
+The simulation is formulated primarily in terms of the scalar and vector \emph{potentials} rather than the derived field vectors $\vv{E}$, $\vv{B}$, $\vv{g}$, $\vv{B}_g$.  The potentials are the quantities evolved by the wave equations and stored on the grid.  The derived field vectors are gauge-invariant and are computed on demand --- at particle positions during force evaluation, and over the full grid only for visualization.  This eliminates four grid arrays ($g_x$, $g_y$, $E_x$, $E_y$, $B_{g,z}$, $B_z$ as persistent arrays) and the associated full-grid curl passes from the per-timestep inner loop.
+
+The potentials are discretized on a staggered Yee grid, which assigns different components to different spatial locations within each grid cell.  The staggering ensures that finite-difference gradient and curl operations on the potentials are exact --- no interpolation is needed.
+
+\subsubsection*{The 2D Yee grid layout}
+
+In 2D each cell is a square of side $\Delta x$.  The cell at index $(i,j)$ has its lower-left corner at position $(i\Delta x, j\Delta y)$.  Only the potentials and their sources are stored as persistent grid arrays:
+
+\begin{center}
+\begin{tabular}{@{}L{5cm}L{3cm}L{5cm}@{}}
+\toprule
+\textbf{Quantity} & \textbf{Location} & \textbf{Index notation} \\
+\midrule
+$\Phig$, $\phi$ (scalar potentials) & Cell corners & $(i,\; j)$ \\
+$\rho_{\mathrm{matter}}$, $\rho_q$ (charge/mass density) & Cell corners & $(i,\; j)$ \\
+$A_{g,x}$, $A_x$ ($x$-potentials) & Horizontal edge centers & $(i+\tfrac{1}{2},\; j)$ \\
+$J_{\mathrm{matter},x}$, $J_{q,x}$ ($x$-currents) & Horizontal edge centers & $(i+\tfrac{1}{2},\; j)$ \\
+$A_{g,y}$, $A_y$ ($y$-potentials) & Vertical edge centers & $(i,\; j+\tfrac{1}{2})$ \\
+$J_{\mathrm{matter},y}$, $J_{q,y}$ ($y$-currents) & Vertical edge centers & $(i,\; j+\tfrac{1}{2})$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The derived quantities $g_x$, $g_y$, $E_x$, $E_y$ (which would live on edges) and $B_{g,z}$, $B_z$ (which would live at cell centers) are \emph{not} stored as persistent arrays.  They are computed locally at particle positions during force evaluation, and computed over the full grid only when requested for visualization.
+
+The layout is shown schematically for one cell:
+
+\begin{center}
+\begin{tabular}{ccccc}
+$(i,j+1)$ & $-$ & $A_x(i+\tfrac{1}{2},j+1)$ & $-$ & $(i+1,j+1)$ \\
+$|$ & & & & $|$ \\
+$A_y(i,j+\tfrac{1}{2})$ & & [cell center] & & $A_y(i+1,j+\tfrac{1}{2})$ \\
+$|$ & & & & $|$ \\
+$(i,j)$ & $-$ & $A_x(i+\tfrac{1}{2},j)$ & $-$ & $(i+1,j)$
+\end{tabular}
+\end{center}
+
+\subsubsection*{Why this staggering: exact gradient and curl operations}
+
+\paragraph{Gradient (for force and for visualization):}
+The gravitoelectric field component $g_x = -\partial_x\Phig - \partial_t A_{g,x}$ is evaluated at a horizontal edge position $(i+\tfrac{1}{2}, j)$.  With $\Phig$ at corners, the spatial gradient $-\partial_x\Phig$ naturally lands at horizontal edges --- exactly where $A_{g,x}$ lives:
+\begin{equation}
+\label{eq:yee_grad}
+  g_{x,i+1/2,j} = -\frac{(\Phig)_{i+1,j} - (\Phig)_{i,j}}{\Delta x}
+                  - \frac{A_{g,x,i+1/2,j}^{n+1} - A_{g,x,i+1/2,j}^{n-1}}{2\Delta t},
+\end{equation}
+and similarly for $g_y$ at vertical edges, and for $\vv{E}$ from $\phi$ and $\vv{A}$.  This operation is performed on demand at particle positions (interpolating $\Phig$ from nearby corners and $\Ag$ from nearby edges) rather than sweeping the full grid.
+
+\paragraph{Curl (for Boris rotation, spin precession, and visualization):}
+The out-of-plane field $B_z = \partial_x A_y - \partial_y A_x$ at a cell center $(i+\tfrac{1}{2}, j+\tfrac{1}{2})$ is:
+\begin{equation}
+\label{eq:yee_curl}
+  B_{z,i+1/2,j+1/2} = \frac{A_{y,i+1,j+1/2} - A_{y,i,j+1/2}}{\Delta x}
+                     - \frac{A_{x,i+1/2,j+1} - A_{x,i+1/2,j}}{\Delta y},
+\end{equation}
+and identically for $B_{g,z}$ from $\Ag$.  This is evaluated at the few cell centers surrounding the particle when needed for the Boris rotation or spin precession, not over the full grid each step.  For visualization, a full-grid sweep applies Eq.~(\ref{eq:yee_curl}) at every cell center.
+
+\paragraph{Source deposition staggering:}
+Source terms must be deposited at the same locations as the potentials they source:
+\begin{itemize}
+  \item $\rho_{\mathrm{matter}}$, $\rho_q$: at cell corners $(i,j)$.  The CIC kernel $W_2$ is evaluated at corner positions relative to the particle.
+  \item $J_{\mathrm{matter},x}$, $J_{q,x}$: at horizontal edge centers $(i+\tfrac{1}{2},j)$.  The CIC kernel is evaluated at horizontal edge positions.  The sub-cell fraction is $\alpha = (x_p - (i+\tfrac{1}{2})\Delta x)/\Delta x$, measured from the edge center rather than the corner.
+  \item $J_{\mathrm{matter},y}$, $J_{q,y}$: at vertical edge centers $(i,j+\tfrac{1}{2})$.
+\end{itemize}
+
+\paragraph{Spin dipole curl deposition:}
+The magnetization curl $\nabla\times[\mu\,W_3]$ deposits $J_{q,x}$ at horizontal edges and $J_{q,y}$ at vertical edges, consistent with the current staggering.  The $x$-component is $\mu\,W_3(x-x_p)\cdot(\dd W_3/\dd y)(y-y_p)$, depositing to horizontal edges via the smooth $W_3$ weight in $x$ and the two-tent $\dd W_3/\dd y$ weight in $y$, centered on horizontal edge positions $(i+\tfrac{1}{2}, j)$.
+
+\subsection{Time stepping: the leapfrog scheme}
+\label{sec:leapfrog}
+
+\subsubsection*{The field leapfrog and its three-point stencil}
+
+The d'Alembert equation $\partial_t^2\Phi = c^2\nabla^2\Phi + \mathrm{source}$ is discretized in time using the three-point leapfrog (Störmer-Verlet) scheme.  The superscripts $n-1$, $n$, $n+1$ denote values at three consecutive integer timesteps separated by $\dd t$:
+\begin{equation}
+\label{eq:leapfrog_field}
+  \Phi^{n+1} = 2\Phi^n - \Phi^{n-1} + (c\,\dd t)^2\!\left[\nabla^2\Phi^n + \mathrm{source}^n\right].
+\end{equation}
+The term $2\Phi^n - \Phi^{n-1}$ is a linear extrapolation of $\Phi$ forward by one timestep using the last two known values.  It is the free-propagation prediction --- what $\Phi^{n+1}$ would be if the right-hand side were zero (no source, no spatial coupling).  The $(c\,\dd t)^2[\cdots]$ term is the correction from the wave equation.  This is not overrelaxation in the iterative solver sense.  Rather, it is the standard second-order centered finite difference for $\partial_t^2\Phi$:
+\begin{equation}
+  \frac{\Phi^{n+1} - 2\Phi^n + \Phi^{n-1}}{\dd t^2} \approx \frac{\partial^2\Phi}{\partial t^2}\bigg|_n + \order{\dd t^2},
+\end{equation}
+rearranged to solve for $\Phi^{n+1}$.  The scheme is second-order accurate in time and requires storing only two time levels ($\Phi^n$ and $\Phi^{n-1}$) to advance to $\Phi^{n+1}$.
+
+The CFL stability condition requires:
+\begin{equation}
+  \dd t < \frac{\dd x}{c\sqrt{d}}, \qquad d = \text{spatial dimension} \quad (d=2 \text{ or } 3).
+\end{equation}
+
+\subsubsection*{The $\alpha$-family: interpolating between Euler and leapfrog}
+
+The leapfrog can be placed in a one-parameter family that continuously interpolates between a naive Euler scheme and the full leapfrog:
+\begin{equation}
+  \Phi^{n+1} = (1+\alpha)\Phi^n - \alpha\Phi^{n-1} + \dd t^2\,f^n,
+\end{equation}
+where $f^n = c^2\nabla^2\Phi^n + \mathrm{source}^n$.  The parameter $\alpha$ controls the history weighting:
+\begin{align}
+  \alpha = 0: &\quad \Phi^{n+1} = \Phi^n + \dd t^2 f^n \quad\text{(forward Euler applied to }\partial_t^2; \text{ first-order, unstable for wave eq.)} \\
+  \alpha = 1: &\quad \Phi^{n+1} = 2\Phi^n - \Phi^{n-1} + \dd t^2 f^n \quad\text{(standard leapfrog; second-order, conditionally stable)}
+\end{align}
+Values $0 < \alpha < 1$ give intermediate schemes that are first-order accurate but more stable than pure Euler.  Values $\alpha > 1$ are analogous to overrelaxation and are \emph{unstable} for the wave equation --- the leapfrog at $\alpha=1$ is the maximally stable point in the explicit family.
+
+The analogous family for the implicit $\theta$-method (Newmark-$\beta$) is:
+\begin{equation}
+  \Phi^{n+1} - 2\Phi^n + \Phi^{n-1} = \dd t^2\!\left[\theta f^{n+1} + (1-2\theta)f^n + \theta f^{n-1}\right],
+\end{equation}
+with $\theta=0$ recovering the explicit leapfrog and $\theta=\tfrac{1}{4}$ giving an unconditionally stable implicit scheme.  The implicit schemes require solving a linear system at each step and are not used here.
+
+\subsubsection*{The leapfrog stagger: what lives when}
+
+The field and particle updates are interleaved on a staggered time grid.  Understanding what quantity lives at what time is essential for correctly evaluating forces, sources, and proper time.  The complete stagger is:
+
+\begin{center}
+\begin{tabular}{@{}L{6cm}L{3cm}L{4cm}@{}}
+\toprule
+\textbf{Quantity} & \textbf{Time level} & \textbf{Notes} \\
+\midrule
+Scalar potentials $\Phig$, $\phi$ & Integer $n\,\dd t$ & Two levels stored: $n$ and $n-1$ \\
+Vector potentials $\Ag$, $\vv{A}$ & Integer $n\,\dd t$ & Two levels stored: $n$ and $n-1$ \\
+Particle positions $\vv{x}_i$ & Integer $n\,\dd t$ & \\
+Source terms $\rho$, $\vv{J}$ & Integer $n\,\dd t$ & Deposited from $\vv{x}_i^n$, $\vv{v}_i^{n-1/2}$ \\
+Forces $\vv{F}_i$ & Integer $n\,\dd t$ & Computed from potentials at particle position \\
+Particle momenta $\vv{p}_i$, velocities $\vv{v}_i$ & Half-integer $(n\pm\tfrac{1}{2})\dd t$ & Boris kick uses $\vv{F}^n$ \\
+Proper time increment $\dd\tau_i$ & Integer $n\,\dd t$ & Uses $\bar{v}_i = \tfrac{1}{2}(v^{n-1/2}+v^{n+1/2})$; reuses $(\Ag\cdot\vv{v})_i$ from force step \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The derived fields $\vv{g}$, $\vv{B}_g$, $\vv{E}$, $\vv{B}$ are not stored as persistent arrays.  They are computed on demand from the potentials at particle positions during force evaluation (Step~4 below) and over the full grid only for visualization.
+
+The per-timestep sequence is:
+\begin{enumerate}
+  \item Deposit sources from $\vv{x}_i^n$, $\vv{v}_i^{n-1/2}$ onto grid $\to$ $\rho^n$, $\vv{J}^n$.
+  \item Step potentials: $(\Phig^{n-1}, \Phig^n, \rho^n) \to \Phig^{n+1}$, and similarly for $\phi$, $\Ag$, $\vv{A}$.
+  \item Apply gauge cleaning to $\Phig^{n+1}$, $\Ag^{n+1}$ (Section~\ref{sec:gauge}).
+  \item Compute force $\vv{F}_i^n$ at each particle from potentials at surrounding grid points (see Section on force from potentials below).
+  \item Boris kick: $(\vv{p}_i^{n-1/2}, \vv{F}_i^n) \to \vv{p}_i^{n+1/2}$.
+  \item Drift: $\vv{x}_i^{n+1} = \vv{x}_i^n + \vv{v}_i^{n+1/2}\,\dd t$.
+  \item Update spin using $\vv{a}_i^n = (\vv{v}_i^{n+1/2} - \vv{v}_i^{n-1/2})/\dd t$.
+  \item Update proper time using $\bar{v}_i = \tfrac{1}{2}(\vv{v}_i^{n-1/2} + \vv{v}_i^{n+1/2})$, $(\Phig^{\mathrm{total}})_i$, and $(\Ag^{\mathrm{total}}\cdot\bar{\vv{v}}_i)$ --- the last quantity already computed during the force evaluation step.
+\end{enumerate}
+The force $\vv{F}_i^n$ and position $\vv{x}_i^n$ are both at integer time, and the momentum $\vv{p}_i^{n+1/2}$ is at the half-integer time between them --- this stagger is what makes the scheme symplectic.
+
+\subsubsection*{Force from potentials}
+\label{sec:force_potential}
+
+The Lorentz force in EM, written directly in terms of the scalar potential $\phi$ and vector potential $\vv{A}$, using the vector identity $\vv{v}\times(\nabla\times\vv{A}) = \nabla(\vv{v}\cdot\vv{A}) - (\vv{v}\cdot\nabla)\vv{A}$:
+\begin{equation}
+\label{eq:em_force_potential}
+  \vv{F}_{\mathrm{EM}} = q\!\left(-\nabla\phi - \partial_t\vv{A} + \nabla(\vv{v}\cdot\vv{A}) - (\vv{v}\cdot\nabla)\vv{A}\right).
+\end{equation}
+The GEM analogue (with factor of 4 on the vector potential terms from the spin-2 structure):
+\begin{equation}
+\label{eq:gem_force_potential}
+  \vv{F}_{\mathrm{GEM}} = m\!\left(-\nabla\Phig - \partial_t\Ag + 4\nabla(\vv{v}\cdot\Ag) - 4(\vv{v}\cdot\nabla)\Ag\right).
+\end{equation}
+
+\paragraph{$\vv{v}$ is a constant vector, not a field.}
+In these expressions $\vv{v} = \vv{v}_i$ is the velocity of a specific particle evaluated at its position --- a single constant vector, not a spatially varying field.  The full vector identity for two arbitrary vector fields $\vv{u}(\vv{x})$ and $\vv{A}(\vv{x})$ contains two additional terms:
+\begin{equation}
+  \vv{u}\times(\nabla\times\vv{A}) = \nabla(\vv{u}\cdot\vv{A}) - (\vv{u}\cdot\nabla)\vv{A} - (\vv{A}\cdot\nabla)\vv{u} - \vv{A}\times(\nabla\times\vv{u}).
+\end{equation}
+When $\vv{u} = \vv{v}_i$ is a constant (i.e.\ $\nabla\vv{v}_i = 0$), the last two terms vanish and the identity reduces to the two-term form used here.  The spatial gradient $\nabla$ in $\nabla(\vv{v}\cdot\vv{A})$ and the directional derivative $(\vv{v}\cdot\nabla)$ act only on $\vv{A}(\vv{x})$, with $\vv{v}$ held fixed.
+
+\paragraph{The directional derivative $(\vv{v}\cdot\nabla)\vv{A}$.}
+The notation $(\vv{v}\cdot\nabla)\vv{A}$ is the directional derivative of the vector field $\vv{A}$ in the direction of $\vv{v}$.  The operator $\vv{v}\cdot\nabla = v_x\partial_x + v_y\partial_y + v_z\partial_z$ is a scalar operator applied component-wise:
+\begin{equation}
+  (\vv{v}\cdot\nabla)\vv{A} =
+  \begin{pmatrix}
+    v_x\,\partial_x A_x + v_y\,\partial_y A_x + v_z\,\partial_z A_x \\
+    v_x\,\partial_x A_y + v_y\,\partial_y A_y + v_z\,\partial_z A_y \\
+    v_x\,\partial_x A_z + v_y\,\partial_y A_z + v_z\,\partial_z A_z
+  \end{pmatrix}.
+\end{equation}
+In 2D the $z$-row is absent and $v_z = 0$.  On the Yee grid the $x$-component of $(\vv{v}\cdot\nabla)\vv{A}$ at the particle position is:
+\begin{equation}
+  \left[(\vv{v}\cdot\nabla)A_x\right]_p = v_x\,\frac{A_{x,i+1,j} - A_{x,i,j}}{\Delta x}
+                                         + v_y\,\frac{A_{x,i+1/2,j+1} - A_{x,i+1/2,j}}{\Delta y},
+\end{equation}
+where $v_x$ and $v_y$ are the scalar particle velocity components --- constants that multiply the spatial finite differences of $A_x$.  The $y$-component follows identically with $A_y$.
+
+The combination $\nabla(\vv{v}\cdot\vv{A}) - (\vv{v}\cdot\nabla)\vv{A}$ encodes the magnetic cross-product force.  To verify, the $x$-component is:
+\begin{equation}
+  \left[\nabla(\vv{v}\cdot\vv{A}) - (\vv{v}\cdot\nabla)\vv{A}\right]_x
+  = v_y(\partial_x A_y - \partial_y A_x) = v_y B_z,
+\end{equation}
+which is the $x$-component of $\vv{v}\times\vv{B}$, as expected.  The cross product is therefore correctly encoded without ever explicitly forming $\vv{B}$ as a grid array.
+
+These expressions involve no derived field vectors --- only spatial and temporal differences of the potentials evaluated at and near the particle position.  They are gauge-invariant: under $\phi\to\phi-\partial_t\Lambda$, $\vv{A}\to\vv{A}+\nabla\Lambda$ the extra terms cancel identically, so gauge drift in the potentials does not contaminate the computed force.
+
+Each term is evaluated by interpolating potentials from the surrounding grid points to the particle position using the CIC kernel, then forming the appropriate differences:
+\begin{itemize}
+  \item $-\nabla\phi$: finite difference of $\phi$ at surrounding corners, CIC-interpolated to the particle.
+  \item $-\partial_t\vv{A}$: centered time difference $(A_\alpha^{n+1} - A_\alpha^{n-1})/(2\Delta t)$ at edge positions, CIC-interpolated to the particle.
+  \item $\nabla(\vv{v}\cdot\vv{A}) = v_x\nabla A_x + v_y\nabla A_y$: spatial differences of the edge-located $A_x$ and $A_y$, with $v_x$, $v_y$ as constant multipliers.
+  \item $(\vv{v}\cdot\nabla)\vv{A}$: directional derivative of $\vv{A}$ along $\vv{v}$ as defined above --- spatial differences of edge values weighted by velocity components.
+\end{itemize}
+The full force stencil touches the same $4$ corners and $8$ edge points as the CIC interpolation, requiring no larger neighborhood.
+
+\subsubsection*{The Boris pusher and on-the-fly curl}
+
+The Boris algorithm requires the magnetic rotation step, which needs $B_{g,z}$ and $B_z$ at the particle position.  These are computed on the fly from the surrounding edge potentials using Eq.~(\ref{eq:yee_curl}), evaluated at the few cell centers near the particle and then CIC-interpolated to the particle position:
+\begin{equation}
+  B_{z}(\vv{x}_p) \approx \sum_{j,k} B_{z,j+1/2,k+1/2} \cdot W_2(\vv{x}_{j+1/2,k+1/2} - \vv{x}_p),
+\end{equation}
+where each $B_{z,j+1/2,k+1/2}$ is evaluated from the four surrounding edge values via Eq.~(\ref{eq:yee_curl}).  This touches at most 4 cell centers near the particle --- a negligible cost.
+
+The effective combined fields for Boris are then:
+\begin{equation}
+  \vv{B}_{\mathrm{eff}} = 4\,(\nabla\times\Ag)(\vv{x}_p) + \frac{q}{m}(\nabla\times\vv{A})(\vv{x}_p),
+\end{equation}
+where both curls are evaluated on-the-fly at the particle position from surrounding edge potentials via Eq.~(\ref{eq:yee_curl}).  In 2D the curl fields reduce to scalars with only a $z$-component, so:
+\begin{equation}
+  B_{\mathrm{eff},z} = 4\,B_{g,z}(\vv{x}_p) + \frac{q}{m}B_z(\vv{x}_p) \qquad\text{(2D specialization).}
+\end{equation}
+
+The Boris algorithm splits the total force into two parts.  The \textbf{electric-like force} $\vv{F}_{\mathrm{eff,E}}$ collects all terms that do not involve the magnetic cross product --- the gradient and time-derivative potential terms:
+\begin{equation}
+\label{eq:feff}
+  \vv{F}_{\mathrm{eff,E}} = m(-\nabla\Phig - \partial_t\Ag)
+                          + q(-\nabla\phi  - \partial_t\vv{A})
+                          + \vv{F}_{\mathrm{spin}} + \vv{F}_{\mathrm{rel}},
+\end{equation}
+where $\vv{F}_{\mathrm{spin}} = \nabla(\vv{S}\cdot\nabla\times\Ag) + \nabla(\boldsymbol{\mu}\cdot\nabla\times\vv{A})$ and $\vv{F}_{\mathrm{rel}}$ are the spin gradient and relativistic correction forces (Section~\ref{sec:relcorr}).  The velocity-dependent cross-product terms $4\nabla(\vv{v}\cdot\Ag) - 4(\vv{v}\cdot\nabla)\Ag$ and $\nabla(\vv{v}\cdot\vv{A}) - (\vv{v}\cdot\nabla)\vv{A}$ encode the magnetic rotation and are handled implicitly by the Boris rotation step using $B_{\mathrm{eff},z}$, not included in $\vv{F}_{\mathrm{eff,E}}$.
+
+The Boris update applies $\vv{F}_{\mathrm{eff,E}}$ as two half-kicks bracketing the exact magnetic rotation:
+\begin{align}
+  \vv{p}^- &= \vv{p}^{n-1/2} + \tfrac{1}{2}\vv{F}_{\mathrm{eff,E}}\,\dd t, \\
+  \vv{t}   &= \frac{q\,\vv{B}_{\mathrm{eff}}}{2\gamma^- m}\,\dd t, \qquad
+  \vv{s} = \frac{2\vv{t}}{1+|\vv{t}|^2}, \\
+  \vv{p}'  &= \vv{p}^- + \vv{p}^-\times\vv{t}, \qquad
+  \vv{p}^+ = \vv{p}^- + \vv{p}'\times\vv{s}, \\
+  \vv{p}^{n+1/2} &= \vv{p}^+ + \tfrac{1}{2}\vv{F}_{\mathrm{eff,E}}\,\dd t.
+\end{align}
+In 2D $\vv{B}_{\mathrm{eff}} = B_{\mathrm{eff},z}\hat{z}$, so $\vv{t} = t_z\hat{z}$ and $\vv{s} = s_z\hat{z}$ are purely out-of-plane, and the cross products $\vv{p}^-\times\vv{t}$ and $\vv{p}'\times\vv{s}$ reduce to in-plane rotations by the 2D scalar $t_z = q\,B_{\mathrm{eff},z}\,\dd t/(2\gamma^- m)$.  The Boris rotation step is exactly symplectic.  The $\order{v^2/c^2}$ gravitational corrections enter as additional contributions to $\vv{F}_{\mathrm{rel}}$ in Eq.~(\ref{eq:feff}).
+
+\subsection{Symplectic structure and relativistic limitations}
+
+The leapfrog scheme preserves the phase-space area element $\dd\vv{x}\wedge\dd\vv{p}$ exactly for linear (shear) force laws, preventing secular energy drift.  At relativistic speeds the electric kick becomes a curved shear whose Jacobian depends on $\vv{p}$, and the Boris approximation is symplectic only to $\order{\dd t^2}$.  The symplectic error grows as $(\gamma v/c)^2(\dd t/T)^2$ and can be mitigated by subcycling fast particles.  Photon-like particles ($v\approx c$) should use null geodesic ray tracing in the $c_{\mathrm{local}}$ field rather than the Boris pusher.
+
+\subsection{Numerical dispersion and anisotropy}
+\label{sec:dispersion}
+
+\subsubsection*{The exact numerical dispersion relation}
+
+The continuous wave equation has the dispersion relation $\omega^2 = c^2k^2$, meaning all wavelengths propagate at exactly $c$.  The discrete leapfrog FDTD scheme on a uniform grid with spacing $\Delta x$ and timestep $\Delta t$ has a different, exact dispersion relation.  Substituting a plane wave ansatz $\Phi^n_{j,k} = \hat\Phi\,e^{i(\omega n\Delta t - k_x j\Delta x - k_y k\Delta x)}$ into the leapfrog update gives:
+\begin{equation}
+\label{eq:dispersion_exact}
+  \sin^2\!\left(\frac{\omega\Delta t}{2}\right)
+  = c_{\mathrm{CFL}}^2\!\left[\sin^2\!\left(\frac{k_x\Delta x}{2}\right) + \sin^2\!\left(\frac{k_y\Delta x}{2}\right)\right],
+\end{equation}
+where $c_{\mathrm{CFL}} = c\Delta t/\Delta x$ is the CFL number.  This is not an approximation --- it is the exact dispersion relation of the discrete scheme.
+
+\subsubsection*{Dimensionless variables for the expansion}
+
+To expand Eq.~(\ref{eq:dispersion_exact}) cleanly it is convenient to work entirely in dimensionless phase variables:
+\begin{equation}
+  \xi = \frac{\omega\Delta t}{2}, \qquad
+  \beta_x = \frac{k_x\Delta x}{2}, \qquad
+  \beta_y = \frac{k_y\Delta x}{2},
+\end{equation}
+so that Eq.~(\ref{eq:dispersion_exact}) becomes simply:
+\begin{equation}
+  \sin^2\xi = c_{\mathrm{CFL}}^2(\sin^2\beta_x + \sin^2\beta_y).
+\end{equation}
+All quantities are dimensionless.  The continuous limit is $\xi = c_{\mathrm{CFL}}\sqrt{\beta_x^2+\beta_y^2}$, i.e.\ $\omega = ck$.
+
+\subsubsection*{Taylor expansion}
+
+Using $\sin^2 u = u^2 - u^4/3 + \order{u^6}$:
+\begin{align}
+  \text{Left side:}&\quad \sin^2\xi = \xi^2 - \frac{\xi^4}{3} + \ldots \label{eq:lhs_expand}\\
+  \text{Right side:}&\quad c_{\mathrm{CFL}}^2\!\left[(\beta_x^2+\beta_y^2) - \frac{\beta_x^4+\beta_y^4}{3} + \ldots\right] \label{eq:rhs_expand}
+\end{align}
+Equating and collecting terms, with $\beta^2 \equiv \beta_x^2+\beta_y^2$:
+\begin{equation}
+  \xi^2\!\left(1 - \frac{\xi^2}{3}\right) = c_{\mathrm{CFL}}^2\beta^2\!\left(1 - \frac{\beta_x^4+\beta_y^4}{3\beta^2}\right).
+\end{equation}
+At leading order $\xi^2 = c_{\mathrm{CFL}}^2\beta^2$, confirming the continuous dispersion relation.  Substituting this into the $\order{\beta^4}$ correction terms and solving for $\xi^2$:
+\begin{equation}
+\label{eq:dispersion_expanded}
+  \xi^2 \approx c_{\mathrm{CFL}}^2\beta^2\!\left[1 + \frac{\beta^2}{3}\!\left(c_{\mathrm{CFL}}^2 - \frac{\beta_x^4+\beta_y^4}{\beta^4}\right)\right].
+\end{equation}
+All terms are dimensionless throughout.  Converting back to physical variables via $\xi = \omega\Delta t/2$ and $\beta_\alpha = k_\alpha\Delta x/2$:
+\begin{equation}
+\label{eq:dispersion_physical}
+  \omega^2 \approx c^2k^2\!\left[1 + \frac{k^2\Delta x^2}{12}\!\left(c_{\mathrm{CFL}}^2 - \frac{k_x^4+k_y^4}{k^4}\right)\right].
+\end{equation}
+Every term now has units $[\mathrm{rad}^2/\mathrm{s}^2]$, with the correction being a dimensionless factor.
+
+\subsubsection*{Structure of the dispersion error}
+
+The correction factor in Eq.~(\ref{eq:dispersion_physical}) has two contributions that partially oppose each other:
+\begin{itemize}
+  \item $+c_{\mathrm{CFL}}^2\,k^2\Delta x^2/12$: from the \textbf{temporal} discretization.  Isotropic, positive --- makes $\omega$ too large, so the numerical phase velocity is slightly above $c$.
+  \item $-(k_x^4+k_y^4)/k^4\cdot k^2\Delta x^2/12$: from the \textbf{spatial} discretization.  Anisotropic, negative --- makes $\omega$ too small, with a magnitude that depends on the propagation angle $\theta$.
+\end{itemize}
+The numerical phase velocity along a general direction $\theta$ (where $k_x = k\cos\theta$, $k_y = k\sin\theta$) is:
+\begin{equation}
+  \frac{v_\phi(\theta)}{c} \approx 1 + \frac{k^2\Delta x^2}{24}\!\left(c_{\mathrm{CFL}}^2 - \frac{\cos^4\theta + \sin^4\theta}{1}\right) + \order{(k\Delta x)^4}.
+\end{equation}
+Using $\cos^4\theta + \sin^4\theta = 1 - \tfrac{1}{2}\sin^2(2\theta)$, this becomes:
+\begin{equation}
+\label{eq:phase_vel}
+  \frac{v_\phi(\theta)}{c} \approx 1 + \frac{k^2\Delta x^2}{24}\!\left(c_{\mathrm{CFL}}^2 - 1 + \frac{\sin^2(2\theta)}{2}\right).
+\end{equation}
+
+\subsubsection*{Anisotropy}
+
+The anisotropy --- the variation of phase velocity with propagation angle --- comes from the $\sin^2(2\theta)/2$ term in Eq.~(\ref{eq:phase_vel}).  This term is independent of $c_{\mathrm{CFL}}$: the anisotropy is a fixed property of the square grid and the 5-point Laplacian stencil, not of the timestep.  The maximum anisotropy occurs between the axis directions ($\theta = 0°$, $90°$) and the diagonals ($\theta = 45°$):
+\begin{align}
+  \frac{v_\phi(0°)}{c}  &\approx 1 + \frac{k^2\Delta x^2}{24}(c_{\mathrm{CFL}}^2 - 1), \\
+  \frac{v_\phi(45°)}{c} &\approx 1 + \frac{k^2\Delta x^2}{24}\!\left(c_{\mathrm{CFL}}^2 - \frac{1}{2}\right).
+\end{align}
+The difference between the two:
+\begin{equation}
+  \frac{v_\phi(45°) - v_\phi(0°)}{c} \approx \frac{k^2\Delta x^2}{48}
+\end{equation}
+is independent of $c_{\mathrm{CFL}}$, confirming that the CFL number does not affect the anisotropy.  A circular wavefront generated by a point source will appear as a slightly rounded square due to this anisotropy, with the diagonal directions propagating faster than the axis directions by a fractional amount $(k\Delta x)^2/48$.
+
+\subsubsection*{Overall dispersion magnitude and the role of $c_{\mathrm{CFL}}$}
+
+While the anisotropy is fixed, the overall magnitude of the dispersion error does depend on $c_{\mathrm{CFL}}$ through the $c_{\mathrm{CFL}}^2 - 1$ term.  Along the grid axes:
+\begin{itemize}
+  \item At $c_{\mathrm{CFL}} = 1$ (1D stability limit): $v_\phi(0°) = c$ exactly --- zero dispersion along the axis in 1D.
+  \item At $c_{\mathrm{CFL}} = 1/\sqrt{2}$ (2D stability limit): $v_\phi(0°)/c \approx 1 - k^2\Delta x^2/48$ (slightly slow), $v_\phi(45°)/c \approx 1$ (exact at the diagonal).
+  \item At $c_{\mathrm{CFL}} \ll 1$: $v_\phi(0°)/c \approx 1 - k^2\Delta x^2/24$ (maximally slow along axes).
+\end{itemize}
+So running well below the stability limit does worsen the overall dispersion (larger negative error along the axes) while the anisotropy remains the same.  Running at the stability limit minimizes the frequency-dependent part of the dispersion error by maximally cancelling the temporal and spatial contributions, though at no $c_{\mathrm{CFL}}$ value is the 2D dispersion simultaneously zero in all directions.
+
+\subsubsection*{Practical implications for the sandbox}
+
+\begin{itemize}
+  \item \textbf{Run at the CFL limit.} $c_{\mathrm{CFL}} = 1/\sqrt{2}$ in 2D minimizes the overall dispersion error while remaining stable.  The conventional advice to run ``safely below'' the CFL limit worsens wave propagation accuracy without improving stability.
+  \item \textbf{Ensure adequate spatial resolution.}  The dispersion error scales as $(k\Delta x)^2$.  A wavelength spanning $N$ grid cells has $k\Delta x = 2\pi/N$, giving a dispersion error of order $\pi^2/(6N^2)$.  For $N=10$ cells per wavelength this is $\approx 1.6\%$; for $N=20$ it is $\approx 0.4\%$.  For the sandbox, 10--20 cells per wavelength is adequate for qualitative demonstrations.
+  \item \textbf{Anisotropy is a fixed grid artifact.}  A circularly-emitted wavefront will be slightly non-circular due to the $(k\Delta x)^2/48$ anisotropy, appearing as a rounded square with the diagonals slightly ahead of the axes.  This can be reduced by replacing the standard 5-point Laplacian with the 9-point isotropic stencil:
+  \begin{equation}
+    \nabla^2\Phi \approx \frac{1}{\Delta x^2}\!\left[\frac{1}{6}\sum_{\mathrm{diag}}\Phi + \frac{2}{3}\sum_{\mathrm{axis}}\Phi - \frac{10}{3}\Phi_{i,j}\right],
+  \end{equation}
+  which replaces $k_x^4+k_y^4$ with $k^4$ in the spatial error term, eliminating the angular dependence and reducing the anisotropy coefficient by a factor of $\sim\!4$ at the cost of involving 8 neighbours instead of 4.
+  \item \textbf{Higher-order stencils.}  Using a 4th-order accurate spatial stencil replaces the $\order{(k\Delta x)^2}$ error with $\order{(k\Delta x)^4}$, dramatically reducing dispersion for well-resolved wavelengths at the cost of a wider stencil (5 points per dimension rather than 3).
+\end{itemize}
+
+\subsection{Source deposition: approximating the delta function}
+\label{sec:deposition}
+
+The physical sources involve $\delta(\vv{x}-\vv{x}_i)$ and for spin sources $\nabla\times[\boldsymbol{\mu}\,\delta(\vv{x}-\vv{x}_i)]$, neither of which can exist on a discrete grid.  They must be replaced by smooth kernel functions $W(\vv{x}-\vv{x}_i)$ that approximate the delta function on the grid scale.  Three competing requirements must be balanced:
+
+\begin{enumerate}
+  \item \textbf{Sub-cell position accuracy:} the kernel must encode the particle's position within a cell, not just which cell it occupies.
+  \item \textbf{Smoothness for curl deposition:} taking $\nabla\times[W\,\boldsymbol{\mu}]$ requires $W$ to have well-defined spatial derivatives.
+  \item \textbf{Compactness:} a wide kernel smears the source over many cells, reducing spatial resolution.
+\end{enumerate}
+
+\subsubsection*{The B-spline hierarchy}
+
+There is a well-established family of kernels that interpolates between a box function (maximally compact, discontinuous) and a Gaussian (infinitely smooth, infinite support).  These are the B-spline kernels $W_n$ of order $n$, each being the convolution of its predecessor with a box function:
+
+\begin{center}
+\begin{tabular}{@{}lllll@{}}
+\toprule
+\textbf{Order} & \textbf{Common name} & \textbf{Smoothness} & \textbf{Support (cells)} & \textbf{Curl kernel} \\
+\midrule
+$n=1$ & Nearest-grid-point (NGP) & Discontinuous & 1 & Undefined \\
+$n=2$ & Tent / CIC               & $C^0$         & 2 & Box (discontinuous) \\
+$n=3$ & Quadratic B-spline        & $C^1$         & 3 & Tent ($C^0$) \\
+$n=4$ & Cubic B-spline            & $C^2$         & 4 & Quadratic ($C^1$) \\
+$n\to\infty$ & Gaussian          & $C^\infty$    & $\infty$ & Hermite--Gaussian \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection*{Monopole and current deposition: the CIC kernel and bilinear interpolation}
+
+For $\rho_{\mathrm{matter}}$, $\vv{J}_{\mathrm{matter}}$, $\rho_q$, $\vv{J}_q$ the cloud-in-cell (CIC) tent kernel $W_2$ is the standard choice.  In 1D it is:
+\begin{equation}
+  W_2(x) = \begin{cases}
+    1 - |x|/\Delta x & |x| < \Delta x \\
+    0                & \text{otherwise,}
+  \end{cases}
+\end{equation}
+and in 2D it is the tensor product:
+\begin{equation}
+  W_2(x,y) = W_2(x)\,W_2(y)
+            = \left(1-\frac{|x|}{\Delta x}\right)\!\left(1-\frac{|y|}{\Delta y}\right),
+  \quad |x|<\Delta x,\;|y|<\Delta y.
+\end{equation}
+Deposition of charge $q$ at sub-cell position $(\alpha,\beta)$ with $\alpha=(x_p-x_i)/\Delta x$, $\beta=(y_p-y_j)/\Delta y$ distributes to the four surrounding grid points:
+\begin{equation}
+\label{eq:cic_deposit}
+\begin{aligned}
+  \rho_{i,j}     &\mathrel{+}= q\,(1-\alpha)(1-\beta)/\Delta x^2, \\
+  \rho_{i+1,j}   &\mathrel{+}= q\,\alpha(1-\beta)/\Delta x^2, \\
+  \rho_{i,j+1}   &\mathrel{+}= q\,(1-\alpha)\beta/\Delta x^2, \\
+  \rho_{i+1,j+1} &\mathrel{+}= q\,\alpha\beta/\Delta x^2.
+\end{aligned}
+\end{equation}
+The weights $(1-\alpha)(1-\beta)$, $\alpha(1-\beta)$, $(1-\alpha)\beta$, $\alpha\beta$ are exactly the bilinear interpolation weights.  Field interpolation back to the particle position uses the same four weights:
+\begin{equation}
+\label{eq:cic_interp}
+  E_p = (1-\alpha)(1-\beta)\,E_{i,j}
+       + \alpha(1-\beta)\,E_{i+1,j}
+       + (1-\alpha)\beta\,E_{i,j+1}
+       + \alpha\beta\,E_{i+1,j+1}.
+\end{equation}
+The deposition weights in Eq.~(\ref{eq:cic_deposit}) and the interpolation weights in Eq.~(\ref{eq:cic_interp}) are identical.  This is the adjoint condition, discussed in detail below.
+
+\subsubsection*{Dipole deposition: the quadratic B-spline and its derivative as two tents}
+
+The quadratic B-spline $W_3$ is obtained by convolving $W_2$ with a box function of width $\Delta x$.  In 1D:
+\begin{equation}
+  W_3(x) = \begin{cases}
+    \tfrac{3}{4} - (x/\Delta x)^2                             & |x| < \tfrac{1}{2}\Delta x \\
+    \tfrac{1}{2}\!\left(\tfrac{3}{2} - |x|/\Delta x\right)^2 & \tfrac{1}{2}\Delta x \leq |x| < \tfrac{3}{2}\Delta x \\
+    0                                                          & \text{otherwise.}
+  \end{cases}
+\end{equation}
+$W_3$ is $C^1$, spans 3 cells, and has an inflection point at $|x|=\tfrac{1}{2}\Delta x$---concave down in the central region and concave up in the two outer regions.  Its derivative is:
+\begin{equation}
+\label{eq:dW3}
+  \frac{\dd W_3}{\dd x}(x) = \begin{cases}
+    +\!\left(\tfrac{3}{2} - |x|/\Delta x\right)/\Delta x & -\tfrac{3}{2}\Delta x \leq x < -\tfrac{1}{2}\Delta x \\
+    -2x/\Delta x^2                                        & |x| < \tfrac{1}{2}\Delta x \\
+    -\!\left(\tfrac{3}{2} - |x|/\Delta x\right)/\Delta x & \phantom{-}\tfrac{1}{2}\Delta x \leq x < \phantom{-}\tfrac{3}{2}\Delta x \\
+    0                                                     & \text{otherwise.}
+  \end{cases}
+\end{equation}
+
+The key geometric insight is that $\dd W_3/\dd x$ consists of \textbf{two tent functions placed side by side}---one positive and one negative---straddling the particle position at $x=0$:
+\begin{itemize}
+  \item A \textbf{positive tent} centered at $x=-\tfrac{1}{2}\Delta x$, rising from 0 at $x=-\tfrac{3}{2}\Delta x$, peaking at $+1/\Delta x$ at $x=-\tfrac{1}{2}\Delta x$, and falling back to 0 at $x=0$.
+  \item A \textbf{negative tent} centered at $x=+\tfrac{1}{2}\Delta x$, falling from 0 at $x=0$, reaching $-1/\Delta x$ at $x=+\tfrac{1}{2}\Delta x$, and returning to 0 at $x=+\tfrac{3}{2}\Delta x$.
+\end{itemize}
+The two tents meet at zero at the particle position.  This antisymmetric structure is a direct consequence of $W_3$ being symmetric: the derivative of a symmetric function is antisymmetric and must pass through zero at the center, positive on the rising (left) side and negative on the falling (right) side.
+
+When deposited onto the grid, the three cells receive:
+\begin{itemize}
+  \item \textbf{Cell $i-1$} (left): only the positive tail of the positive tent.
+  \item \textbf{Cell $i$} (containing particle): the right half of the positive tent (positive) plus the left half of the negative tent (negative), partially cancelling with net value depending on sub-cell position $\alpha$.
+  \item \textbf{Cell $i+1$} (right): only the negative tail of the negative tent.
+\end{itemize}
+The total weight across all three cells sums to zero, since $W_3(\pm\tfrac{3}{2}\Delta x)=0$.
+
+For comparison, the derivative of the CIC kernel $W_2$ is a discontinuous box function:
+\begin{equation}
+  \frac{\dd W_2}{\dd x}(x) = \begin{cases}
+    -\mathrm{sgn}(x)/\Delta x & |x| < \Delta x \\
+    0                         & \text{otherwise,}
+  \end{cases}
+\end{equation}
+which produces Gibbs-like ringing when used as a grid source.  The $W_3$ two-tent derivative avoids this discontinuity.
+
+For reference, the Gaussian $W_G = (2\pi\sigma^2)^{-1/2}\exp(-x^2/2\sigma^2)$ gives a Hermite--Gaussian derivative:
+\begin{equation}
+  \frac{\dd W_G}{\dd x} = -\frac{x}{\sigma^2}\,W_G(x),
+\end{equation}
+which is $C^\infty$ but requires truncation at $\pm 3\sigma$ ($\approx 6$ cells).
+
+\subsubsection*{The 2D curl: sign flip in the direction of differentiation}
+
+In 2D, the spin dipole moment is a scalar $\mu$ (the out-of-plane component), and the magnetization current is the 2D curl of $\mu\,W_3(x-x_p)\,W_3(y-y_p)$:
+\begin{align}
+  J_{q,x}(\vv{x}) &= \mu\,W_3(x-x_p)\cdot\frac{\dd W_3}{\dd y}(y-y_p), \label{eq:curl2d_x}\\
+  J_{q,y}(\vv{x}) &= -\mu\,\frac{\dd W_3}{\dd x}(x-x_p)\cdot W_3(y-y_p). \label{eq:curl2d_y}
+\end{align}
+Each component is a tensor product of one smooth $W_3$ factor (all positive, $C^1$) and one two-tent $\dd W_3/\dd x_\alpha$ factor ($C^0$, sign flip).  The sign flip occurs only in the direction of differentiation:
+\begin{itemize}
+  \item $J_{q,x}$: smooth in $x$, two-tent in $y$.  Positive above the particle ($y>y_p$), negative below.
+  \item $J_{q,y}$: two-tent in $x$ with overall minus sign, smooth in $y$.  Negative to the left of the particle, positive to the right.
+\end{itemize}
+Together these form a counter-clockwise current loop in the $xy$-plane---the correct physical current distribution for a magnetic dipole $\mu>0$ pointing out of the plane.  Each component spans $3\times 3 = 9$ cells in 2D.
+
+\subsubsection*{Generalization to 3D}
+
+All formulas above are written in 2D for clarity.  The 3D generalization adds the third tensor product factor straightforwardly.
+
+\paragraph{CIC (monopole/current):} add factor $W_2(z-z_p)$ with $\gamma=(z_p-z_k)/\Delta z$.  The 8 surrounding cells receive weights that are all products of factors from $\{(1-\alpha),\alpha\}\times\{(1-\beta),\beta\}\times\{(1-\gamma),\gamma\}$.
+
+\paragraph{Quadratic B-spline (dipole):} the 3D kernel is $W_3(x-x_p)\,W_3(y-y_p)\,W_3(z-z_p)$, spanning $3^3=27$ cells.
+
+\paragraph{3D curl for spin sources:} with $\boldsymbol{\mu}$ now a 3-vector, the three components of $\nabla\times[\boldsymbol{\mu}\,W_3]$ are:
+\begin{align}
+  [\nabla\times(\boldsymbol{\mu}\,W_3)]_x &= \mu_z\,W_3(x)\,\tfrac{\dd W_3}{\dd y}(y)\,W_3(z)
+                                           - \mu_y\,W_3(x)\,W_3(y)\,\tfrac{\dd W_3}{\dd z}(z), \\
+  [\nabla\times(\boldsymbol{\mu}\,W_3)]_y &= \mu_x\,W_3(x)\,W_3(y)\,\tfrac{\dd W_3}{\dd z}(z)
+                                           - \mu_z\,\tfrac{\dd W_3}{\dd x}(x)\,W_3(y)\,W_3(z), \\
+  [\nabla\times(\boldsymbol{\mu}\,W_3)]_z &= \mu_y\,\tfrac{\dd W_3}{\dd x}(x)\,W_3(y)\,W_3(z)
+                                           - \mu_x\,W_3(x)\,\tfrac{\dd W_3}{\dd y}(y)\,W_3(z),
+\end{align}
+where arguments $(x-x_p)$ etc.\ are suppressed.  Each term has exactly one two-tent $\dd W_3/\dd x_\alpha$ factor in the direction of differentiation and smooth $W_3$ factors in the other two directions, spanning 27 cells and summing to zero over the grid.  In 2D only $\mu_z$ is nonzero and only the $x$ and $y$ components of the curl exist (Eqs.~\ref{eq:curl2d_x}--\ref{eq:curl2d_y}).
+
+\subsubsection*{The adjoint condition and self-force cancellation}
+
+The deposition operator $D$ maps a particle quantity at position $\vv{x}_p$ to the grid:
+\begin{equation}
+  \rho(\vv{x}_j) = [D\,q](\vv{x}_j) = q\,W(\vv{x}_j - \vv{x}_p),
+\end{equation}
+and the interpolation operator $I$ maps a grid field back to the particle:
+\begin{equation}
+  E_p = [I\,E](\vv{x}_p) = \sum_j E(\vv{x}_j)\,\tilde{W}(\vv{x}_j - \vv{x}_p).
+\end{equation}
+The \textbf{adjoint condition} requires $\tilde{W} = W$---the same kernel is used for both operations.
+
+To see why this cancels the static self-force, write the force of the particle's own field on itself:
+\begin{equation}
+  \vv{F}_{\mathrm{self}} = q\sum_j \vv{E}_{\mathrm{self}}(\vv{x}_j)\,W(\vv{x}_j-\vv{x}_p).
+\end{equation}
+For a stationary particle, $\vv{E}_{\mathrm{self}}$ is produced by the symmetric charge distribution $\rho(\vv{x}_j) = q\,W(\vv{x}_j-\vv{x}_p)$.  On a uniform grid with a symmetric kernel $W$, the field $\vv{E}_{\mathrm{self}}$ is antisymmetric about the particle position---it points away from the particle equally in all directions.  Interpolating this antisymmetric field back with the same symmetric kernel $W$ gives exactly zero:
+\begin{equation}
+  \vv{F}_{\mathrm{self}} = q\sum_j \vv{E}_{\mathrm{self}}(\vv{x}_j)\,W(\vv{x}_j-\vv{x}_p) = 0 \qquad \text{(stationary particle).}
+\end{equation}
+If different kernels are used for deposition and interpolation, this symmetry is broken and the self-force is nonzero even for a stationary particle, producing unphysical heating.
+
+For the CIC/bilinear case, the adjoint condition is immediately visible: the deposition weights $(1-\alpha)(1-\beta)$, $\alpha(1-\beta)$, $(1-\alpha)\beta$, $\alpha\beta$ in Eq.~(\ref{eq:cic_deposit}) are identical to the interpolation weights in Eq.~(\ref{eq:cic_interp}).  Bilinear interpolation \emph{is} CIC deposition---they are the same operation, so the adjoint condition is automatically satisfied.
+
+For the gradient fields needed by the spin forces, the adjoint condition has a critical implication that must be stated precisely.  The dipole source was deposited using the kernel $\dd W_3/\dd x_\alpha \cdot W_3$ over 9 cells in 2D (27 in 3D).  The adjoint of that deposition operator is the interpolation that uses those \emph{exact same weights} to map grid field values back to the particle.  Concretely, the $x$-gradient of $B_{g,z}$ at the particle is:
+\begin{align}
+  (\partial_x B_{g,z})_p &= \sum_{j,k} B_{g,z}(\vv{x}_{j,k})\cdot
+    \frac{\dd W_3}{\dd x}(x_j - x_p)\cdot W_3(y_k - y_p), \label{eq:grad_adjoint_x}\\
+  (\partial_y B_{g,z})_p &= \sum_{j,k} B_{g,z}(\vv{x}_{j,k})\cdot
+    W_3(x_j - x_p)\cdot\frac{\dd W_3}{\dd y}(y_k - y_p), \label{eq:grad_adjoint_y}
+\end{align}
+where the sums run over the same $3\times 3 = 9$ cells used during dipole deposition, and $\dd W_3/\dd x$ is the two-tent function of Eq.~(\ref{eq:dW3}).  The identical formulas apply to $\nabla B_z$ for the magnetic gradient force, and generalize to $3\times 3\times 3 = 27$ cells in 3D.
+
+It is important to note what is \emph{not} correct here.  The box-function derivative $-\mathrm{sgn}(x)/\Delta x$ is the derivative of the CIC kernel $W_2$, not of $W_3$.  It would be the correct adjoint gradient interpolation only if the dipole had been deposited with $W_2$---but $W_2$ was deliberately avoided for dipole deposition because its discontinuous derivative causes Gibbs ringing.  Using $\mathrm{sgn}(x)/\Delta x$ for gradient interpolation while using $W_3$ for dipole deposition breaks the adjoint pairing and introduces a residual dipole self-force: a spinning stationary particle would experience a spurious gradient force from its own field.  The two-tent weights of Eqs.~(\ref{eq:grad_adjoint_x})--(\ref{eq:grad_adjoint_y}) are the unique correct choice.
+
+Similarly, computing the gradient by finite-differencing the bilinearly interpolated field (another common approach) is not adjoint to $W_3$ dipole deposition and also introduces a self-force.  The rule is simple: \textbf{use the same kernel weights for interpolation that were used for deposition, applied to the same set of cells}.
+
+\subsubsection*{Self-interaction, radiation reaction, and their limitations}
+
+The self-force cancellation described above is exact only for a \emph{stationary} particle.  For an \emph{accelerating} particle the retarded self-field is asymmetric---the field the particle emitted in the past arrives back at the particle's current position from a different direction---and the cancellation is incomplete.  The residual is the \textbf{radiation reaction force}, which in classical electrodynamics is the Abraham--Lorentz force:
+\begin{equation}
+  \vv{F}_{\mathrm{rad}} = \frac{q^2}{6\pi\varepsilon_0 c^3}\dddot{\vv{x}},
+\end{equation}
+involving the third time derivative of position (the jerk).  The gravitational analogue for GEM is structurally identical with the appropriate coupling constants.
+
+In a grid-based simulation this radiation reaction force is captured only approximately.  The particle deposits its field onto the grid via the CIC kernel---effectively giving the particle a finite size of order $\Delta x$---and the retarded self-field propagates back to the particle's position via the wave equation.  The resulting self-force approximates but does not exactly reproduce the Abraham--Lorentz force, for two reasons:
+
+\begin{itemize}
+  \item The effective particle size $\sim\Delta x$ regularizes the $1/r$ self-field divergence at a scale chosen for numerical convenience rather than physical accuracy, making the radiation reaction force grid-spacing-dependent.
+  \item The exact Abraham--Lorentz force involves the $r\to 0$ limit of the retarded self-field, which the grid cannot resolve below $\Delta x$.
+\end{itemize}
+
+The practical consequence is that a radiating particle in the simulation will correctly emit energy into the field (the outgoing wave is accurately computed), but the back-reaction force on the particle that causes it to slow down may be slightly inconsistent with the emitted power, leading to small violations of energy conservation at the particle level over long integration times.
+
+For qualitative demonstrations---watching waves propagate outward from an oscillating mass, observing the radiation pattern, verifying the $1/\sqrt{r}$ field fall-off in 2D---the simulation is fully adequate.  For quantitative long-time tracking of radiation-induced orbital decay, a hybrid approach is recommended: add an explicit phenomenological radiation damping term computed analytically from the particle's current acceleration, rather than relying entirely on the grid self-interaction.  This maintains energy conservation to much higher accuracy without the numerical stiffness of the exact Abraham--Lorentz--Dirac equation.
+
+\subsubsection*{Practical recommendation}
+
+\begin{center}
+\begin{tabular}{@{}L{5.5cm}L{3.5cm}L{3.5cm}@{}}
+\toprule
+\textbf{Source / Force} & \textbf{Kernel} & \textbf{Cells (2D / 3D)} \\
+\midrule
+$\rho$, $\vv{J}$ monopole/current deposition & CIC $W_2$ & 4 / 8 \\
+Potential interpolation at particle ($\phi$, $\Phig$) & Bilinear $W_2$ at corners & 4 / 8 \\
+Potential interpolation at particle ($\vv{A}$, $\Ag$) & Bilinear $W_2$ at edges & 4 / 8 \\
+On-the-fly $B_{g,z}$, $B_z$ at particle & Yee curl + bilinear $W_2$ & 4 cell centers \\
+Spin dipole $\nabla\times[\boldsymbol{\mu}\,\delta]$ deposition & $W_3$ curl & 9 / 27 \\
+Gradient fields $\nabla B_{g,z}$, $\nabla B_z$ at particle & Two-tent $\dd W_3/\dd x_\alpha$ & 9 / 27 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Gauge condition enforcement}
+\label{sec:gauge}
+
+\subsubsection*{The Lorenz gauge and why it drifts}
+
+The wave equations for the GEM and EM potentials were derived in the Lorenz gauge, which for GEM requires:
+\begin{equation}
+\label{eq:lorenz_gem}
+  \mathcal{G}_{\mathrm{GEM}} \equiv \frac{1}{c^2}\frac{\partial\Phig}{\partial t} + \nabla\cdot\Ag = 0,
+\end{equation}
+and for EM:
+\begin{equation}
+\label{eq:lorenz_em}
+  \mathcal{G}_{\mathrm{EM}} \equiv \frac{1}{c^2}\frac{\partial\phi}{\partial t} + \nabla\cdot\vv{A} = 0.
+\end{equation}
+In the continuous theory, if these conditions hold at $t=0$ and the sources satisfy the continuity equations $\partial_t\rho + \nabla\cdot\vv{J} = 0$, then the gauge conditions are preserved exactly by the wave equation evolution --- the gauge violation satisfies the homogeneous wave equation $\Box\mathcal{G} = 0$ and simply propagates outward and exits through the absorbing boundary.  There is no exponential amplification mechanism.
+
+In the discrete FDTD scheme the gauge condition drifts for two reasons.  First, the finite-difference operators do not satisfy the same algebraic identities as the continuous operators.  Second, the discretely deposited sources satisfy the continuity equation only approximately.  The drift is sourced by truncation errors of order $(k\Delta x)^2$ per step --- small, bounded, and not self-amplifying.  It accumulates at a slow linear rate, not exponentially.
+
+\subsubsection*{Why gauge drift does not affect particle dynamics}
+
+A crucial observation is that the force expressions Eqs.~(\ref{eq:em_force_potential})--(\ref{eq:gem_force_potential}) are \emph{gauge-invariant}.  Under a gauge transformation $\phi\to\phi-\partial_t\Lambda$, $\vv{A}\to\vv{A}+\nabla\Lambda$, the extra terms introduced into the force cancel exactly --- the physical force is independent of the gauge function $\Lambda$.  Therefore gauge drift in the stored potentials has \emph{no effect} on the computed forces or particle trajectories.
+
+Gauge drift matters only when the potentials themselves are used directly: for visualization of $\phi$, $\Phig$, $\Ag$, $\vv{A}$; for the gauge condition monitoring; and for the EM effective GEM source $\rho_{\mathrm{EM}} = u_{\mathrm{EM}}/c^2$, which uses $\vv{E}$ and $\vv{B}$ derived from the potentials.  For a purely qualitative pedagogical simulation gauge correction can be omitted entirely without affecting the particle dynamics.
+
+\subsubsection*{The discrete continuity equation: the primary defense}
+
+The most important gauge-preserving measure is to ensure that the deposited sources satisfy the \emph{discrete} continuity equation exactly.  On the Yee grid with $\rho$ at corners and $\vv{J}$ at edges, the discrete continuity equation is:
+\begin{equation}
+  \frac{\rho^{n+1}_{i,j} - \rho^{n-1}_{i,j}}{2\Delta t}
+  + \frac{J_{x,i+1/2,j}^n - J_{x,i-1/2,j}^n}{\Delta x}
+  + \frac{J_{y,i,j+1/2}^n - J_{y,i,j-1/2}^n}{\Delta y} = 0.
+\end{equation}
+Using a consistent CIC kernel for both $\rho$ and $\vv{J}$ deposition satisfies this condition to the accuracy of the kernel, bounding gauge drift at the truncation error level automatically.
+
+\subsubsection*{Parabolic cleaning: optional refinement for long integrations}
+
+For very long simulations where the slow linear gauge drift eventually becomes visible in potential visualizations, a parabolic cleaning step can be applied after each field update:
+\begin{equation}
+\label{eq:parabolic_clean}
+  \Phig \;\leftarrow\; \Phig - R\,c^2\,\Delta t\,(\nabla\cdot\Ag), \qquad
+  \phi  \;\leftarrow\; \phi  - R\,c^2\,\Delta t\,(\nabla\cdot\vv{A}),
+\end{equation}
+where $R$ is a small positive dimensionless constant.  This drives the scalar potentials toward the Lorenz gauge condition, damping the gauge violation on a timescale $\sim 1/(Rc)$.  A practical choice is $R \sim c_{\mathrm{CFL}}^2/4$, giving a damping timescale of a few domain-crossing times.
+
+The cleaning is a single extra multiplication per cell and is applied only to the perturbation fields.  Since gauge drift does not affect particle dynamics, this correction is purely cosmetic --- it keeps the potential visualizations free of slowly drifting background artifacts.  It is not needed for physical correctness of the simulation.
+
+\subsubsection*{Hyperbolic cleaning: stronger alternative}
+
+If parabolic cleaning is insufficient (e.g.\ for very long integrations or highly dynamic configurations), hyperbolic divergence cleaning can be used.  An auxiliary field $\psi_g$ (for GEM; similarly $\psi$ for EM) is introduced:
+\begin{align}
+  \frac{\partial\Ag}{\partial t} &\;\leftarrow\; \frac{\partial\Ag}{\partial t} - \nabla\psi_g, \\
+  \frac{\partial\psi_g}{\partial t} &= -c_h^2\nabla\cdot\Ag - \kappa\psi_g,
+\end{align}
+making the gauge violation satisfy a damped wave equation that propagates violations outward at speed $c_h = c$ and damps them at rate $\kappa = c/L$.  This is more robust than parabolic cleaning but requires an additional scalar field per wave equation.
+
+\subsubsection*{Monitoring}
+
+The discrete gauge residual:
+\begin{equation}
+  \mathcal{G}_{i,j}^n = \frac{(\Phig^{\mathrm{pert}})_{i,j}^{n+1} - (\Phig^{\mathrm{pert}})_{i,j}^{n-1}}{2c^2\Delta t}
+  + \frac{A_{g,x,i+1/2,j}^n - A_{g,x,i-1/2,j}^n}{\Delta x}
+  + \frac{A_{g,y,i,j+1/2}^n - A_{g,y,i,j-1/2}^n}{\Delta y}
+\end{equation}
+should remain at the level of the truncation error $\sim(k\Delta x)^2$.  Rapid growth indicates inconsistent source deposition.  Since gauge drift does not affect dynamics, monitoring is primarily useful for diagnosing deposition bugs rather than correcting physical errors.
+
+\subsection{Absorbing boundary conditions}
+\label{sec:abc}
+
+Without special treatment at the grid edges the leapfrog FDTD scheme imposes reflecting boundary conditions by default --- the field values outside the grid are implicitly zero, which acts as a perfect reflector for any outgoing wave.  Reflected waves re-enter the simulation domain and interfere with the physics being demonstrated.  For a GR sandbox this is particularly problematic: a gravitational wave emitted by an oscillating mass would bounce off the grid boundary, return to the source region, and create standing wave patterns that have no physical meaning and would confuse any student watching.
+
+\subsubsection*{The damping layer}
+
+The recommended approach for the sandbox is a \textbf{damping layer}: a border region of $N_d$ cells on each side of the grid where the field is multiplied by a spatially varying attenuation factor at each timestep.  Outgoing waves entering the layer are attenuated gradually and the small residual that reaches the hard boundary is attenuated again on the return trip, making double-pass reflections negligible.
+
+The damping factor at position $x$ within the layer (measured from the inner edge of the layer, $0 \leq x \leq L = N_d\Delta x$) is:
+\begin{equation}
+  f(x) = \exp\!\left(-\sigma(x)\,\dd t\right) \approx 1 - \sigma(x)\,\dd t,
+\end{equation}
+where $\sigma(x)$ is the conductivity profile.  A smooth polynomial ramp is recommended:
+\begin{equation}
+\label{eq:damp_profile}
+  \sigma(x) = \sigma_{\max}\!\left(\frac{x}{L}\right)^2,
+\end{equation}
+which rises from zero at the interior edge to $\sigma_{\max}$ at the outer edge.  The quadratic profile ensures the attenuation starts gently, minimizing the impedance mismatch at the interior-damping interface that would otherwise cause partial reflection.
+
+The round-trip reflection coefficient for a wave traversing the layer twice is:
+\begin{equation}
+  R \approx \exp\!\left(-\frac{2}{c}\int_0^L \sigma(x)\,\dd x\right)
+           = \exp\!\left(-\frac{2\sigma_{\max}L}{3c}\right).
+\end{equation}
+Setting $2\sigma_{\max}L/3c = 7$ gives $R \approx e^{-7} \approx 10^{-3}$, which is adequate for all qualitative demonstrations.  For a layer of $N_d = 16$ cells this requires:
+\begin{equation}
+  \sigma_{\max} = \frac{21c}{2L} = \frac{21c}{2 N_d \Delta x}.
+\end{equation}
+
+\subsubsection*{Implementation}
+
+The damping factor array is precomputed once at initialization.  For a grid of size $N\times N$ with damping layer of thickness $N_d$ cells on each side, define:
+\begin{equation}
+  d_{i,j} = \max\!\left(d_x(i),\; d_y(j)\right),
+\end{equation}
+where:
+\begin{align}
+  d_x(i) &= \begin{cases}
+    \sigma_{\max}\!\left(\dfrac{N_d - i}{N_d}\right)^2 \dd t & i < N_d \quad\text{(left layer)} \\[6pt]
+    \sigma_{\max}\!\left(\dfrac{i - (N-N_d)}{N_d}\right)^2 \dd t & i > N - N_d \quad\text{(right layer)} \\
+    0 & \text{otherwise,}
+  \end{cases}
+\end{align}
+and similarly for $d_y(j)$.  The per-timestep application after each field update is then:
+
+\begin{equation}
+  \Phi^{n+1}_{i,j} \;\leftarrow\; \Phi^{n+1}_{i,j} \cdot (1 - d_{i,j})
+\end{equation}
+
+applied to all six perturbation field arrays $(\Phig^{\mathrm{pert}},\; A_{g,x}^{\mathrm{pert}},\; A_{g,y}^{\mathrm{pert}},\; \phi^{\mathrm{pert}},\; A_x^{\mathrm{pert}},\; A_y^{\mathrm{pert}})$.  The same damping array $d_{i,j}$ applies to all six because they all satisfy the same wave equation with the same propagation speed.
+
+\subsubsection*{What is and is not damped}
+
+Only the perturbation fields are damped.  The background fields $\Phig^{\mathrm{bg}}$, $A_{g,\alpha}^{\mathrm{bg}}$, $\phi^{\mathrm{bg}}$, $A_\alpha^{\mathrm{bg}}$ are evaluated analytically at particle positions and are never stored on the grid, so they are automatically exempt from the damping operation.  This is a further advantage of the background + perturbation split: the static $1/r$ gravitational field, which is not a propagating wave and should not be attenuated, requires no special treatment at the boundary.
+
+Particles should be confined to the interior region and prevented from entering the damping layer.  A simple reflecting or absorbing boundary at the inner edge of the damping layer (at $i = N_d$ and $i = N - N_d$, and similarly in $y$) is sufficient.  A particle that reaches the inner boundary can be reflected elastically, absorbed and removed from the simulation, or wrapped with a warning — the choice depends on the scenario being demonstrated.
+
+\subsubsection*{Practical parameters}
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Parameter} & \textbf{Recommended value} \\
+\midrule
+Layer thickness $N_d$ & 16 cells \\
+Profile exponent & 2 (quadratic) \\
+$\sigma_{\max}$ & $21c / (2 N_d \Delta x)$ \\
+Grid overhead & $(N + 2N_d)^2 / N^2 \approx 1.27$ for $N=256$, $N_d=16$ \\
+Residual reflection $R$ & $\approx 10^{-3}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+For scenarios where lower reflection is needed --- for example, measuring radiated power or verifying the $1/\sqrt{r}$ amplitude fall-off --- the layer thickness can be increased to $N_d = 32$ cells and $\sigma_{\max}$ adjusted accordingly, reducing $R$ to $\approx 10^{-6}$.
+
+\subsubsection*{Realized reflection in practice (added in v33)}
+
+The $R\approx10^{-3}$ figure above is the \emph{plane-wave normal-incidence} limit of the continuum derivation.  Two effects degrade the realized in-interior residual for a 2D circular wavefront launched from a centered Gaussian initial condition:
+
+\begin{itemize}
+  \item \textbf{Linearization error}.  The continuum derivation uses $f(x)=\exp(-\sigma(x)\,\dd t)$, while the implementation block above prescribes the linearized form $(1-d_{i,j})$.  For the default parameters ($N_d=16$, $\sigma_{\max}=21c/(2N_d\Delta x)$, $c_{\mathrm{CFL}}=1/\sqrt{2}$), $\sigma_{\max}\,\dd t \approx 0.46$, where the two forms differ by $\sim15\%$.  The linearization \emph{over-attenuates} per step, but distorts the discrete dispersion of the absorbing region and introduces a small impedance-mismatch reflection at the inner edge of the layer.
+  \item \textbf{Oblique-incidence corner trapping}.  The axis-aligned profile $d_{i,j}=\max(d_x,d_y)$ damps perpendicular incidence strongly but is weak for waves heading into the grid \emph{corners} at $\approx45^\circ$ from both walls.  Such waves arrive at the corner having spent comparable depth along both axes; the $\max$ operator does not accumulate their depths.  A perfectly matched layer (PML) addresses this by introducing complex coordinate stretching that absorbs in each direction independently.
+\end{itemize}
+
+Empirically (measured in Stage~2 of the implementation plan, §\ref{sec:impl}): with $N_d=16$ and a $\sigma=4\Delta x$ Gaussian pulse at the center of a $256\times256$ grid, after 800 timesteps the field at the cell just inside the wall is suppressed by $\sim 3000\times$ versus the no-damping case, while at the domain center it is suppressed by $\sim 20\times$ --- the difference being the corner-trapped energy slowly refocusing through the interior over multiple round-trips.  The damping layer is therefore fully adequate for qualitative pedagogical demonstrations where outgoing waves visibly exit the domain, but does \emph{not} achieve $10^{-3}$ residual at the source for a 2D circular wavefront without moving to PML.
+
+\subsection{Units and non-dimensionalization}
+\label{sec:units}
+
+The physical values of $G$ and $c$ make gravitational effects completely invisible at any computationally tractable scale.  For example, the Schwarzschild radius of a solar mass is $\sim 3\,\mathrm{km}$, which would require astronomical grid extents to simulate at physical scales.  The simulation therefore uses a rescaled set of units in which all quantities are of order unity.
+
+Choose three base scales: a length scale $\ell_0$ (the grid cell size in physical units, or equivalently the domain size), a time scale $t_0 = \ell_0/c_{\mathrm{eff}}$, and a mass scale $m_0$.  All simulation quantities are then expressed in terms of these:
+
+\begin{center}
+\begin{tabular}{@{}L{4cm}L{3cm}L{3cm}L{3cm}@{}}
+\toprule
+\textbf{Quantity} & \textbf{Physical} & \textbf{Simulation} & \textbf{Relation} \\
+\midrule
+Length & $x$ & $\tilde{x} = x/\ell_0$ & $\tilde{x} \in [0, N]$ \\
+Time & $t$ & $\tilde{t} = t/t_0$ & $\dd\tilde{t} = 1$ per step \\
+Speed of light & $c$ & $\tilde{c} = c_{\mathrm{eff}}$ & chosen so $\tilde{c}\,\dd\tilde{t} = c_{\mathrm{CFL}}\,\dd\tilde{x}$ \\
+Mass & $m$ & $\tilde{m} = m/m_0$ & typically $\tilde{m} \sim 1$ \\
+Charge & $q$ & $\tilde{q} = q/q_0$ & $q_0$ chosen freely \\
+Momentum & $p$ & $\tilde{p} = p/(m_0 c_{\mathrm{eff}})$ & \\
+Grav.\ potential & $\Phig$ & $\tilde{\Phi}_g = \Phig/c_{\mathrm{eff}}^2$ & dimensionless \\
+Grav.\ constant & $G$ & $\tilde{G} = G_{\mathrm{eff}}$ & chosen for visibility \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The key free parameter is $G_{\mathrm{eff}}$ — the effective gravitational constant in simulation units.  It should be chosen so that a typical particle-particle gravitational interaction produces a visible deflection over a few timesteps.  A useful guideline: for two particles of mass $\tilde{m}$ separated by distance $\tilde{r}$, the gravitational acceleration is $\tilde{G}\tilde{m}/\tilde{r}^2$ in simulation units.  Setting this to be a fraction of $\tilde{c}^2/\tilde{r}$ (the speed squared over the separation, a natural relativistic scale) gives:
+
+\begin{equation}
+  G_{\mathrm{eff}} \sim \frac{c_{\mathrm{eff}}^2\,\tilde{r}}{\tilde{m}} \cdot \epsilon,
+\end{equation}
+
+where $\epsilon \ll 1$ keeps the system in the weak-field linearized regime.  Typical values in practice are $G_{\mathrm{eff}} \sim 10^{-3}$ to $10^{-1}$ depending on the desired strength of gravitational effects.
+
+The charge-to-mass ratio $q/m$ for test particles can be set independently of any physical value, allowing electromagnetic and gravitational effects to be tuned relative to each other.  Setting $q/m \gg \sqrt{G_{\mathrm{eff}}}$ makes EM effects dominate; setting $q/m \ll \sqrt{G_{\mathrm{eff}}}$ makes gravitational effects dominate.  The coupling of EM field energy to the GEM equations through $\rho_{\mathrm{EM}} = u_{\mathrm{EM}}/c^2$ is automatically consistent with whatever $G_{\mathrm{eff}}$ and $c_{\mathrm{eff}}$ are chosen, since it follows directly from the field equations.
+
+\subsection{Field initialization}
+\label{sec:init}
+
+At $t=0$ the perturbation fields must be initialized to the static solution corresponding to the initial particle configuration.  Starting with zero fields and nonzero particle sources creates a spurious transient wavefront that propagates outward at $c$ --- a pulse with no physical meaning that takes several domain crossing times to damp out in the absorbing boundary layer.
+
+\subsubsection*{Convergence iteration}
+
+The cleanest initialization approach is to iterate the FDTD field update with all \textbf{positions} held fixed at their initial values and all \textbf{velocities} held fixed at their initial values, until the fields converge.  The particles are not moved during this phase --- only the field arrays are updated each step.  With fixed positions and velocities:
+\begin{itemize}
+  \item Charge/mass density sources $\rho_{\mathrm{matter}}$, $\rho_q$ are time-independent (positions fixed).
+  \item Current sources $\vv{J}_{\mathrm{matter}} = \gamma m\vv{v}$ and $\vv{J}_q = q\vv{v}$ are also time-independent (velocities fixed).
+  \item All six source terms are constant, so the wave equations iterate toward their static solutions --- the Poisson equation solutions for $\Phig$ and $\phi$, and the vector potential solutions for $\Ag$ and $\vv{A}$ sourced by the constant currents.
+\end{itemize}
+This is important: velocities must \emph{not} be set to zero during initialization unless the particles are actually stationary.  The vector potentials $\Ag$ and $\vv{A}$ are sourced by $\vv{J}_{\mathrm{matter}}$ and $\vv{J}_q$ respectively, which depend on velocity.  A particle with nonzero initial velocity generates gravitomagnetic and magnetic fields that must be present in the initial field configuration.  Setting velocities to zero during initialization would converge to the wrong field --- one with no vector potentials --- which is only correct for truly stationary particles.
+
+For the special case of all particles stationary ($\vv{v}_i = 0$), the currents vanish and $\Ag \to 0$, $\vv{A} \to 0$ as a consequence rather than as an assumption.
+
+The transient oscillations during convergence are absorbed by the damping layer.  The convergence timescale is a few domain-crossing times $\sim N\sqrt{2}$ timesteps (at $c_{\mathrm{CFL}} = 1/\sqrt{2}$), roughly 1000--3000 steps for $N=256$.  This can be done invisibly before the simulation begins displaying to the user.
+
+\subsubsection*{Leapfrog initialization}
+
+The leapfrog requires field values at two consecutive time levels $\Phi^{-1}$ and $\Phi^0$ to start.  With zero initial time derivative ($\partial_t\Phi = 0$ for a static initial configuration), the correct initialization is:
+\begin{equation}
+  \Phi^{-1} = \Phi^0 = 0,
+\end{equation}
+which makes the free-propagation extrapolation $2\Phi^0 - \Phi^{-1} = 0$ correct.  As the convergence iteration proceeds both levels are updated normally.
+
+For the particle momenta, what is needed is $\vv{p}_i^{-1/2}$ --- the momentum at a half timestep before $t=0$.  The standard approach is a single half-step using the force from the converged initial fields:
+\begin{equation}
+  \vv{p}_i^{-1/2} = \vv{p}_i^0 - \vv{F}_i^0\,\frac{\dd t}{2},
+\end{equation}
+where $\vv{F}_i^0$ is the total force on particle $i$ from the converged initial fields at $t=0$, and $\vv{p}_i^0$ is the specified initial momentum.  For a stationary initial configuration $\vv{p}_i^0 = 0$ and the half-step momentum is $-\vv{F}_i^0\,\dd t/2$ --- a small quantity representing the velocity the particle would have acquired over a half timestep from the static initial field.  This initialization is first-order accurate; the error affects only the very first full leapfrog step, after which the scheme is self-consistent and second-order accurate.
+
+The particle position $\vv{x}_i^0$ lives at integer time and is specified directly by the initial conditions --- no back-extrapolation of position is needed.
+
+\subsubsection*{Interactive particle placement}
+
+When a particle is added mid-simulation the sudden deposition of its charge and mass creates a field disturbance that propagates outward at $c$.  This is physically correct: in classical field theory a source that suddenly appears radiates a spherical pulse, with the new static field inside the pulse and the pre-existing field outside it.  For the pedagogical sandbox this is a feature --- a student who places a mass and watches a gravitational wavefront propagate outward is seeing real physics.
+
+If a smooth turn-on is preferred, ramp the particle's effective mass and charge from zero to their final values over $\sim N\sqrt{2}$ timesteps, suppressing the pulse at the cost of physical honesty.
+
+The convergence iteration used for startup cannot be applied to mid-simulation particle addition without erasing all existing propagating waves in the domain --- it would reset the entire field to the new static configuration.  It is only appropriate before any dynamics have begun.
+
+Particle removal is symmetric: a particle that disappears leaves a void in its Coulomb/Newton field that also propagates outward as a pulse.  If a particle exits through the domain boundary the most physically honest treatment is to remove it and accept the outgoing pulse, which will be absorbed by the damping layer.  The fundamental ambiguity in both creation and removal is that a particle appearing or disappearing has no prior history to specify what the surrounding field configuration should have been, making any treatment somewhat arbitrary; the pulse-based approach at least has a clear physical interpretation.
+
+\subsection{Field-particle energy accounting}
+\label{sec:energy}
+
+The linearized GEM theory is not strictly energy-conserving in the full GR sense: the gravitational field carries energy in the nonlinear theory through the Landau-Lifshitz pseudotensor, which does not appear in the linearized equations.  What the linearized theory does conserve, in the same structural sense that EM conserves energy, is the combined energy of the matter, GEM field, and EM field, with fluxes through the boundary accounting for radiation losses.
+
+This section describes the conserved quantities and their use as \emph{consistency diagnostics} rather than strict conservation laws.  They verify that the numerical scheme is correctly implementing the linearized equations, not that the linearized equations are a complete description of reality.
+
+\subsubsection*{Energy}
+
+The total energy in the simulation domain is:
+\begin{equation}
+  E_{\mathrm{total}} = E_{\mathrm{particles}} + E_{\mathrm{GEM}} + E_{\mathrm{EM}},
+\end{equation}
+where:
+\begin{align}
+  E_{\mathrm{particles}} &= \sum_i \gamma_i m_i c^2, \\
+  E_{\mathrm{GEM}}       &= \frac{1}{8\pi G}\int\!\!\left(|\vv{g}|^2 + c^2|\vv{B}_g|^2\right)\dd^3x, \\
+  E_{\mathrm{EM}}        &= \frac{\varepsilon_0}{2}\int\!\!\left(|\vv{E}|^2 + c^2|\vv{B}|^2\right)\dd^3x.
+\end{align}
+In 2D the volume integrals become area integrals ($\dd^3x \to \dd^2x$), $\vv{B}_g \to B_{g,z}\hat{z}$ and $\vv{B} \to B_z\hat{z}$.
+
+The rate of change of $E_{\mathrm{total}}$ should equal the energy flux leaving through the damping layer boundary:
+\begin{equation}
+  \frac{\dd E_{\mathrm{total}}}{\dd t} = -\oint_{\partial\Omega}(\vv{S}_{\mathrm{GEM}} + \vv{S}_{\mathrm{EM}})\cdot\hat{n}\,\dd A,
+\end{equation}
+where $\vv{S}_{\mathrm{GEM}} = (\vv{g}\times\vv{B}_g)/(4\pi G)$ and $\vv{S}_{\mathrm{EM}} = (\vv{E}\times\vv{B})/\mu_0$ are the GEM and EM Poynting vectors (in 2D, $\dd A \to \dd\ell$).  In the presence of an absorbing boundary layer the boundary flux is not easily computed directly, so in practice one monitors $E_{\mathrm{total}}$ and checks that it changes smoothly and monotonically (decreasing as radiation exits through the boundary), with no sudden jumps that would indicate a numerical instability.
+
+\subsubsection*{Momentum}
+
+The total canonical momentum is:
+\begin{equation}
+  \vv{P}_{\mathrm{total}} = \sum_i\vv{p}_i + \frac{1}{c^2}\int\!\!\left(\vv{S}_{\mathrm{GEM}} + \vv{S}_{\mathrm{EM}}\right)\dd^3x.
+\end{equation}
+In the absence of external forces and with symmetric boundary conditions, this should be conserved.  In practice the damping layer introduces a small asymmetry if waves exit preferentially in one direction, but for a symmetric simulation $\vv{P}_{\mathrm{total}}$ should remain near zero.  A systematic drift in one direction indicates a bug in the force calculation or source deposition.
+
+\subsubsection*{Angular momentum}
+
+The total angular momentum is:
+\begin{equation}
+  \vv{L}_{\mathrm{total}} = \sum_i\!\left(\vv{r}_i\times\vv{p}_i + \vv{S}_i\right) + \frac{1}{c^2}\int\vv{r}\times(\vv{S}_{\mathrm{GEM}}+\vv{S}_{\mathrm{EM}})\,\dd^3x,
+\end{equation}
+where $\vv{S}_i$ is the spin angular momentum of particle $i$.  In 2D only the $z$-component survives, with $\vv{S}_i \to s_i\hat{z}$.  For isolated systems this should be conserved; systematic drift indicates an error in the spin precession or the spin-field coupling.
+
+\subsubsection*{EM effective sources and the background field}
+
+When a charged background (Kerr-Newman-like) is present, its EM field has energy density $u_{\mathrm{EM}}^{\mathrm{bg}}$ that gravitates.  In the exact Kerr-Newman solution this is already incorporated into the background metric --- the gravitational potentials $\Phig^{\mathrm{bg}}$, $\Ag^{\mathrm{bg}}$ reflect the mass $M$ plus the EM field energy, not $M$ alone.  Feeding the background EM energy density into the perturbation GEM solver as $\rho_{\mathrm{EM}}$ would therefore double-count its gravitational effect.
+
+The correct rule is to use only the perturbation potentials in the effective GEM sources (Eqs.~\ref{eq:rho_em_pot}--\ref{eq:J_em_pot}):
+\begin{align}
+  \rho_{\mathrm{EM}} &= \frac{\varepsilon_0}{2c^2}\!\left(|\nabla\phi^{\mathrm{pert}} + \partial_t\vv{A}^{\mathrm{pert}}|^2
+    + c^2|\nabla\times\vv{A}^{\mathrm{pert}}|^2\right).
+\end{align}
+Cross terms involving background potentials are second-order small for weakly charged backgrounds and are neglected.  For the pedagogical scenarios the sandbox is designed for --- a Kerr-Newman background precessing gyroscopes, curving charged particle paths, and producing Larmor precession alongside gravitomagnetic precession --- this approximation is entirely adequate.
+
+\subsubsection*{Practical monitoring}
+
+Computing the full field integrals at every timestep is an $O(N^3)$ operation in 3D ($O(N^2)$ in 2D).  A practical compromise is to compute them every $M$ steps (say $M=100$) and store the time series.  The field integrals can be accumulated in the same WASM loop as the field update with minimal overhead since field values are already in cache.
+
+The most useful single diagnostic is the total canonical momentum $\vv{P}_{\mathrm{total}}$: it should be small and non-drifting for any symmetric simulation.  A non-zero systematic drift indicates either a force asymmetry (bug) or genuine momentum carried away by asymmetric radiation (physics).
+
+\subsubsection*{Benchmark validation}
+
+The most reliable check that the simulation is physically correct is comparison against known analytic results:
+\begin{itemize}
+  \item A circular orbit should have period $T = 2\pi r/v$ with $v$ determined by the force law.
+  \item A gyroscope in the Kerr-like background should precess at rate $\dd\phi/\dd t = -2GJ/(c^2r^2)$.
+  \item The Shapiro delay for a test signal past the background mass should match $\Delta t = -2\int\Phig\,\dd\ell/c^3$.
+  \item The proper time accumulated along a circular orbit should match the analytic expression involving both kinematic and gravitational time dilation.
+\end{itemize}
+These provide rigorous point checks against exact results and are more diagnostic than energy monitoring for catching subtle physics errors.
+
+\subsection{Artificial constants}
+
+The physical value of $G/c^4$ makes gravitational effects invisible at any reasonable simulation scale.  An effective $G_{\mathrm{eff}}$ is chosen to make effects visible, as described in Section~\ref{sec:units}.  The CFL constraint $c_{\mathrm{eff}}\,\dd t < \dd x/\sqrt{2}$ in 2D determines the maximum simulation speed given the chosen $c_{\mathrm{eff}}$ and $\dd x$.
+
+%====================================================================
+\section{Two-Dimensional Reduction and Pedagogical Goals}
+%====================================================================
+
+\subsection{Motivation}
+
+The primary goal of the sandbox is to serve as a teaching tool for general relativity.  A 2D simulation ($2+1$ dimensions) scales as $N^2$ rather than the $N^3$ of 3D, runs at interactive frame rates in JavaScript or WebAssembly, and retains essentially all physically interesting GR effects.  The 3D extension is a natural future direction once the 2D browser version is established.
+
+\subsection{Reduction of fields and spin}
+
+In $2+1$ dimensions:
+\begin{itemize}
+  \item $\vv{g}$ and $\vv{E}$ become 2-vectors ($x$ and $y$ components only).
+  \item $\vv{B}_g$ and $\vv{B}$ reduce to scalars $B_{g,z}$ and $B_z$ (the only non-vanishing curl components).
+  \item Cross products reduce to scalar multiplications: $(v\times B_g)_x = v_y B_{g,z}$, $(v\times B_g)_y = -v_x B_{g,z}$.
+  \item The spin 3-vector $\vv{S}$ reduces to a scalar angle $\phi_{\mathrm{spin}}$ with precession:
+  \begin{equation}
+    \frac{\dd\phi_{\mathrm{spin}}}{\dd t} = B_{g,z} + \frac{g_s q}{2m}B_z + \Omega_{\mathrm{Thomas},z}.
+  \end{equation}
+  The Tulczyjew--Dixon constraint is automatically satisfied in 2D---no correction step is needed.
+\end{itemize}
+
+\subsection{The 2D Green's function}
+
+In strict 2D the static Green's function is logarithmic:
+\begin{equation}
+  \text{3D:}\; \Phi\sim 1/r \;\Rightarrow\; |\vv{g}|\sim 1/r^2; \qquad
+  \text{2D:}\; \Phi\sim \ln r \;\Rightarrow\; |\vv{g}|\sim 1/r.
+\end{equation}
+This produces flat rotation curves.  If 3D-like $1/r^2$ gravity is preferred, prescribe $\Phig^{\mathrm{bg}} = -GM/r$ analytically for the background---the FDTD perturbation solver is unchanged.
+
+\subsection{Gravitational waves in 2D}
+
+In pure $2+1$ GR the vacuum Einstein equations have no propagating tensor degrees of freedom---the Riemann tensor is fully determined by the Ricci tensor, which vanishes in vacuum.  However, this does not mean masses affect each other instantaneously.  The scalar and vector potential wave equations in the GEM approximation do propagate at $c$, carrying causal influence between masses.  A mass that accelerates sends a wavefront outward at $c$; particles beyond the wavefront are not affected until it reaches them.  The difference from 3D is the \emph{polarization structure}: in 2D only the scalar (compression/dilation) wave mode propagates; the tensor $+$ and $\times$ polarizations require two independent transverse directions and do not exist.
+
+\subsection{Effects demonstrable in the 2D sandbox}
+
+\begin{center}
+\begin{tabular}{@{}L{4.5cm}L{2cm}L{6.5cm}@{}}
+\toprule
+\textbf{Effect} & \textbf{In 2D?} & \textbf{Notes} \\
+\midrule
+Newtonian gravity          & Yes & Logarithmic; background can use $1/r$ \\
+Gravitational wave propagation & Yes & Scalar mode only \\
+Frame dragging             & Yes & $B_{g,z}$ from spinning/moving masses \\
+Perihelion precession      & Yes & $\order{v^2/c^2}$ corrections \\
+Shapiro delay              & Yes & Via $c_{\mathrm{local}}$ \\
+Gravitational lensing      & Yes & Via $c_{\mathrm{local}}$ \\
+Spin precession            & Yes & Scalar $\phi_{\mathrm{spin}}$; directly visible \\
+Proper time dilation       & Yes & Per-particle clock \\
+Dipole radiation           & Yes & Time-varying spin source \\
+EM--gravity coupling       & Yes & Via $\rho_{\mathrm{EM}}$, $\vv{J}_{\mathrm{EM}}$ \\
+Tensor GW polarizations    & No  & Require $h^{ij}$, absent in 2D GEM \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Implementation in JavaScript and WebAssembly}
+
+For a $256\times 256$ grid with 6 scalar field equations and $\sim$10 operations per cell per step:
+\begin{equation}
+  N_{\mathrm{ops}} \approx 6 \times 10 \times 256^2 \approx 4\times 10^6 \text{ per timestep.}
+\end{equation}
+Achievable at 60\,fps in pure JavaScript.  Recommended architecture:
+\begin{itemize}
+  \item \textbf{WASM module:} inner FDTD loop and particle integration (performance-critical); WASM SIMD processes 4 \texttt{float32} cells per instruction.
+  \item \textbf{JavaScript:} user interaction and outer simulation loop.
+  \item \textbf{WebGL / WebGPU:} field visualization; WebGPU compute shaders extend practical grid size to $2048\times 2048$.
+\end{itemize}
+
+\subsection{Complete 2D algorithm: all effects}
+\label{sec:alg_2d}
+
+This is the definitive per-timestep algorithm for the 2D sandbox incorporating the background spacetime split, all spin effects, Tier~3 relativistic force corrections, proper time integration, and the correct deposition kernels.
+
+\subsubsection*{Initialization (once before simulation begins)}
+
+\begin{algsteps}
+  \item \textbf{Set background object parameters:} mass $M$, charge $Q$, angular momentum $J$, position.
+
+  \item \textbf{Define analytic background field functions:}
+  \begin{align}
+    \Phig^{\mathrm{bg}}(x,y) &= -GM/r \quad\text{(or }-GM\ln r\text{ for strict 2D)}, \\
+    A_{g,x}^{\mathrm{bg}},\; A_{g,y}^{\mathrm{bg}} &\quad\text{from angular momentum }J, \\
+    \phi^{\mathrm{bg}}(x,y)  &= Q/(2\pi\varepsilon_0\ln r) \quad\text{(2D Coulomb)}, \\
+    \vv{g}^{\mathrm{bg}}     &= -\nabla\Phig^{\mathrm{bg}}, \quad
+    B_{g,z}^{\mathrm{bg}}  = \partial_x A_{g,y}^{\mathrm{bg}} - \partial_y A_{g,x}^{\mathrm{bg}}, \\
+    \vv{E}^{\mathrm{bg}}     &= -\nabla\phi^{\mathrm{bg}}, \quad
+    B_z^{\mathrm{bg}} = 0 \quad\text{(static background)}, \\
+    \nabla B_{g,z}^{\mathrm{bg}},\; \nabla B_z^{\mathrm{bg}} &\quad\text{(analytic gradients for spin forces).}
+  \end{align}
+
+  \item \textbf{Initialize perturbation field arrays} $\Phig^{\mathrm{pert}}$, $A_{g,x}^{\mathrm{pert}}$, $A_{g,y}^{\mathrm{pert}}$, $\phi^{\mathrm{pert}}$, $A_x^{\mathrm{pert}}$, $A_y^{\mathrm{pert}}$ and their previous-timestep copies to zero (or to specified initial conditions).
+
+  \item \textbf{Initialize particles:} for each particle $i$ set $\vv{x}_i$, $\vv{p}_i$, $m_i$, $q_i$, $g_{s,i}$, $\phi_{\mathrm{spin},i}$, $\tau_i = 0$.
+\end{algsteps}
+
+\subsubsection*{Per-timestep iteration}
+
+\begin{algsteps}
+  \item \textbf{Deposit matter and charge sources from non-background particles} using the CIC kernel $W_2$:
+  \begin{align}
+    \rho_{\mathrm{matter}}(\vv{x}) &= \sum_i \gamma_i m_i\,W_2(\vv{x}-\vv{x}_i), \\
+    \vv{J}_{\mathrm{matter}}(\vv{x}) &= \sum_i \gamma_i m_i\vv{v}_i\,W_2(\vv{x}-\vv{x}_i), \\
+    \rho_q(\vv{x}) &= \sum_i q_i\,W_2(\vv{x}-\vv{x}_i), \\
+    \vv{J}_q(\vv{x}) &= \sum_i q_i\vv{v}_i\,W_2(\vv{x}-\vv{x}_i).
+  \end{align}
+
+  \item \textbf{Deposit spin dipole sources} using the quadratic B-spline kernel $W_3$:
+  \begin{align}
+    \mu_i    &= \frac{g_{s,i} q_i}{2m_i} s_i, \qquad \sigma_i = 2 s_i, \\
+    \vv{J}_q(\vv{x}) &\mathrel{+}= \nabla_{2D}\times\!\left[\sum_i \mu_i\,W_3(\vv{x}-\vv{x}_i)\right], \\
+    \vv{J}_{\mathrm{matter}}(\vv{x}) &\mathrel{+}= \nabla_{2D}\times\!\left[\sum_i \sigma_i\,W_3(\vv{x}-\vv{x}_i)\right],
+  \end{align}
+  where $\nabla_{2D}\times f = (\partial_y f,\,-\partial_x f)$ is the 2D curl of a scalar field, and $s_i$ is the scalar spin.
+
+  \item \textbf{Compute EM effective GEM sources} from perturbation potentials (2D specialization of Eqs.~\ref{eq:rho_em_pot}--\ref{eq:J_em_pot}, with $\nabla\times\vv{A}^{\mathrm{pert}} \to F_{12}^{\mathrm{pert}}\hat{z}$ where $F_{12}^{\mathrm{pert}} = \partial_x A_y^{\mathrm{pert}} - \partial_y A_x^{\mathrm{pert}}$):
+  \begin{align}
+    \rho_{\mathrm{EM}} &= \frac{\varepsilon_0}{2c^2}\!\left(|\nabla\phi^{\mathrm{pert}} + \partial_t\vv{A}^{\mathrm{pert}}|^2
+      + c^2 (F_{12}^{\mathrm{pert}})^2\right), \\
+    \vv{J}_{\mathrm{EM}} &= -\frac{F_{12}^{\mathrm{pert}}}{\mu_0 c^2}
+      \begin{pmatrix} \partial_y\phi^{\mathrm{pert}} + \partial_t A_y^{\mathrm{pert}} \\ -(\partial_x\phi^{\mathrm{pert}} + \partial_t A_x^{\mathrm{pert}}) \end{pmatrix}.
+  \end{align}
+  (Background potentials are excluded to avoid double-counting; Section~\ref{sec:energy}.)
+
+  \item \textbf{Sum effective GEM sources:}
+  \begin{equation}
+    \rho_{\mathrm{eff}} = \rho_{\mathrm{matter}} + \rho_{\mathrm{EM}}, \qquad
+    \vv{J}_{\mathrm{eff}} = \vv{J}_{\mathrm{matter}} + \vv{J}_{\mathrm{EM}}.
+  \end{equation}
+
+  \item \textbf{Step perturbation GEM wave equations} (leapfrog; 3 scalar equations):
+  \begin{align}
+    (\Phig^{\mathrm{pert}})^{n+1} &= 2(\Phig^{\mathrm{pert}})^n - (\Phig^{\mathrm{pert}})^{n-1}
+       + (c\,\dd t)^2\!\left[\nabla_{2D}^2(\Phig^{\mathrm{pert}})^n - 4\pi G\rho_{\mathrm{eff}}^n\right], \\
+    (A_{g,\alpha}^{\mathrm{pert}})^{n+1} &= 2(A_{g,\alpha}^{\mathrm{pert}})^n - (A_{g,\alpha}^{\mathrm{pert}})^{n-1}
+       + (c\,\dd t)^2\!\left[\nabla_{2D}^2(A_{g,\alpha}^{\mathrm{pert}})^n
+       - \frac{4\pi G}{c^2}(J_{\mathrm{eff},\alpha})^n\right], \;\alpha\in\{x,y\}.
+  \end{align}
+
+  \item \textbf{Evaluate total gravitational potential} at each grid point for $c_{\mathrm{local}}$:
+  \begin{equation}
+    \Phig^{\mathrm{total}}(\vv{x}) = \Phig^{\mathrm{bg}}(\vv{x}) + (\Phig^{\mathrm{pert}})^{n+1}(\vv{x}),
+  \end{equation}
+  \begin{equation}
+    c_{\mathrm{local}}(\vv{x}) = c\!\left(1 + \frac{2\Phig^{\mathrm{total}}(\vv{x})}{c^2}\right).
+  \end{equation}
+
+  \item \textbf{Step perturbation EM wave equations} (3 scalar equations) using $c_{\mathrm{local}}$:
+  \begin{align}
+    (\phi^{\mathrm{pert}})^{n+1} &= 2(\phi^{\mathrm{pert}})^n - (\phi^{\mathrm{pert}})^{n-1}
+       + (c_{\mathrm{local}}\,\dd t)^2\!\left[\nabla_{2D}^2(\phi^{\mathrm{pert}})^n + (\rho_q^n)/\varepsilon_0\right], \\
+    (A_\alpha^{\mathrm{pert}})^{n+1} &= 2(A_\alpha^{\mathrm{pert}})^n - (A_\alpha^{\mathrm{pert}})^{n-1}
+       + (c_{\mathrm{local}}\,\dd t)^2\!\left[\nabla_{2D}^2(A_\alpha^{\mathrm{pert}})^n
+       - \mu_0 (J_{q,\alpha})^n\right], \;\alpha\in\{x,y\}.
+  \end{align}
+
+  \item \textbf{Evaluate potentials and on-the-fly curls at each particle position,} combining analytic background and grid perturbation:
+  \begin{align}
+    (\Phig)_{i}^{\mathrm{total}}    &= \Phig^{\mathrm{bg}}(\vv{x}_i) + (\Phig^{\mathrm{pert}})^n_{W_2}(\vv{x}_i), \\
+    (A_{g,\alpha})_i            &= A_{g,\alpha}^{\mathrm{bg}}(\vv{x}_i) + (A_{g,\alpha}^{\mathrm{pert}})^n_{W_2}(\vv{x}_i), \quad\alpha\in\{x,y\}, \\
+    (\partial_t A_{g,\alpha})_i &= \frac{(A_{g,\alpha}^{\mathrm{pert}})^{n+1} - (A_{g,\alpha}^{\mathrm{pert}})^{n-1}}{2\dd t}\bigg|_{W_2}(\vv{x}_i), \\
+    B_{g,z,i}                   &= B_{g,z}^{\mathrm{bg}}(\vv{x}_i) + (B_{g,z}^{\mathrm{pert}})_{\mathrm{curl},W_2}(\vv{x}_i),
+  \end{align}
+  and identically for the EM potentials $\phi_i$, $(A_\alpha)_i$, $(\partial_t A_\alpha)_i$, $B_{z,i}$.  The on-the-fly curl values $B_{g,z,i}$ and $B_{z,i}$ are computed from the four cell centers surrounding the particle via Eq.~(\ref{eq:yee_curl}) and bilinearly interpolated.  The background curl $B_{g,z}^{\mathrm{bg}}$ is evaluated analytically.  Also evaluate the background-referenced gradient vectors:
+  \begin{align}
+    \vv{g}_i^{\mathrm{bg}}    &= -\nabla\Phig^{\mathrm{bg}}(\vv{x}_i), \\
+    \nabla B_{g,z,i}          &= \nabla B_{g,z}^{\mathrm{bg}}(\vv{x}_i) + (\nabla B_{g,z}^{\mathrm{pert}})_{W_3}(\vv{x}_i), \\
+    \nabla B_{z,i}            &= \nabla B_z^{\mathrm{bg}}(\vv{x}_i) + (\nabla B_z^{\mathrm{pert}})_{W_3}(\vv{x}_i).
+  \end{align}
+
+  \item \textbf{Compute total force on each particle} (2D, Tier~3, potential form):
+  \begin{eqbox}
+  \begin{align*}
+    g_{x,i} &= -\partial_x(\Phig)_{i} - (\partial_t A_{g,x})_i, \quad g_{y,i} = -\partial_y(\Phig)_{i} - (\partial_t A_{g,y})_i, \\[4pt]
+    F_{x,i} &= m_i\!\left[g_{x,i}
+                         + 4v_{y,i}B_{g,z,i}
+                         + \frac{v_i^2}{c^2}g_{x,i}
+                         + \frac{4(\vv{v}_i\cdot\vv{g}_i)v_{x,i}}{c^2}\right. \\
+            &\qquad\quad \left.+ 4\partial_x(\vv{v}_i\cdot(\Ag)_{i}) - 4(\vv{v}_i\cdot\nabla)A_{g,x,i}\right] \\
+            &\quad + q_i\!\left[E_{x,i} + v_{y,i}B_{z,i}
+                         + \partial_x(\vv{v}_i\cdot\vv{A}_i) - (\vv{v}_i\cdot\nabla)A_{x,i}\right] \\
+            &\quad + s_i\,\partial_x B_{g,z,i} + \mu_i\,\partial_x B_{z,i}, \\[6pt]
+    F_{y,i} &= m_i\!\left[g_{y,i}
+                         - 4v_{x,i}B_{g,z,i}
+                         + \frac{v_i^2}{c^2}g_{y,i}
+                         + \frac{4(\vv{v}_i\cdot\vv{g}_i)v_{y,i}}{c^2}\right. \\
+            &\qquad\quad \left.+ 4\partial_y(\vv{v}_i\cdot(\Ag)_{i}) - 4(\vv{v}_i\cdot\nabla)A_{g,y,i}\right] \\
+            &\quad + q_i\!\left[E_{y,i} - v_{x,i}B_{z,i}
+                         + \partial_y(\vv{v}_i\cdot\vv{A}_i) - (\vv{v}_i\cdot\nabla)A_{y,i}\right] \\
+            &\quad + s_i\,\partial_y B_{g,z,i} + \mu_i\,\partial_y B_{z,i},
+  \end{align*}
+  \end{eqbox}
+  where $E_{x,i} = -\partial_x\phi_i - (\partial_t A_x)_i$ and $E_{y,i} = -\partial_y\phi_i - (\partial_t A_y)_i$ are computed on-the-fly, and $\vv{v}_i\cdot\vv{g}_i = v_{x,i}g_{x,i} + v_{y,i}g_{y,i}$.  Evaluate $v_i^2/c^2$ and $\vv{v}_i\cdot\vv{g}_i$ using $\vv{v}_i^{n-1/2}$. The vector potential terms $\partial_\alpha(\vv{v}\cdot\Ag)$ and $(\vv{v}\cdot\nabla)A_{g,\alpha}$ encode the gravitomagnetic cross-product force and are computed from spatial differences of edge potentials at the particle's CIC stencil.
+
+  \item \textbf{Update momentum and position} (Boris pusher, 2D):
+  \begin{align}
+    \vv{v}_i^{\mathrm{old}} &= \vv{v}_i^{n-1/2}, \\
+    \vv{p}_i^{n+1/2} &\leftarrow \text{Boris}(\vv{p}_i^{n-1/2},\; F_{x,i},\; F_{y,i},\; B_{g,z,i},\; B_{z,i},\; \dd t), \\
+    \vv{v}_i^{n+1/2} &= \vv{p}_i^{n+1/2} / \sqrt{m_i^2 + |\vv{p}_i^{n+1/2}|^2/c^2}, \\
+    \vv{x}_i^{n+1}   &\leftarrow \vv{x}_i^n + \vv{v}_i^{n+1/2}\,\dd t.
+  \end{align}
+
+  \item \textbf{Update spin} (scalar in 2D):
+  \begin{align}
+    \vv{a}_i &= (\vv{v}_i^{n+1/2} - \vv{v}_i^{\mathrm{old}})/\dd t, \\
+    \Omega_{\mathrm{Thomas},z,i} &= -\frac{\gamma_i^2}{\gamma_i+1}\,\frac{v_{x,i}a_{y,i} - v_{y,i}a_{x,i}}{c^2}, \\
+    \Omega_{z,i} &= B_{g,z,i} + \frac{g_{s,i}q_i}{2m_i}B_{z,i} + \Omega_{\mathrm{Thomas},z,i}, \\
+    \phi_{\mathrm{spin},i} &\leftarrow \phi_{\mathrm{spin},i} + \Omega_{z,i}\,\dd t.
+  \end{align}
+  (No constraint correction step is needed in 2D.)
+
+  \item \textbf{Update proper time:}
+  \begin{equation}
+    \beta_i^2 = \tfrac{1}{2}\!\left(|\vv{v}_i^{\mathrm{old}}|^2 + |\vv{v}_i^{n+1/2}|^2\right)/c^2, \qquad
+    \dd\tau_i = \dd t\,\sqrt{1 + \frac{2(\Phig^{\mathrm{total}})_i}{c^2}
+                             - \left(1-\frac{2(\Phig^{\mathrm{total}})_i}{c^2}\right)\beta_i^2},
+  \end{equation}
+  \begin{equation}
+    \tau_i \leftarrow \tau_i + \dd\tau_i.
+  \end{equation}
+  $(\Phig^{\mathrm{total}})_i = \Phig^{\mathrm{bg}}(\vv{x}_i^{n+1}) + (\Phig^{\mathrm{pert}})^{n+1}(\vv{x}_i^{n+1})$, evaluated analytically and by grid interpolation respectively.
+\end{algsteps}
+
+\subsection{Pedagogical design notes}
+
+\begin{itemize}
+  \item \textbf{Separate field visualizations:} display $\Phig$, $B_{g,z}$, $\vv{E}$, $B_z$ independently.
+  \item \textbf{Slow-motion and pause:} continuously adjustable speed; single-frame stepping.
+  \item \textbf{Particle display:} velocity vector, spin angle indicator, GEM force vector, EM force vector, proper time readout.
+  \item \textbf{Preloaded scenarios:} binary orbit, spinning mass with test gyroscopes, gravitational lens, EM wave scattering.
+  \item \textbf{Adjustable constants:} sliders for $G_{\mathrm{eff}}$, $c_{\mathrm{eff}}$, $q/m$ allow students to explore the Newtonian limit ($c\to\infty$), strong-field limit, and EM-dominated regime.
+\end{itemize}
+
+%====================================================================
+\section{Visualization}
+%====================================================================
+
+The visualization layer translates the numerical state of the simulation into something a student can see and understand intuitively.  It is as important as the physics for a pedagogical tool: a correct simulation that displays nothing meaningful teaches nothing.  This section describes the recommended particle and field visualizations, organized by what physical quantity they represent.  All visualizations should be independently toggleable so a student can isolate the effect they are studying.
+
+\subsection{Particle visualizations}
+
+Each particle is displayed as a small icon at its current position.  The icon serves as an anchor for several overlaid indicators, each encoding a different aspect of the particle's state.
+
+\subsubsection*{Trajectory tracks}
+
+A fading trail of the particle's past positions is drawn, length corresponding to a user-adjustable number of recent timesteps.  For orbital motion this produces a visible arc or closed ellipse.  The trail should fade in opacity with age so the most recent position is brightest and the oldest is nearly invisible, giving an immediate sense of the particle's direction of travel and speed.
+
+At regularly spaced intervals along the track, small tick marks are drawn with an associated time readout.  Two modes are useful:
+\begin{itemize}
+  \item \textbf{Coordinate time ticks}: equally spaced in simulation time $t$, showing when the particle was at each point in coordinate time.  Tick spacing is uniform along the track for a particle at constant speed.
+  \item \textbf{Proper time ticks}: equally spaced in proper time $\tau_i$.  For a fast-moving or deep-potential particle, proper time ticks are closer together (more time elapses per tick in coordinate time) than coordinate time ticks, making relativistic time dilation directly visible as a non-uniform spacing along the track.
+\end{itemize}
+Displaying both simultaneously with different symbols (e.g.\ circles for coordinate time, triangles for proper time) makes the twin paradox and gravitational time dilation immediately readable from the track geometry.
+
+\subsubsection*{Velocity arrow}
+
+A short arrow from the particle center in the direction of $\vv{v}_i$, with length proportional to $|\vv{v}_i|/c_{\mathrm{eff}}$ (so the arrow reaches a standard reference length at $v = c_{\mathrm{eff}}$).  Color can encode $\gamma_i$ --- blue for nonrelativistic, red for relativistic.
+
+\subsubsection*{Spin phase indicator}
+
+A small icon resembling a spinning top or gyroscope overlaid on the particle, with an arrow pointing in the direction $(\cos\phi_{\mathrm{spin}}, \sin\phi_{\mathrm{spin}})$ encoding the current spin phase $\phi_{\mathrm{spin}}$.  As the particle moves through a gravitomagnetic or magnetic field the arrow rotates, directly visualizing Lense--Thirring precession, geodetic precession, Larmor precession, and Thomas precession as a continuous rotation of the indicator.
+
+The rotation rate of the arrow is $\Omega_{z,i} = B_{g,z,i} + (g_s q_i/2m_i)B_{z,i} + \Omega_{\mathrm{Thomas},z,i}$, so regions of strong gravitomagnetic or magnetic field produce visible rapid precession and field-free regions produce no rotation.  This is one of the most pedagogically direct visualizations in the sandbox --- frame dragging becomes literally visible as a spinning arrow.
+
+\subsubsection*{Magnetic dipole indicator}
+
+A separate icon resembling a small bar magnet (a rectangle with N and S poles indicated) that rotates with the magnetic dipole moment direction $\boldsymbol{\mu}_i = g_{s,i}(q_i/2m_i)\vv{S}_i$.  In 2D this is the same angle as the spin indicator but with a different icon to emphasize the physical distinction between the spin angular momentum (gyroscope icon) and the magnetic dipole moment (magnet icon).  The magnet icon makes it visually clear that the dipole moment is what couples to $\vv{B}$ for the Larmor force, while the gyroscope icon is what couples to $\vv{B}_g$ for the gravitomagnetic precession.
+
+The magnitude $|\boldsymbol{\mu}_i|$ is constant (spin magnitude is conserved), which can be indicated by fixing the length of the bar magnet icon.
+
+\subsubsection*{Force arrows}
+
+One or more arrows showing the force components acting on each particle:
+\begin{itemize}
+  \item \textbf{Gravitational force} $\vv{F}_{\mathrm{grav}}$: the GEM Lorentz force plus relativistic corrections.  Color: e.g.\ orange.
+  \item \textbf{Electromagnetic force} $\vv{F}_{\mathrm{EM}} = q(\vv{E}+\vv{v}\times\vv{B})$.  Color: e.g.\ blue.
+  \item \textbf{Total force} $\vv{F}_{\mathrm{total}}$.  Color: e.g.\ white.
+  \item \textbf{Spin gradient force} $\vv{F}_{\mathrm{spin}} = \nabla(s\,B_{g,z}) + \mu\nabla B_z$.  Color: e.g.\ green.
+\end{itemize}
+Arrow length is proportional to force magnitude, normalized to a reference force scale.  Individual components can be toggled, allowing a student to isolate which force is responsible for a given orbital feature.
+
+\subsubsection*{Proper time clock}
+
+A small analog clock face next to each particle, with a hand rotating at rate $\dd\tau_i/\dd t$ relative to coordinate time.  When $\dd\tau_i/\dd t < 1$ (relativistic motion or deep potential well) the hand rotates visibly more slowly than a reference clock displayed at a fixed point on the screen.  The running total $\tau_i$ can also be displayed as a digital readout beside the clock face.
+
+\subsection{Field visualizations}
+
+The perturbation field quantities available for visualization are listed below.  The scalar and vector potentials are stored on the grid and available at all times.  The derived fields $\vv{g}$, $\vv{E}$, $B_{g,z}$, $B_z$ are computed from the potentials on demand at display time --- they are not persistent grid arrays.  The per-step derivations are:
+\begin{align}
+  \vv{g}^{\mathrm{pert}}    &= -\nabla\Phig^{\mathrm{pert}} - \partial_t\Ag^{\mathrm{pert}}, &
+  B_{g,z}^{\mathrm{pert}}   &= \partial_x A_{g,y}^{\mathrm{pert}} - \partial_y A_{g,x}^{\mathrm{pert}}, \\
+  \vv{E}^{\mathrm{pert}}    &= -\nabla\phi^{\mathrm{pert}} - \partial_t\vv{A}^{\mathrm{pert}},  &
+  B_z^{\mathrm{pert}}       &= \partial_x A_y^{\mathrm{pert}} - \partial_y A_x^{\mathrm{pert}}.
+\end{align}
+
+\begin{center}
+\begin{tabular}{@{}L{4cm}L{4.5cm}L{4cm}@{}}
+\toprule
+\textbf{Field} & \textbf{Symbol} & \textbf{Physical meaning} \\
+\midrule
+Gravitational scalar potential & $\Phig^{\mathrm{pert}}$ (stored) & Depth of gravitational well \\
+Gravitomagnetic vector potential & $\Ag^{\mathrm{pert}}$ (stored) & Source of frame dragging \\
+Gravitoelectric field & $\vv{g}^{\mathrm{pert}}$ (computed) & Gravitational force per unit mass \\
+Gravitomagnetic field & $B_{g,z}^{\mathrm{pert}}$ (computed) & Frame dragging / precession rate \\
+Electrostatic potential & $\phi^{\mathrm{pert}}$ (stored) & Electric potential per unit charge \\
+EM vector potential & $\vv{A}^{\mathrm{pert}}$ (stored) & Source of magnetic effects \\
+Electric field & $\vv{E}^{\mathrm{pert}}$ (computed) & Electric force per unit charge \\
+Magnetic field & $B_z^{\mathrm{pert}}$ (computed) & Larmor precession rate \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The background contributions $\Phig^{\mathrm{bg}}$, $B_{g,z}^{\mathrm{bg}}$, $\vv{E}^{\mathrm{bg}}$, $B_z^{\mathrm{bg}}$ can optionally be added to give the total field, or displayed separately.
+
+\subsubsection*{Scalar field display modes}
+
+Scalar fields ($\Phig$, $\phi$, $B_{g,z}$, $B_z$) can be displayed in three modes:
+
+\begin{itemize}
+  \item \textbf{Grayscale or false color magnitude}: the field value is mapped to a color via a diverging colormap (e.g.\ blue for negative, white for zero, red for positive).  This gives an immediate spatial impression of the field structure.  The colormap range should be auto-scaled to the current field maximum, or fixed to a user-specified range.
+
+  \item \textbf{Contour lines}: isosurfaces of constant field value drawn as lines.  Contours of $\Phig$ are the gravitational equipotential surfaces; for a static mass they are concentric circles.  Contours of $B_{g,z}$ show the spatial structure of the frame-dragging field.  Spacing between contours encodes field gradient --- closely spaced contours indicate strong fields.
+
+  \item \textbf{Animated phase}: for oscillating or wave fields, the field value can be mapped to a slowly cycling colormap so that wavefronts appear to propagate visually even when the field amplitude is small.  This makes gravitational and EM waves visible at low amplitude that would be invisible in a static colormap.
+\end{itemize}
+
+\subsubsection*{Vector field display modes}
+
+Vector fields ($\vv{g}$, $\vv{E}$, $\Ag$, $\vv{A}$) can be displayed in two modes:
+
+\begin{itemize}
+  \item \textbf{Quiver plot}: arrows at a subsampled grid of points (e.g.\ every 8 cells), each pointing in the field direction with length proportional to field magnitude.  Length is typically logarithmically scaled to handle the large dynamic range near particle positions.  Color can encode magnitude independently of arrow length for additional clarity.
+
+  \item \textbf{Streamlines / field lines}: curves everywhere tangent to the field direction, integrated from seed points.  For $\vv{g}$ these are the gravitational field lines (analogous to electric field lines), which originate at mass sources and point toward them.  For $\Ag$ the field lines show the curl structure that generates $\vv{B}_g$.  Streamlines give a cleaner global picture than quiver plots for smooth fields, but are less informative near particle positions where the field changes rapidly.
+\end{itemize}
+
+\subsubsection*{Dynamic range and normalization}
+
+Near a particle the fields diverge as $1/r$ or $1/r^2$, making naive display of the full field dominated by the near-field singularity and showing nothing useful in the rest of the domain.  The following normalizations are recommended:
+
+\begin{itemize}
+  \item \textbf{Clamp}: cap the displayed value at a user-adjustable maximum, saturating the color near particles.  Simple but loses information near the source.
+  \item \textbf{Logarithmic scale}: display $\mathrm{sgn}(\Phi)\log(1 + |\Phi|/\Phi_0)$ where $\Phi_0$ is a reference scale.  Shows both the near-field and far-field structure simultaneously.
+  \item \textbf{Show perturbation only}: display $\Phig^{\mathrm{pert}}$ rather than $\Phig^{\mathrm{total}}$, removing the large static background.  This makes propagating waves visible even in the presence of a dominant static field.  This is the most useful mode for demonstrating gravitational wave emission.
+\end{itemize}
+
+\subsubsection*{Recommended display combinations for specific demonstrations}
+
+\begin{center}
+\begin{tabular}{@{}L{4cm}L{8cm}@{}}
+\toprule
+\textbf{Demonstration} & \textbf{Recommended display} \\
+\midrule
+Newtonian orbits & Contours of $\Phig^{\mathrm{total}}$ + particle tracks with coordinate time ticks \\
+Frame dragging & False color $B_{g,z}$ + gyroscope spin indicators on test particles \\
+Gravitational waves & Animated false color $\Phig^{\mathrm{pert}}$ (perturbation only) + particle tracks \\
+Gravitational lensing & Streamlines of $\vv{E}^{\mathrm{pert}}$ (EM wave) on false color $\Phig^{\mathrm{bg}}$ \\
+Larmor precession vs Lense--Thirring & False color $B_{g,z}$ and $B_z$ side by side + magnet and gyroscope icons \\
+Twin paradox & Particle tracks with both coordinate and proper time ticks \\
+EM--gravity coupling & False color $\Phig^{\mathrm{pert}}$ with EM source active, showing EM energy gravitating \\
+Charged particle orbits & Quiver $\vv{g}$ and $\vv{E}$ + force arrows split by GEM and EM components \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection*{Implementation notes}
+
+All field arrays are already on the GPU as WebGL textures (one float per cell for scalar fields, two floats per cell for 2D vector fields).  Rendering is a fragment shader that maps the texture value to a color via the chosen colormap --- a single draw call per displayed field.  Quiver plots are rendered as a second pass drawing arrow geometry at subsampled positions, reading field values from the texture.  Particle icons, spin indicators, and force arrows are rendered as sprite geometry in a final pass.  The separation into three render passes (fields, quivers, sprites) allows each to be toggled independently with no performance cost when disabled.
+
+%====================================================================
+\section{Implementation Plan}
+\label{sec:impl}
+%====================================================================
+
+This section describes a staged implementation strategy.  Each stage adds one capability, is independently testable against a known analytic result, and must pass its tests before the next stage begins.  This prevents bugs introduced early from manifesting as wrong answers late in the stack when the cause is difficult to trace.
+
+The governing principle throughout: \textbf{never proceed to the next stage until the current stage passes its quantitative tests.}  A simulation that produces plausible-looking output is not the same as a correct simulation.
+
+\subsection{Stage 1: Scalar wave equation, free propagation}
+
+Implement the leapfrog update for a single scalar potential $\Phi$ in 2D on a uniform grid, with no sources and no damping boundary.
+
+\textbf{Test:} place a narrow Gaussian initial condition at the center of the domain.  The pulse should propagate outward as a circular ring at speed $c_{\mathrm{eff}}$.  Verify:
+\begin{itemize}
+  \item The wavefront reaches radius $r$ at time $t = r/c_{\mathrm{eff}}$ to within one timestep.
+  \item The amplitude falls off as $1/\sqrt{r}$ in 2D.
+  \item The scheme is stable at $c_{\mathrm{CFL}} = 1/\sqrt{2}$ and unstable at $c_{\mathrm{CFL}} = 1/\sqrt{2} + \epsilon$.
+  \item Measured numerical dispersion matches the analytic prediction of Section~\ref{sec:dispersion}.
+\end{itemize}
+
+\subsection{Stage 2: Absorbing boundary layer}
+
+Add the damping layer (Section~\ref{sec:abc}) to Stage~1.
+
+\textbf{Test:} the Gaussian pulse from Stage~1 should exit the domain cleanly.  Record the residual field amplitude at the domain center after the pulse should have fully exited.  Per the realized-reflection paragraph added to §\ref{sec:abc} in v33, for a 2D circular wavefront the in-interior residual is degraded from the plane-wave $R\approx10^{-3}$ limit by linearization and corner-trapping effects; a few-percent central residual with $\sim20\times$ suppression versus the no-damping case is the realistic target.
+
+\subsection{Stage 3: Static CIC source, Poisson convergence}
+
+Add a fixed point source using CIC deposition at the domain center.  Run the convergence iteration (positions and velocities held fixed) until fields converge.
+
+\textbf{Test:} the scalar potential should converge to the 2D Green's function.  Plot $\Phi(r)$ vs $\ln r$ and verify linearity.  Verify convergence takes $\sim N\sqrt{2}$ timesteps.  Verify the discrete Poisson equation $\nabla^2_{h}\Phi = -\mathrm{source}$ is satisfied to machine precision at convergence.
+
+\subsection{Stage 4: All six wave equations, gauge monitoring}
+
+Extend to all six potentials ($\Phig$, $A_{g,x}$, $A_{g,y}$, $\phi$, $A_x$, $A_y$) simultaneously.  Add the discrete Lorenz gauge residual monitor.
+
+\textbf{Test:} a static point source with zero velocity should produce $\Ag = 0$ and $\vv{A} = 0$ automatically (zero current sources).  Verify the gauge residual $\langle\mathcal{G}^2\rangle^{1/2}$ remains at the truncation error level $(k\Delta x)^2$.  Enable parabolic cleaning and verify it reduces the residual without destabilizing.
+
+\subsection{Stage 5: Moving source, vector potential, Yee curl}
+
+Initialize a source with nonzero velocity $\vv{v}$ during the convergence phase.  Verify that $\Ag$ and $\vv{A}$ develop the correct boosted Coulomb values.
+
+\textbf{Test:} for a source moving at velocity $v$ the vector potential should satisfy $|\vv{A}| \approx v|\phi|/c^2$ to leading order.  Compute $B_z = \partial_x A_y - \partial_y A_x$ using the Yee curl at several points and compare against the analytic result for a uniformly moving charge.
+
+\subsection{Stage 6: Sampled background field arrays}
+\label{sec:stage_bg}
+
+Introduce a parallel set of read-only grid arrays for the background contributions to each of the six potentials:
+\[
+  \Phig^{\mathrm{bg}}, \quad A_{g,x}^{\mathrm{bg}}, \quad A_{g,y}^{\mathrm{bg}}, \quad \phi^{\mathrm{bg}}, \quad A_x^{\mathrm{bg}}, \quad A_y^{\mathrm{bg}}.
+\]
+These arrays live on the same staggered Yee grid as the perturbation potentials (§\ref{sec:numerical}), are filled \emph{once} at scenario setup, and are not touched by the leapfrog or the damping layer (§\ref{sec:abc}).  Force evaluations from Stage~7 onward compute totals as
+\[
+  \Phig^{\mathrm{total}}(\vv{x}) = \Phig^{\mathrm{bg}}(\vv{x}) + \Phig^{\mathrm{pert}}(\vv{x}),
+\]
+and similarly for $\Ag$, $\phi$, $\vv{A}$, through a single combined CIC interpolation per quantity per particle.
+
+\subsubsection*{Motivation: testability decoupled from source-coupling}
+
+Particle-dynamics tests (orbital period, time dilation, precession, frame dragging, cyclotron motion) require a field for the particle to move in.  In v32 those tests presumed an analytic background available at the particle position via closed-form evaluation; the alternative --- creating the field with a second body and the perturbation FDTD --- would require all of the source-deposition machinery (Stages~3--5) to be working perfectly before any single-particle test could run.  By introducing sampled background arrays as their own stage, every later particle-dynamics test runs against a prescribed field, isolating the particle integrator from the source path.
+
+\subsubsection*{Implementation}
+
+Add the six pointers to the simulation struct, allocated lazily on first use.  Provide a small registry of background generators that fill the arrays at scenario setup time.  The minimum required for this stage is the softened point mass:
+\begin{equation}
+\label{eq:bg_softened_point_mass}
+  \Phig^{\mathrm{bg}}(\vv{x}) = -\frac{G_{\mathrm{eff}}M}{\sqrt{|\vv{x}-\vv{x}_0|^2 + \epsilon^2}},
+\end{equation}
+sampled onto the grid at scenario load, with a smoothing length $\epsilon$ of a few cells to avoid the $1/r$ singularity at the source.  Later stages add further generators as needed: uniform gravitational field ($\Phig^{\mathrm{bg}}=-g_0 y$), gravitomagnetic dipole ($A_{g,\theta}^{\mathrm{bg}}\propto J/r$ as in §\ref{sec:gem_metric}), point charge, and the full mode list collected in Stage~15 below.
+
+\textbf{Test:}
+\begin{itemize}
+  \item Sampled values match Eq.~(\ref{eq:bg_softened_point_mass}) at interior cells to within floating-point precision.
+  \item Finite-difference gradient $-\nabla_h\Phig^{\mathrm{bg}}$ at sample radii $r\gg\epsilon$ matches the analytic Newtonian field $G_{\mathrm{eff}}M\,\hat r/r^2$ to within the CIC interpolation tolerance.
+  \item Re-running the Stage~1 wave pulse with a non-trivial background installed produces a perturbation field bit-identical to the no-background case (perturbation FDTD does not read backgrounds).
+  \item Toggling the damping layer with a background present does not alter the background array.
+\end{itemize}
+
+\subsubsection*{Caveat: discretization noise vs.\ small effects}
+
+Sampling a closed-form background onto a discrete grid carries an $\order{(\Delta x/L)^2}$ representation error where $L$ is the local feature scale.  For \emph{coarse} tests (Keplerian period, gravitomagnetic precession at moderate $r$) this error is negligible.  For \emph{small} effects whose signature competes with the discretization noise --- most notably the post-Newtonian perihelion precession of Stage~8, where the per-orbit advance is $\sim G_{\mathrm{eff}}M/(c_{\mathrm{eff}}^2 a)$ and may approach the smoothing- and finite-difference-induced error --- an analytic-form background evaluator can be added as an optional code path that bypasses the grid for those specific tests.  This is a known deferred optimization, not a requirement of the present stage.
+
+\subsection{Stage 7: Single test particle, Boris pusher, Keplerian orbit}
+
+Add a single test particle with mass $m$ and no charge, placed in the softened-point-mass background of Stage~6 (Eq.~\ref{eq:bg_softened_point_mass}).  Implement the potential-form force (Eq.~\ref{eq:force_gem_pot}) and the Boris pusher.  No perturbation FDTD is exercised in this stage --- the particle only reads the background array.
+
+\textbf{Test:} a circular orbit should have period $T = 2\pi r^{3/2}/\sqrt{G_{\mathrm{eff}}M}$.  Verify the total energy $\gamma mc^2 + m\Phig^{\mathrm{bg}}$ is approximately conserved over many orbits with no secular drift (Boris symplectic structure).  Verify that taking the smoothing length $\epsilon\to0$ recovers the textbook $1/r^2$ force law at $r\gg\epsilon$.
+
+\subsection{Stage 8: Relativistic corrections, perihelion precession}
+
+Enable Tier~2 and Tier~3 force corrections (Section~\ref{sec:relcorr}).
+
+\textbf{Test:} a slightly eccentric orbit should precess at the GR rate:
+\begin{equation}
+  \Delta\phi_{\mathrm{prec}} = \frac{6\pi G_{\mathrm{eff}} M}{c_{\mathrm{eff}}^2\,a(1-e^2)}
+\end{equation}
+per orbit, where $a$ is the semi-major axis and $e$ the eccentricity.  This directly verifies that the $(v^2/c^2)\vv{g}$ and $4(\vv{v}\cdot\vv{g})\vv{v}/c^2$ terms are correctly implemented.  See the Stage~6 caveat on discretization noise: if the measured precession is contaminated by the smoothing-length or finite-difference error of the sampled background, fall back to an analytic-background evaluator for this test only.
+
+\subsection{Stage 9: Proper time accumulation}
+
+Add the proper time clock to each particle.
+
+\textbf{Test:} a particle on a circular orbit at radius $r$ should accumulate proper time at rate:
+\begin{equation}
+  \frac{\dd\tau}{\dd t} = \sqrt{1 + \frac{2\Phig^{\mathrm{bg}}}{c^2} - \frac{v^2}{c^2}}.
+\end{equation}
+Compare the accumulated $\tau$ after one orbit against the analytic prediction.  This tests both the gravitational and kinematic time dilation contributions simultaneously.
+
+\subsection{Stage 10: Perturbation FDTD with moving particle source}
+
+Enable the full perturbation FDTD: the particle deposits $\rho_{\mathrm{matter}}$ and $\vv{J}_{\mathrm{matter}}$ onto the grid, the wave equations evolve the perturbation potentials, and the particle feels both background and perturbation forces.
+
+\textbf{Test:}
+\begin{itemize}
+  \item A particle moving at constant velocity in empty space should produce a perturbation field consistent with the boosted Coulomb solution.
+  \item A particle in a circular orbit should radiate outgoing gravitational waves visible in $\Phig^{\mathrm{pert}}$.
+  \item Outgoing wave amplitude should fall off as $1/\sqrt{r}$ in 2D.
+  \item The orbit period should be unchanged from Stage~8 to within the radiation reaction correction (which is small for weak coupling $G_{\mathrm{eff}} \ll c_{\mathrm{eff}}^2 r / m$).
+\end{itemize}
+
+\subsection{Stage 11: Two-particle gravitational interaction}
+
+Two particles mutually attracting via the FDTD perturbation field, no analytic background.
+
+\textbf{Test:}
+\begin{itemize}
+  \item Two equal masses at rest should fall toward each other with initial acceleration $G_{\mathrm{eff}}M/r^2$.
+  \item A circular binary orbit should have the correct Keplerian period.
+  \item Results should agree with a direct $N$-body calculation using the same force law, verifying the FDTD intermediary introduces no force errors.
+  \item The total canonical momentum $\vv{P}_{\mathrm{total}} = \sum_i\vv{p}_i + c^{-2}\int\vv{S}_{\mathrm{GEM}}\,\dd^2x$ should be conserved.
+\end{itemize}
+
+\subsection{Stage 12: Charged particles and electromagnetism}
+
+Add electric charge $q$ to particles.
+
+\textbf{Test:}
+\begin{itemize}
+  \item A charge at rest should produce the 2D Coulomb potential $\phi \propto \ln r$.
+  \item Two opposite charges should attract at the correct Coulomb force.
+  \item A moving charge in a uniform background magnetic field $B_0$ (sampled into $\vv{A}^{\mathrm{bg}}$ per Stage~6) should undergo circular cyclotron motion at frequency $\omega_c = qB_0/m\gamma$.
+  \item The EM vector potential $\vv{A}$ should correctly encode the magnetic field via the Yee curl.
+\end{itemize}
+
+\subsection{Stage 13: EM effective GEM sources}
+
+Enable the $\rho_{\mathrm{EM}}$ and $\vv{J}_{\mathrm{EM}}$ source terms (Eqs.~\ref{eq:rho_em_pot}--\ref{eq:J_em_pot}).
+
+\textbf{Test:} an EM pulse passing a test mass should exert a gravitational impulse via the Poynting flux term $\vv{J}_{\mathrm{EM}} = -(\nabla\phi^{\mathrm{pert}}+\partial_t\vv{A}^{\mathrm{pert}})\times(\nabla\times\vv{A}^{\mathrm{pert}})/(\mu_0 c^2)$.  With boosted coupling constants the deflection should be measurable and match the analytic estimate $\Delta p \sim G_{\mathrm{eff}}\int u_{\mathrm{EM}}\,\dd t / (c^2 b)$ where $b$ is the impact parameter.
+
+\subsection{Stage 14: Intrinsic spin, precession, spin forces}
+
+Add spin $\vv{S}$ to particles.  Implement the spin update (Section~\ref{sec:alg_spin}), the Tulczyjew-Dixon constraint correction, and the spin gradient forces.
+
+\textbf{Test:}
+\begin{itemize}
+  \item A gyroscope in a Kerr-like gravitomagnetic background (sampled into $\Ag^{\mathrm{bg}}$ per Stage~6) should precess at rate $\Omega_{\mathrm{LT}} = 2G_{\mathrm{eff}}J/(c_{\mathrm{eff}}^2 r^3)$ for a circular orbit at radius $r$.
+  \item A spinning charged particle in a background magnetic field $B_0$ should precess at the Larmor rate $\Omega_L = g_s qB_0/2m$.
+  \item The spin magnitude $|\vv{S}|$ should be conserved to machine precision throughout.
+  \item Thomas precession should contribute the correct rate $\Omega_{\mathrm{Thomas}} = -(\gamma^2/(\gamma+1))(\vv{v}\times\vv{a})/c^2$ for a circular orbit.
+\end{itemize}
+
+\subsection{Stage 15: Complete background spacetime library}
+
+Extend the Stage~6 background-generator library with the remaining canonical spacetimes from §\ref{sec:bg}: Schwarzschild-like, Kerr-like, Reissner--Nordstr\"om-like, Kerr--Newman-like, uniform field, binary.  Each is just an additional generator that fills the appropriate combination of $\Phig^{\mathrm{bg}}$, $\Ag^{\mathrm{bg}}$, $\phi^{\mathrm{bg}}$, $\vv{A}^{\mathrm{bg}}$ arrays; no changes to the simulation core are required.
+
+\textbf{Test} each background against its known analytic properties:
+\begin{itemize}
+  \item Schwarzschild: photon orbit (unstable) at $r = 3G_{\mathrm{eff}}M/c_{\mathrm{eff}}^2$.
+  \item Kerr-like: frame dragging rate at given $r$ and spin $J$.
+  \item Reissner-Nordström: Coulomb potential from background charge consistent with $\phi^{\mathrm{bg}}$.
+  \item Binary: superposition of two Schwarzschild potentials at large separation.
+\end{itemize}
+Verify the background + perturbation split produces no spurious transients at startup (convergence iteration correctly initialized).
+
+\subsection{Stage 16: Visualization pipeline}
+
+Implement the WebGL rendering passes (Section~\ref{sec:viz}): field textures, quiver geometry, particle sprites.
+
+\textbf{Test:}
+\begin{itemize}
+  \item Potential arrays display correctly as false-color images with correct dynamic range.
+  \item On-demand field computation ($\vv{g}$, $B_{g,z}$, $\vv{E}$, $B_z$ from potentials) matches analytic values for the Stage~7--15 test configurations.
+  \item Particle tracks display at the correct positions with fading.
+  \item Coordinate time and proper time ticks are correctly spaced along the track.
+  \item Spin indicator rotates at the correct precession rate.
+  \item Force arrows point in the correct directions and scale correctly with force magnitude.
+\end{itemize}
+
+\subsection{Stage 17: Full integration benchmarks}
+
+Run the complete set of pedagogical benchmark scenarios:
+
+\begin{center}
+\begin{tabular}{@{}L{4.5cm}L{7cm}@{}}
+\toprule
+\textbf{Scenario} & \textbf{Expected result} \\
+\midrule
+Twin paradox & Proper time clocks on different orbits show measurable difference after one orbital period \\
+Lense-Thirring ring & Gyroscope ring around spinning mass precesses uniformly at $\Omega_{\mathrm{LT}}$ \\
+Gravitational wave dipole & Outgoing $\Phig^{\mathrm{pert}}$ wave from oscillating mass, $1/\sqrt{r}$ amplitude fall-off \\
+Shapiro delay & EM pulse delay past central mass matches $\Delta t = -2\int\Phig\,\dd\ell/c^3$ \\
+EM wave scattering & EM pulse deflected by charged mass, trajectory bending matches analytic estimate \\
+Binary inspiral & Two-body orbit slowly decays if radiation damping term is enabled \\
+Spin-orbit coupling & Spinning particle orbit precesses differently from non-spinning particle \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+All scenarios should produce qualitatively correct behavior and agree with the corresponding analytic predictions to within the expected numerical accuracy of the linearized GEM approximation.
+
+%====================================================================
+\end{document}
+%====================================================================

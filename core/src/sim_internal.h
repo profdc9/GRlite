@@ -33,6 +33,19 @@ struct gr_sim {
      * leapfrog kernel — see eq:damp_profile and the implementation block below it. */
     int    n_damping;
     float* damping_d;
+
+    /* Background field arrays (Stage 6, gr_sandbox_v33.tex §12.6).
+     * Lazily allocated by gr_sim_set_background_*; NULL until first use.
+     * Read-only after scenario setup. Never touched by the leapfrog or the
+     * damping layer — see field.c (leapfrog only modifies the perturbation
+     * arrays phi_prev/curr/next). Force evaluation (future Stage 7+) will read
+     * Phi_total = Phi_bg + Phi_pert via a single CIC interpolation. */
+    float* phi_g_bg;
+    float* Agx_bg;
+    float* Agy_bg;
+    float* phi_bg;
+    float* Ax_bg;
+    float* Ay_bg;
 };
 
 /* Defined in field.c — fills sim->phi_next from sim->phi_curr and sim->phi_prev. */

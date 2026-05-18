@@ -39,11 +39,11 @@ EMCC_FLAGS = -O3 -std=c11 -Wall -Wextra -msimd128 \
              -s MODULARIZE=1 \
              -s EXPORT_ES6=1 \
              -s ALLOW_MEMORY_GROWTH=1 \
-             -s EXPORTED_FUNCTIONS='["_gr_sim_create","_gr_sim_destroy","_gr_sim_step","_gr_sim_step_n","_gr_sim_step_count","_gr_sim_time","_gr_sim_dt","_gr_sim_dx","_gr_sim_width","_gr_sim_height","_gr_sim_field_ptr","_gr_sim_load_scenario","_gr_sim_set_damping","_gr_sim_damping_layers","_malloc","_free"]' \
+             -s EXPORTED_FUNCTIONS='["_gr_sim_create","_gr_sim_destroy","_gr_sim_step","_gr_sim_step_n","_gr_sim_step_count","_gr_sim_time","_gr_sim_dt","_gr_sim_dx","_gr_sim_width","_gr_sim_height","_gr_sim_field_ptr","_gr_sim_load_scenario","_gr_sim_set_damping","_gr_sim_damping_layers","_gr_sim_background_ptr","_gr_sim_clear_background","_gr_sim_set_background_point_mass","_malloc","_free"]' \
              -s EXPORTED_RUNTIME_METHODS='["HEAPF32","HEAPU8","ccall","cwrap","UTF8ToString","stringToUTF8"]'
 
 # --- Sources -------------------------------------------------------------
-CORE_SRCS = src/sim.c src/field.c scenarios/registry.c scenarios/wave_pulse.c
+CORE_SRCS = src/sim.c src/field.c src/background.c scenarios/registry.c scenarios/wave_pulse.c
 TEST_SRCS = $(wildcard tests/*.c)
 
 BUILD       = build

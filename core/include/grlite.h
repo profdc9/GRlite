@@ -64,6 +64,35 @@ int   gr_sim_height(const gr_sim_t* sim);
 float* gr_sim_field_ptr(gr_sim_t* sim, gr_field_id_t which);
 
 /* ----------------------------------------------------------------------------
+ * Sampled background field arrays (Stage 6)
+ *
+ * Each of the six potentials has an optional companion "background" grid array,
+ * filled once at scenario setup by a generator and never touched by the
+ * leapfrog or damping layer. Force evaluations (Stage 7+) read the sum
+ * Phi_total = Phi_bg + Phi_pert via a single CIC interpolation.
+ *
+ * The arrays are lazily allocated on first set_background_* call. Pass
+ * gr_sim_clear_background to free them all (e.g. when switching scenarios).
+ * The pointer returned by gr_sim_background_ptr is NULL until the
+ * corresponding background has been set.
+ *
+ * See gr_sandbox_v33.tex §12.6 (sec:stage_bg) for the architecture and the
+ * eq:bg_softened_point_mass generator below.
+ * --------------------------------------------------------------------------*/
+
+float* gr_sim_background_ptr(gr_sim_t* sim, gr_field_id_t which);
+void   gr_sim_clear_background(gr_sim_t* sim);
+
+/* Softened point mass — fills Phi_g^{bg} with
+ *   -G*M / sqrt(|x - x0|^2 + epsilon^2)
+ * sampled at cell centers. epsilon (in simulation length units) is a smoothing
+ * length, recommended ~ few cells, that avoids the 1/r singularity at the
+ * source. Calls clear of any previous Phi_g^{bg} and allocates fresh. */
+void gr_sim_set_background_point_mass(gr_sim_t* sim,
+                                      float x0, float y0,
+                                      float GM, float epsilon);
+
+/* ----------------------------------------------------------------------------
  * Absorbing damping layer (Stage 2)
  *
  * Install (or remove) a quadratic-profile absorbing layer of n_damping cells

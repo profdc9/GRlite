@@ -42,6 +42,13 @@ void gr_sim_destroy(gr_sim_t* sim) {
     free(sim->phi_curr);
     free(sim->phi_next);
     free(sim->damping_d);
+    /* Background arrays — see background.c. */
+    free(sim->phi_g_bg);
+    free(sim->Agx_bg);
+    free(sim->Agy_bg);
+    free(sim->phi_bg);
+    free(sim->Ax_bg);
+    free(sim->Ay_bg);
     free(sim);
 }
 
