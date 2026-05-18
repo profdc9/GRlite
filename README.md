@@ -14,9 +14,9 @@ Of the 17 stages in v33's §12:
 - **Stage 2** — absorbing damping layer ✓
 - **Stage 3** — static CIC source, Poisson convergence ✓
 - **Stage 4** — all six wave equations, Lorenz-gauge monitoring ✓
-- **Stage 6** — sampled background field arrays ✓ (built ahead of Stage 5
-  so single-particle dynamics tests can be written against a prescribed background)
-- Stages 5, 7–17 — pending
+- **Stage 5** — moving source, vector potentials, Yee curl ✓
+- **Stage 6** — sampled background field arrays ✓
+- Stages 7–17 — pending
 
 ## Repo layout
 

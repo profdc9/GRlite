@@ -31,10 +31,12 @@ const gr_scenario_t* gr_scenario_find(const char* name) {
  * it from gr_scenarios_init. */
 extern void gr_scenario_register_wave_pulse(void);
 extern void gr_scenario_register_static_source(void);
+extern void gr_scenario_register_moving_source(void);
 
 void gr_scenarios_init(void) {
     if (g_initialized) return;
     g_initialized = 1;
     gr_scenario_register_wave_pulse();
     gr_scenario_register_static_source();
+    gr_scenario_register_moving_source();
 }

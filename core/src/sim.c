@@ -175,6 +175,32 @@ void gr_sim_deposit_point_charge(gr_sim_t* sim, float x, float y, float charge) 
     gr_cic_deposit_scalar(sim->rho_q, sim->width, sim->height, sim->dx, x, y, charge);
 }
 
+/* Stage 5 — composite deposit for a moving particle. Uses a single CIC kernel
+ * (W_2 / bilinear) for all six contributions, satisfying the §9.5 adjoint
+ * condition automatically since deposit and interpolation share the same
+ * weights. Note: holding the particle position fixed across timesteps while
+ * J = rho*v is nonzero violates the discrete continuity equation by exactly
+ * v . grad(rho); Stage 5's test measures this directly. */
+void gr_sim_deposit_point_particle(gr_sim_t* sim, float x, float y,
+                                   float mass, float charge,
+                                   float vx, float vy) {
+    if (!sim) return;
+    const int   W  = sim->width;
+    const int   H  = sim->height;
+    const float dx = sim->dx;
+    if (mass   != 0.0f) gr_cic_deposit_scalar(sim->rho_matter, W, H, dx, x, y, mass);
+    if (charge != 0.0f) gr_cic_deposit_scalar(sim->rho_q,      W, H, dx, x, y, charge);
+    if (mass   != 0.0f && vx != 0.0f) gr_cic_deposit_scalar(sim->J_mx, W, H, dx, x, y, mass   * vx);
+    if (mass   != 0.0f && vy != 0.0f) gr_cic_deposit_scalar(sim->J_my, W, H, dx, x, y, mass   * vy);
+    if (charge != 0.0f && vx != 0.0f) gr_cic_deposit_scalar(sim->J_qx, W, H, dx, x, y, charge * vx);
+    if (charge != 0.0f && vy != 0.0f) gr_cic_deposit_scalar(sim->J_qy, W, H, dx, x, y, charge * vy);
+}
+
+const float* gr_sim_J_mx_ptr(const gr_sim_t* sim) { return sim ? sim->J_mx : NULL; }
+const float* gr_sim_J_my_ptr(const gr_sim_t* sim) { return sim ? sim->J_my : NULL; }
+const float* gr_sim_J_qx_ptr(const gr_sim_t* sim) { return sim ? sim->J_qx : NULL; }
+const float* gr_sim_J_qy_ptr(const gr_sim_t* sim) { return sim ? sim->J_qy : NULL; }
+
 int gr_sim_load_scenario(gr_sim_t* sim, const char* name, const float* params, int n_params) {
     if (!sim || !name) return -1;
     gr_scenarios_init();

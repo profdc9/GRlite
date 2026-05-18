@@ -104,11 +104,22 @@ void gr_sim_clear_sources(gr_sim_t* sim);
 void gr_sim_deposit_point_mass(gr_sim_t* sim, float x, float y, float mass);
 void gr_sim_deposit_point_charge(gr_sim_t* sim, float x, float y, float charge);
 
-/* Read access to the six source arrays. Always non-NULL after gr_sim_create.
- * Current arrays carry mass*velocity (J_matter) and charge*velocity (J_q)
- * components — both zero in Stages 3-4 since particles aren't moving yet. */
+/* Stage 5 — single-call deposit of a point "particle" with mass, charge, and
+ * velocity. Lays down all six source contributions at the same CIC stencil:
+ *   rho_matter += mass        rho_q  += charge
+ *   J_mx       += mass*vx     J_qx   += charge*vx
+ *   J_my       += mass*vy     J_qy   += charge*vy */
+void gr_sim_deposit_point_particle(gr_sim_t* sim, float x, float y,
+                                   float mass, float charge,
+                                   float vx, float vy);
+
+/* Read access to all six source arrays. Always non-NULL after gr_sim_create. */
 const float* gr_sim_rho_matter_ptr(const gr_sim_t* sim);
 const float* gr_sim_rho_q_ptr(const gr_sim_t* sim);
+const float* gr_sim_J_mx_ptr(const gr_sim_t* sim);
+const float* gr_sim_J_my_ptr(const gr_sim_t* sim);
+const float* gr_sim_J_qx_ptr(const gr_sim_t* sim);
+const float* gr_sim_J_qy_ptr(const gr_sim_t* sim);
 
 /* ----------------------------------------------------------------------------
  * Lorenz gauge monitoring (Stage 4)
