@@ -18,10 +18,17 @@ extern "C" {
 /* Opaque simulation handle. */
 typedef struct gr_sim gr_sim_t;
 
-/* Field identifiers (used by gr_sim_field_ptr). */
+/* Field identifiers — six potentials per v33 §12.4 / v32 §9.1. The Stage 4
+ * refactor expanded this from {Phi_g} to all six. Numeric values are stable;
+ * code may rely on PHI_GRAV == 0. */
 typedef enum {
-    GR_FIELD_PHI_GRAV = 0,  /* gravitational scalar potential Phi_g */
-    GR_FIELD_COUNT
+    GR_FIELD_PHI_GRAV = 0,  /* gravitational scalar  Phi_g     */
+    GR_FIELD_A_GX     = 1,  /* gravitomagnetic vec.  A_{g,x}   */
+    GR_FIELD_A_GY     = 2,  /* gravitomagnetic vec.  A_{g,y}   */
+    GR_FIELD_PHI_EM   = 3,  /* electric scalar       phi       */
+    GR_FIELD_A_X      = 4,  /* magnetic vector       A_x       */
+    GR_FIELD_A_Y      = 5,  /* magnetic vector       A_y       */
+    GR_FIELD_COUNT    = 6
 } gr_field_id_t;
 
 /* ----------------------------------------------------------------------------
@@ -38,10 +45,19 @@ typedef enum {
  * 1.0 (set via gr_sim_set_G_eff). */
 gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl);
 
-/* Set the effective gravitational constant (Stage 3+). The Phi_g leapfrog
- * source term is -4*pi*G_eff*rho_matter per gr_sandbox_v32.tex §9.7. */
+/* Set effective coupling constants (Stage 3 / Stage 4).
+ *
+ *   Phi_g source coeff:  -4*pi*G_eff
+ *   A_g_{x,y} source coeff: -4*pi*G_eff / c_eff^2
+ *   phi_em source coeff: -4*pi*k_e
+ *   A_{x,y} source coeff: -4*pi*k_e / c_eff^2
+ *
+ * Both default to 1.0 at gr_sim_create. Setting one updates the corresponding
+ * field source coefficients in-place. */
 void  gr_sim_set_G_eff(gr_sim_t* sim, float G_eff);
 float gr_sim_get_G_eff(const gr_sim_t* sim);
+void  gr_sim_set_k_e(gr_sim_t* sim, float k_e);
+float gr_sim_get_k_e(const gr_sim_t* sim);
 
 /* Free the simulation. Safe to pass NULL. */
 void gr_sim_destroy(gr_sim_t* sim);
@@ -86,10 +102,30 @@ float* gr_sim_field_ptr(gr_sim_t* sim, gr_field_id_t which);
 
 void gr_sim_clear_sources(gr_sim_t* sim);
 void gr_sim_deposit_point_mass(gr_sim_t* sim, float x, float y, float mass);
+void gr_sim_deposit_point_charge(gr_sim_t* sim, float x, float y, float charge);
 
-/* Read access to the gravitational mass-density source array (rho_matter).
- * Always non-NULL after gr_sim_create. */
+/* Read access to the six source arrays. Always non-NULL after gr_sim_create.
+ * Current arrays carry mass*velocity (J_matter) and charge*velocity (J_q)
+ * components — both zero in Stages 3-4 since particles aren't moving yet. */
 const float* gr_sim_rho_matter_ptr(const gr_sim_t* sim);
+const float* gr_sim_rho_q_ptr(const gr_sim_t* sim);
+
+/* ----------------------------------------------------------------------------
+ * Lorenz gauge monitoring (Stage 4)
+ *
+ * Discrete Lorenz residuals (gr_sandbox_v32.tex §9.5 eq:lorenz_gem and
+ * eq:lorenz_em):
+ *    G_grav = (1/c^2) d_t Phi_g + div A_g          ; ideally 0
+ *    G_em   = (1/c^2) d_t phi    + div A           ; ideally 0
+ * In the discrete scheme the residual sits at the truncation-error level
+ * (k Delta x)^2 (§9.5 monitoring paragraph) once the field has reached its
+ * static or quasi-static state. These getters return the RMS over interior
+ * cells. Time derivatives use a one-sided backward difference of the curr
+ * vs prev rotation slot — call after gr_sim_step.
+ * --------------------------------------------------------------------------*/
+
+float gr_sim_gauge_residual_grav(const gr_sim_t* sim);
+float gr_sim_gauge_residual_em(const gr_sim_t* sim);
 
 /* ----------------------------------------------------------------------------
  * Sampled background field arrays (Stage 6)

@@ -33,6 +33,8 @@ static int build_wave_pulse(gr_sim_t* sim, const float* params, int n_params) {
 
     const float inv_2sigma2 = 1.0f / (2.0f * sigma * sigma);
 
+    float* phi_curr = sim->fields[GR_FIELD_PHI_GRAV].curr;
+    float* phi_prev = sim->fields[GR_FIELD_PHI_GRAV].prev;
     for (int j = 0; j < H; j++) {
         const float y = ((float) j + 0.5f) * dx;
         const int row = j * W;
@@ -40,8 +42,8 @@ static int build_wave_pulse(gr_sim_t* sim, const float* params, int n_params) {
             const float x  = ((float) i + 0.5f) * dx;
             const float r2 = (x - x0) * (x - x0) + (y - y0) * (y - y0);
             const float v  = amplitude * expf(-r2 * inv_2sigma2);
-            sim->phi_curr[row + i] = v;
-            sim->phi_prev[row + i] = v;  /* zero initial time derivative — §9.7 */
+            phi_curr[row + i] = v;
+            phi_prev[row + i] = v;  /* zero initial time derivative — §9.7 */
         }
     }
     sim->step_count = 0;

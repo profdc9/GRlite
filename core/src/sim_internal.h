@@ -4,48 +4,53 @@
 
 #include "grlite.h"
 
-/* Three time levels of the scalar potential field, rotated after each leapfrog step.
- * Layout: row-major, index k = j * width + i, for i in [0, width), j in [0, height).
+/* Per-field state. Each of the six potentials owns three time levels
+ * (prev = Phi^{n-1}, curr = Phi^n, next = Phi^{n+1}) plus a pointer to its
+ * source array (rho_matter, J_mx, ..., owned by struct gr_sim) and a scalar
+ * source coupling coefficient.
  *
- * The leapfrog (gr_sandbox_v32.tex §9.2 eq:leapfrog_field) needs Phi at the previous
- * and current timesteps to produce the next:
- *
- *     Phi^{n+1} = 2 Phi^n - Phi^{n-1} + (c dt)^2 (Lap Phi^n + source^n)
- *
- * After computing next, we rotate so the buffer that was "prev" becomes the
- * scratch for the following step's "next" (zero-copy three-pointer rotation). */
+ * The leapfrog update is (gr_sandbox_v32.tex §9.2 eq:leapfrog_field, with
+ * the §9.7 source term):
+ *    Phi^{n+1} = 2 Phi^n - Phi^{n-1} + (c dt)^2 (Lap Phi^n + source_coeff * source^n)
+ * applied to all six fields in parallel each step; pointer rotation between
+ * prev/curr/next is then done on each independently. */
+typedef struct {
+    float* prev;
+    float* curr;
+    float* next;
+    const float* source;     /* aliased to a source array owned by gr_sim_t */
+    float        source_coeff;
+} gr_field_state_t;
+
 struct gr_sim {
     int   width, height;
     float dx;
     float c_eff;
     float dt;
     float cfl;
-    float G_eff;        /* effective gravitational constant (Stage 3+); default 1.0 */
+    float G_eff;        /* gravitational coupling (Stage 3+); default 1.0 */
+    float k_e;          /* electric coupling (Stage 4+); default 1.0 */
     int   step_count;
 
-    float* phi_prev;   /* Phi^{n-1} */
-    float* phi_curr;   /* Phi^n     */
-    float* phi_next;   /* Phi^{n+1} (scratch) */
+    /* The six potentials. Indexed by gr_field_id_t. */
+    gr_field_state_t fields[GR_FIELD_COUNT];
 
-    /* Stage 3 static source — same staggering as phi_g (cell-centered).
-     * Always allocated by gr_sim_create (zero-filled); deposited into by
-     * scenarios via the CIC kernel gr_cic_deposit_scalar (eq:cic_deposit). */
-    float* rho_matter;
+    /* Source arrays — same staggering as fields (cell-centered).
+     * Always allocated by gr_sim_create; zero-filled by default. */
+    float* rho_matter;  /* sources Phi_g       */
+    float* J_mx;        /* sources A_{g,x}     */
+    float* J_my;        /* sources A_{g,y}     */
+    float* rho_q;       /* sources phi (EM)    */
+    float* J_qx;        /* sources A_x         */
+    float* J_qy;        /* sources A_y         */
 
-    /* Damping layer (Stage 2, gr_sandbox_v32.tex §9.6).
-     *   n_damping       : layer thickness on each edge (0 = no damping)
-     *   damping_d       : precomputed d_{i,j} = max(d_x(i), d_y(j)) array (NULL if disabled)
-     * Applied per step as Phi^{n+1}_{i,j} <- Phi^{n+1}_{i,j} * (1 - d_{i,j}) inside the
-     * leapfrog kernel — see eq:damp_profile and the implementation block below it. */
+    /* Damping layer (Stage 2). Applied identically to all six fields, since
+     * they all satisfy the same wave equation with the same c. */
     int    n_damping;
     float* damping_d;
 
-    /* Background field arrays (Stage 6, gr_sandbox_v33.tex §12.6).
-     * Lazily allocated by gr_sim_set_background_*; NULL until first use.
-     * Read-only after scenario setup. Never touched by the leapfrog or the
-     * damping layer — see field.c (leapfrog only modifies the perturbation
-     * arrays phi_prev/curr/next). Force evaluation (future Stage 7+) will read
-     * Phi_total = Phi_bg + Phi_pert via a single CIC interpolation. */
+    /* Background field arrays (Stage 6). Lazily allocated by
+     * gr_sim_set_background_*. */
     float* phi_g_bg;
     float* Agx_bg;
     float* Agy_bg;
@@ -54,16 +59,19 @@ struct gr_sim {
     float* Ay_bg;
 };
 
-/* Defined in field.c — fills sim->phi_next from sim->phi_curr and sim->phi_prev. */
-void gr_field_leapfrog_step(struct gr_sim* sim);
+/* Defined in field.c — steps all six fields in parallel. */
+void gr_field_leapfrog_step_all(struct gr_sim* sim);
 
 /* Defined in deposit.c — CIC deposition of a scalar value at sub-cell position.
- * Used by scenarios to set up rho_matter (Stage 3) and, later, particle
- * source deposition (Stage 9+). */
+ * Used by scenarios and by gr_sim_deposit_point_{mass,charge}. */
 void gr_cic_deposit_scalar(float* rho, int W, int H, float dx,
                            float x_p, float y_p, float value);
 
 /* Defined in scenarios/registry.c. */
 const gr_scenario_t* gr_scenario_find(const char* name);
+
+/* Defined in sim.c — refresh the per-field source coefficients after G_eff
+ * or k_e changes. */
+void gr_sim_recompute_source_coeffs(struct gr_sim* sim);
 
 #endif /* GRLITE_SIM_INTERNAL_H */

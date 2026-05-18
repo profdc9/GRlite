@@ -1,81 +1,36 @@
-/* Leapfrog FDTD update for the scalar potential.
- * Spec reference: gr_sandbox_v32.tex §9.2 "Time stepping: the leapfrog scheme". */
+/* Leapfrog FDTD update for all six potentials.
+ * Spec reference: gr_sandbox_v32.tex §9.2 + §9.7 (source coupling). */
 
 #include "grlite.h"
 #include "sim_internal.h"
 
-/* Eq. (eq:leapfrog_field) — §9.2 "Time stepping: the leapfrog scheme".
+/* Eq. (eq:leapfrog_field) with the §9.7 source term:
+ *   Phi^{n+1} = 2 Phi^n - Phi^{n-1} + (c dt)^2 (Lap Phi^n + source_coeff * source^n)
  *
- * Three-point leapfrog (Stoermer-Verlet) update of the homogeneous d'Alembert
- * equation, Box Phi = 0:
- *
- *     Phi^{n+1} = 2 Phi^n - Phi^{n-1} + (c dt)^2 ( Lap Phi^n + source^n )
- *
- * Stage 1 has no source term — source = 0. The Laplacian uses the standard
- * 5-point isotropic stencil (gr_sandbox_v32.tex §9.4, the dispersion analysis
- * around eq:dispersion_exact assumes this same 5-point form):
- *
- *     (Lap Phi)_{i,j} = ( Phi_{i-1,j} + Phi_{i+1,j} + Phi_{i,j-1} + Phi_{i,j+1}
- *                          - 4 Phi_{i,j} ) / dx^2
- *
- * Boundary treatment for Stage 1: hard reflecting (zero-Dirichlet) edges. The
- * design doc §9.6 prescribes an absorbing damping layer for production runs,
- * but Stage 1 deliberately omits it (§12.1) — tests must be sized so the
- * outgoing pulse does not reach the wall during the measurement window.
- */
-void gr_field_leapfrog_step(struct gr_sim* sim) {
-    const int W = sim->width;
-    const int H = sim->height;
-
-    const float c2dt2   = sim->c_eff * sim->c_eff * sim->dt * sim->dt;
-    const float inv_dx2 = 1.0f / (sim->dx * sim->dx);
-
-    /* gr_sandbox_v32.tex §9.7 (and the Stage 3 leapfrog form): the wave equation
-     *    Phi^{n+1} = 2 Phi^n - Phi^{n-1} + (c dt)^2 [Lap Phi^n - 4 pi G_eff rho_n]
-     * adds a -4 pi G_eff rho term inside the bracket. Stage 1/2 callers that
-     * don't deposit any source see rho == 0 everywhere, so the result is
-     * bit-identical to the pre-Stage-3 leapfrog. */
-    const float source_coeff = -4.0f * 3.14159265358979323846f * sim->G_eff;
-
-    const float* prev = sim->phi_prev;
-    const float* curr = sim->phi_curr;
-    float* next       = sim->phi_next;
-    const float* damp = sim->damping_d;  /* may be NULL (Stage 1) */
-    const float* rho  = sim->rho_matter;  /* always non-NULL after gr_sim_create */
-
-    if (damp) {
-        /* Eq. (eq:leapfrog_field) with absorbing layer (eq:damp_profile, §9.6)
-         * and the Stage 3 source term:
-         *   Phi^{n+1} = (2 Phi^n - Phi^{n-1}
-         *               + (c dt)^2 (Lap Phi^n - 4 pi G_eff rho)) * (1 - d_{i,j}) */
-        for (int j = 1; j < H - 1; j++) {
-            const int row = j * W;
-            for (int i = 1; i < W - 1; i++) {
-                const int k    = row + i;
-                const float lap = (curr[k - 1] + curr[k + 1] + curr[k - W] + curr[k + W]
-                                  - 4.0f * curr[k]) * inv_dx2;
-                next[k] = (2.0f * curr[k] - prev[k]
-                          + c2dt2 * (lap + source_coeff * rho[k])) * (1.0f - damp[k]);
-            }
-        }
-    } else {
-        for (int j = 1; j < H - 1; j++) {
-            const int row = j * W;
-            for (int i = 1; i < W - 1; i++) {
-                const int k    = row + i;
-                const float lap = (curr[k - 1] + curr[k + 1] + curr[k - W] + curr[k + W]
-                                  - 4.0f * curr[k]) * inv_dx2;
-                next[k] = 2.0f * curr[k] - prev[k]
-                       + c2dt2 * (lap + source_coeff * rho[k]);
-            }
+ * Applied identically to all six potentials each step (gr_sandbox_v32.tex §9.6:
+ * "the same damping array d_{i,j} applies to all six because they all satisfy
+ * the same wave equation with the same propagation speed"). The per-field
+ * variation lives entirely in source_coeff (e.g. -4 pi G_eff for Phi_g vs
+ * -4 pi G_eff / c^2 for A_g) and the source array bound to f->source. */
+static void leapfrog_field_damped(gr_field_state_t* f, const float* damp,
+                                  int W, int H, float c2dt2, float inv_dx2) {
+    const float* prev = f->prev;
+    const float* curr = f->curr;
+    float*       next = f->next;
+    const float* src  = f->source;
+    const float  sc   = f->source_coeff;
+    for (int j = 1; j < H - 1; j++) {
+        const int row = j * W;
+        for (int i = 1; i < W - 1; i++) {
+            const int   k   = row + i;
+            const float lap = (curr[k - 1] + curr[k + 1] + curr[k - W] + curr[k + W]
+                              - 4.0f * curr[k]) * inv_dx2;
+            next[k] = (2.0f * curr[k] - prev[k]
+                      + c2dt2 * (lap + sc * src[k])) * (1.0f - damp[k]);
         }
     }
-
-    /* Zero-Dirichlet boundary. With the damping layer engaged this wall sits at
-     * the outer edge of the absorber, where residual amplitude is ~R ~ 1e-3 of
-     * incident — small enough that the reflection re-attenuates on its return
-     * trip (§9.6). Without the damping layer (Stage 1) the wall is a perfect
-     * reflector; tests must size their measurement window accordingly. */
+    /* Zero-Dirichlet boundary; same justification as Stage 1/2 — the damping
+     * layer absorbs incident energy before it reaches the wall (§9.6). */
     for (int i = 0; i < W; i++) {
         next[i] = 0.0f;
         next[(H - 1) * W + i] = 0.0f;
@@ -83,5 +38,48 @@ void gr_field_leapfrog_step(struct gr_sim* sim) {
     for (int j = 0; j < H; j++) {
         next[j * W] = 0.0f;
         next[j * W + (W - 1)] = 0.0f;
+    }
+}
+
+static void leapfrog_field_undamped(gr_field_state_t* f,
+                                    int W, int H, float c2dt2, float inv_dx2) {
+    const float* prev = f->prev;
+    const float* curr = f->curr;
+    float*       next = f->next;
+    const float* src  = f->source;
+    const float  sc   = f->source_coeff;
+    for (int j = 1; j < H - 1; j++) {
+        const int row = j * W;
+        for (int i = 1; i < W - 1; i++) {
+            const int   k   = row + i;
+            const float lap = (curr[k - 1] + curr[k + 1] + curr[k - W] + curr[k + W]
+                              - 4.0f * curr[k]) * inv_dx2;
+            next[k] = 2.0f * curr[k] - prev[k] + c2dt2 * (lap + sc * src[k]);
+        }
+    }
+    for (int i = 0; i < W; i++) {
+        next[i] = 0.0f;
+        next[(H - 1) * W + i] = 0.0f;
+    }
+    for (int j = 0; j < H; j++) {
+        next[j * W] = 0.0f;
+        next[j * W + (W - 1)] = 0.0f;
+    }
+}
+
+void gr_field_leapfrog_step_all(struct gr_sim* sim) {
+    const int   W       = sim->width;
+    const int   H       = sim->height;
+    const float c2dt2   = sim->c_eff * sim->c_eff * sim->dt * sim->dt;
+    const float inv_dx2 = 1.0f / (sim->dx * sim->dx);
+    const float* damp   = sim->damping_d;  /* may be NULL */
+    if (damp) {
+        for (int f = 0; f < GR_FIELD_COUNT; f++) {
+            leapfrog_field_damped(&sim->fields[f], damp, W, H, c2dt2, inv_dx2);
+        }
+    } else {
+        for (int f = 0; f < GR_FIELD_COUNT; f++) {
+            leapfrog_field_undamped(&sim->fields[f], W, H, c2dt2, inv_dx2);
+        }
     }
 }

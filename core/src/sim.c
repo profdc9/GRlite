@@ -1,5 +1,5 @@
-/* Simulation lifecycle and scenario dispatch.
- * Spec reference: gr_sandbox_v32.tex §9 "Numerical Implementation". */
+/* Simulation lifecycle, source management, scenario dispatch.
+ * Spec reference: gr_sandbox_v32.tex §9 + gr_sandbox_v33.tex §12.4. */
 
 #include "grlite.h"
 #include "sim_internal.h"
@@ -7,6 +7,23 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
+void gr_sim_recompute_source_coeffs(struct gr_sim* sim) {
+    if (!sim) return;
+    const float inv_c2  = 1.0f / (sim->c_eff * sim->c_eff);
+    const float c_grav  = -4.0f * (float) M_PI * sim->G_eff;
+    const float c_em    = -4.0f * (float) M_PI * sim->k_e;
+    sim->fields[GR_FIELD_PHI_GRAV].source_coeff = c_grav;
+    sim->fields[GR_FIELD_A_GX    ].source_coeff = c_grav * inv_c2;
+    sim->fields[GR_FIELD_A_GY    ].source_coeff = c_grav * inv_c2;
+    sim->fields[GR_FIELD_PHI_EM  ].source_coeff = c_em;
+    sim->fields[GR_FIELD_A_X     ].source_coeff = c_em   * inv_c2;
+    sim->fields[GR_FIELD_A_Y     ].source_coeff = c_em   * inv_c2;
+}
 
 gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl) {
     if (width <= 2 || height <= 2 || !(dx > 0.0f) || !(c_eff > 0.0f) || !(cfl > 0.0f)) {
@@ -21,49 +38,63 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
     sim->c_eff  = c_eff;
     sim->cfl    = cfl;
     sim->G_eff  = 1.0f;
-    /* dt from CFL — gr_sandbox_v32.tex §9.2: dt = cfl * dx / c_eff, with stability requiring
-     * cfl <= 1/sqrt(d) in d spatial dimensions. We do not enforce here so callers can
-     * deliberately exceed the limit for the Stage 1 instability test (§12.1). */
+    sim->k_e    = 1.0f;
+    /* dt from CFL — gr_sandbox_v32.tex §9.2 eq:cfl. Not enforced to allow
+     * the Stage 1 instability test (§12.1) to deliberately exceed the limit. */
     sim->dt = cfl * dx / c_eff;
 
     const size_t n = (size_t) width * (size_t) height;
-    sim->phi_prev   = (float*) calloc(n, sizeof(float));
-    sim->phi_curr   = (float*) calloc(n, sizeof(float));
-    sim->phi_next   = (float*) calloc(n, sizeof(float));
-    sim->rho_matter = (float*) calloc(n, sizeof(float));  /* Stage 3 — always allocated */
-    if (!sim->phi_prev || !sim->phi_curr || !sim->phi_next || !sim->rho_matter) {
+
+    /* Allocate six source arrays (always present, zero-filled). */
+    sim->rho_matter = (float*) calloc(n, sizeof(float));
+    sim->J_mx       = (float*) calloc(n, sizeof(float));
+    sim->J_my       = (float*) calloc(n, sizeof(float));
+    sim->rho_q      = (float*) calloc(n, sizeof(float));
+    sim->J_qx       = (float*) calloc(n, sizeof(float));
+    sim->J_qy       = (float*) calloc(n, sizeof(float));
+    if (!sim->rho_matter || !sim->J_mx || !sim->J_my
+        || !sim->rho_q   || !sim->J_qx || !sim->J_qy) {
         gr_sim_destroy(sim);
         return NULL;
     }
+
+    /* Allocate three time levels for each of six fields (18 arrays). */
+    for (int f = 0; f < GR_FIELD_COUNT; f++) {
+        sim->fields[f].prev = (float*) calloc(n, sizeof(float));
+        sim->fields[f].curr = (float*) calloc(n, sizeof(float));
+        sim->fields[f].next = (float*) calloc(n, sizeof(float));
+        if (!sim->fields[f].prev || !sim->fields[f].curr || !sim->fields[f].next) {
+            gr_sim_destroy(sim);
+            return NULL;
+        }
+    }
+
+    /* Bind each field to its source array. */
+    sim->fields[GR_FIELD_PHI_GRAV].source = sim->rho_matter;
+    sim->fields[GR_FIELD_A_GX    ].source = sim->J_mx;
+    sim->fields[GR_FIELD_A_GY    ].source = sim->J_my;
+    sim->fields[GR_FIELD_PHI_EM  ].source = sim->rho_q;
+    sim->fields[GR_FIELD_A_X     ].source = sim->J_qx;
+    sim->fields[GR_FIELD_A_Y     ].source = sim->J_qy;
+
+    gr_sim_recompute_source_coeffs(sim);
     return sim;
-}
-
-void  gr_sim_set_G_eff(gr_sim_t* sim, float G_eff) { if (sim) sim->G_eff = G_eff; }
-float gr_sim_get_G_eff(const gr_sim_t* sim)        { return sim ? sim->G_eff : 0.0f; }
-
-const float* gr_sim_rho_matter_ptr(const gr_sim_t* sim) {
-    return sim ? sim->rho_matter : NULL;
-}
-
-void gr_sim_clear_sources(gr_sim_t* sim) {
-    if (!sim || !sim->rho_matter) return;
-    const size_t n = (size_t) sim->width * (size_t) sim->height;
-    for (size_t k = 0; k < n; k++) sim->rho_matter[k] = 0.0f;
-}
-
-void gr_sim_deposit_point_mass(gr_sim_t* sim, float x, float y, float mass) {
-    if (!sim || !sim->rho_matter) return;
-    gr_cic_deposit_scalar(sim->rho_matter, sim->width, sim->height, sim->dx, x, y, mass);
 }
 
 void gr_sim_destroy(gr_sim_t* sim) {
     if (!sim) return;
-    free(sim->phi_prev);
-    free(sim->phi_curr);
-    free(sim->phi_next);
+    for (int f = 0; f < GR_FIELD_COUNT; f++) {
+        free(sim->fields[f].prev);
+        free(sim->fields[f].curr);
+        free(sim->fields[f].next);
+    }
     free(sim->rho_matter);
+    free(sim->J_mx);
+    free(sim->J_my);
+    free(sim->rho_q);
+    free(sim->J_qx);
+    free(sim->J_qy);
     free(sim->damping_d);
-    /* Background arrays — see background.c. */
     free(sim->phi_g_bg);
     free(sim->Agx_bg);
     free(sim->Agy_bg);
@@ -75,13 +106,14 @@ void gr_sim_destroy(gr_sim_t* sim) {
 
 void gr_sim_step(gr_sim_t* sim) {
     if (!sim) return;
-    gr_field_leapfrog_step(sim);
-    /* Three-pointer rotation: the old prev buffer becomes the next scratch.
-     * gr_sandbox_v32.tex §9.2 — only two time levels need be retained between steps. */
-    float* tmp     = sim->phi_prev;
-    sim->phi_prev  = sim->phi_curr;
-    sim->phi_curr  = sim->phi_next;
-    sim->phi_next  = tmp;
+    gr_field_leapfrog_step_all(sim);
+    /* Three-pointer rotation per field. */
+    for (int f = 0; f < GR_FIELD_COUNT; f++) {
+        float* tmp           = sim->fields[f].prev;
+        sim->fields[f].prev  = sim->fields[f].curr;
+        sim->fields[f].curr  = sim->fields[f].next;
+        sim->fields[f].next  = tmp;
+    }
     sim->step_count++;
 }
 
@@ -98,9 +130,49 @@ int   gr_sim_width(const gr_sim_t* sim)      { return sim ? sim->width : 0; }
 int   gr_sim_height(const gr_sim_t* sim)     { return sim ? sim->height : 0; }
 
 float* gr_sim_field_ptr(gr_sim_t* sim, gr_field_id_t which) {
-    if (!sim) return NULL;
-    if (which == GR_FIELD_PHI_GRAV) return sim->phi_curr;
-    return NULL;
+    if (!sim || which < 0 || which >= GR_FIELD_COUNT) return NULL;
+    return sim->fields[which].curr;
+}
+
+void  gr_sim_set_G_eff(gr_sim_t* sim, float G_eff) {
+    if (!sim) return;
+    sim->G_eff = G_eff;
+    gr_sim_recompute_source_coeffs(sim);
+}
+float gr_sim_get_G_eff(const gr_sim_t* sim) { return sim ? sim->G_eff : 0.0f; }
+
+void  gr_sim_set_k_e(gr_sim_t* sim, float k_e) {
+    if (!sim) return;
+    sim->k_e = k_e;
+    gr_sim_recompute_source_coeffs(sim);
+}
+float gr_sim_get_k_e(const gr_sim_t* sim) { return sim ? sim->k_e : 0.0f; }
+
+const float* gr_sim_rho_matter_ptr(const gr_sim_t* sim) {
+    return sim ? sim->rho_matter : NULL;
+}
+const float* gr_sim_rho_q_ptr(const gr_sim_t* sim) {
+    return sim ? sim->rho_q : NULL;
+}
+
+void gr_sim_clear_sources(gr_sim_t* sim) {
+    if (!sim) return;
+    const size_t n = (size_t) sim->width * (size_t) sim->height;
+    if (sim->rho_matter) memset(sim->rho_matter, 0, n * sizeof(float));
+    if (sim->J_mx)       memset(sim->J_mx,       0, n * sizeof(float));
+    if (sim->J_my)       memset(sim->J_my,       0, n * sizeof(float));
+    if (sim->rho_q)      memset(sim->rho_q,      0, n * sizeof(float));
+    if (sim->J_qx)       memset(sim->J_qx,       0, n * sizeof(float));
+    if (sim->J_qy)       memset(sim->J_qy,       0, n * sizeof(float));
+}
+
+void gr_sim_deposit_point_mass(gr_sim_t* sim, float x, float y, float mass) {
+    if (!sim || !sim->rho_matter) return;
+    gr_cic_deposit_scalar(sim->rho_matter, sim->width, sim->height, sim->dx, x, y, mass);
+}
+void gr_sim_deposit_point_charge(gr_sim_t* sim, float x, float y, float charge) {
+    if (!sim || !sim->rho_q) return;
+    gr_cic_deposit_scalar(sim->rho_q, sim->width, sim->height, sim->dx, x, y, charge);
 }
 
 int gr_sim_load_scenario(gr_sim_t* sim, const char* name, const float* params, int n_params) {
@@ -113,17 +185,8 @@ int gr_sim_load_scenario(gr_sim_t* sim, const char* name, const float* params, i
 
 int gr_sim_damping_layers(const gr_sim_t* sim) { return sim ? sim->n_damping : 0; }
 
-/* Eq. (eq:damp_profile) — §9.6 "Absorbing boundary conditions".
- *
- * Precompute the per-cell damping coefficient
- *   d_{i,j} = max( d_x(i), d_y(j) )
- *   d_x(i)  = sigma_max * ((depth_x / N_d))^2 * dt    inside the layer
- *           = 0                                       in the interior
- *   sigma_max = 21 * c_eff / (2 * L),  L = N_d * dx
- *
- * The leapfrog kernel (field.c) then applies the per-step attenuation
- *   Phi^{n+1}_{i,j} <- Phi^{n+1}_{i,j} * (1 - d_{i,j})
- * giving a round-trip reflection R = exp(-2 sigma_max L / 3 c_eff) ~= 1e-3. */
+/* Eq. (eq:damp_profile) — §9.6 — same precomputation as before, unchanged by
+ * the Stage 4 field-state refactor (damping is per-cell, not per-field). */
 void gr_sim_set_damping(gr_sim_t* sim, int n_damping) {
     if (!sim) return;
     free(sim->damping_d);
@@ -143,12 +206,7 @@ void gr_sim_set_damping(gr_sim_t* sim, int n_damping) {
     const float inv_Nd    = 1.0f / (float) n_damping;
     const float dt        = sim->dt;
 
-    /* depth-along-axis helper: 0 in the interior, [1..n_damping] inside the layer
-     * with n_damping at the wall cell, per the symmetric reading of §9.6. */
-    /* Precompute per-axis fractional depth squared to avoid recomputing in the
-     * inner loop. */
-    float fx2[16384];  /* W limit — assertion below */
-    float fy2[16384];  /* H limit — assertion below */
+    float fx2[16384], fy2[16384];
     if (W > 16384 || H > 16384) {
         free(sim->damping_d);
         sim->damping_d = NULL;
@@ -169,7 +227,6 @@ void gr_sim_set_damping(gr_sim_t* sim, int n_damping) {
         const float f = (float) depth * inv_Nd;
         fy2[j] = f * f;
     }
-
     const float sigma_max_dt = sigma_max * dt;
     for (int j = 0; j < H; j++) {
         const int   row = j * W;
