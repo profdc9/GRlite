@@ -57,10 +57,26 @@ struct gr_sim {
     float* phi_bg;
     float* Ax_bg;
     float* Ay_bg;
+
+    /* Particles (Stage 7). Dynamic array of gr_particle_t. */
+    gr_particle_t* particles;
+    int            n_particles;
+    int            particles_capacity;
 };
 
 /* Defined in field.c — steps all six fields in parallel. */
 void gr_field_leapfrog_step_all(struct gr_sim* sim);
+
+/* Defined in particle.c — pushes all particles one timestep (kick-drift).
+ * Reads (background + perturbation) Phi_g at each particle position to
+ * compute the gravitational force. Subsequent stages will add the EM/GEM
+ * vector-potential contributions. */
+void gr_particle_push_all(struct gr_sim* sim);
+
+/* Interpolated total Phi_g at (x, y) — bg + curr perturbation, via the
+ * cell-centered CIC kernel W_2. Used by both the force pusher and the
+ * energy diagnostic. */
+float gr_phi_g_total_at(const struct gr_sim* sim, float x, float y);
 
 /* Defined in deposit.c — CIC deposition of a scalar value at sub-cell position.
  * Used by scenarios and by gr_sim_deposit_point_{mass,charge}. */

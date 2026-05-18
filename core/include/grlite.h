@@ -139,6 +139,42 @@ float gr_sim_gauge_residual_grav(const gr_sim_t* sim);
 float gr_sim_gauge_residual_em(const gr_sim_t* sim);
 
 /* ----------------------------------------------------------------------------
+ * Particles (Stage 7)
+ *
+ * A particle carries a 2D position (x, y), 2D relativistic 3-momentum (px, py)
+ * = gamma*m*v, a rest mass, and an electric charge. The integrator is the
+ * relativistic Boris-leapfrog (kick-drift) form prescribed by §9.2 of v32:
+ *
+ *   p_{n+1/2}  = p_{n-1/2}  + F^n * dt
+ *   gamma     = sqrt(1 + |p|^2 / (m c)^2)
+ *   v_{n+1/2}  = p_{n+1/2} / (gamma * m)
+ *   x_{n+1}   = x_n + v_{n+1/2} * dt
+ *
+ * Stages 7-8 (Boris in a background) use only the gravitational gradient
+ * (eq:force_gem_pot reduced to -m*grad(Phi_g) when v=0 and A=0). Stage 10+
+ * will add the velocity-dependent gravitomagnetic and EM Lorentz pieces.
+ * --------------------------------------------------------------------------*/
+
+typedef struct {
+    float x, y;
+    float px, py;
+    float mass;
+    float charge;
+} gr_particle_t;
+
+int  gr_sim_add_particle(gr_sim_t* sim, float x, float y,
+                         float mass, float charge,
+                         float vx, float vy);
+int  gr_sim_particle_count(const gr_sim_t* sim);
+const gr_particle_t* gr_sim_get_particle(const gr_sim_t* sim, int idx);
+void gr_sim_clear_particles(gr_sim_t* sim);
+
+/* Total energy of particle `idx`: gamma*m*c^2 + m*Phi_g_total(x_p).
+ * Used as the conservation diagnostic in Stage 7+. Returns 0 if idx is out
+ * of range. */
+float gr_sim_particle_energy(const gr_sim_t* sim, int idx);
+
+/* ----------------------------------------------------------------------------
  * Sampled background field arrays (Stage 6)
  *
  * Each of the six potentials has an optional companion "background" grid array,

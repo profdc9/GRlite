@@ -39,13 +39,14 @@ EMCC_FLAGS = -O3 -std=c11 -Wall -Wextra -msimd128 \
              -s MODULARIZE=1 \
              -s EXPORT_ES6=1 \
              -s ALLOW_MEMORY_GROWTH=1 \
-             -s EXPORTED_FUNCTIONS='["_gr_sim_create","_gr_sim_destroy","_gr_sim_step","_gr_sim_step_n","_gr_sim_step_count","_gr_sim_time","_gr_sim_dt","_gr_sim_dx","_gr_sim_width","_gr_sim_height","_gr_sim_field_ptr","_gr_sim_load_scenario","_gr_sim_set_damping","_gr_sim_damping_layers","_gr_sim_set_G_eff","_gr_sim_get_G_eff","_gr_sim_set_k_e","_gr_sim_get_k_e","_gr_sim_clear_sources","_gr_sim_deposit_point_mass","_gr_sim_deposit_point_charge","_gr_sim_deposit_point_particle","_gr_sim_rho_matter_ptr","_gr_sim_rho_q_ptr","_gr_sim_J_mx_ptr","_gr_sim_J_my_ptr","_gr_sim_J_qx_ptr","_gr_sim_J_qy_ptr","_gr_sim_gauge_residual_grav","_gr_sim_gauge_residual_em","_gr_sim_background_ptr","_gr_sim_clear_background","_gr_sim_set_background_point_mass","_malloc","_free"]' \
+             -s EXPORTED_FUNCTIONS='["_gr_sim_create","_gr_sim_destroy","_gr_sim_step","_gr_sim_step_n","_gr_sim_step_count","_gr_sim_time","_gr_sim_dt","_gr_sim_dx","_gr_sim_width","_gr_sim_height","_gr_sim_field_ptr","_gr_sim_load_scenario","_gr_sim_set_damping","_gr_sim_damping_layers","_gr_sim_set_G_eff","_gr_sim_get_G_eff","_gr_sim_set_k_e","_gr_sim_get_k_e","_gr_sim_clear_sources","_gr_sim_deposit_point_mass","_gr_sim_deposit_point_charge","_gr_sim_deposit_point_particle","_gr_sim_rho_matter_ptr","_gr_sim_rho_q_ptr","_gr_sim_J_mx_ptr","_gr_sim_J_my_ptr","_gr_sim_J_qx_ptr","_gr_sim_J_qy_ptr","_gr_sim_gauge_residual_grav","_gr_sim_gauge_residual_em","_gr_sim_background_ptr","_gr_sim_clear_background","_gr_sim_set_background_point_mass","_gr_sim_add_particle","_gr_sim_particle_count","_gr_sim_get_particle","_gr_sim_clear_particles","_gr_sim_particle_energy","_malloc","_free"]' \
              -s EXPORTED_RUNTIME_METHODS='["HEAPF32","HEAPU8","ccall","cwrap","UTF8ToString","stringToUTF8"]'
 
 # --- Sources -------------------------------------------------------------
 CORE_SRCS = src/sim.c src/field.c src/background.c src/deposit.c src/gauge.c \
+            src/particle.c \
             scenarios/registry.c scenarios/wave_pulse.c scenarios/static_source.c \
-            scenarios/moving_source.c
+            scenarios/moving_source.c scenarios/kepler_orbit.c
 TEST_SRCS = $(wildcard tests/*.c)
 
 BUILD       = build

@@ -101,6 +101,7 @@ void gr_sim_destroy(gr_sim_t* sim) {
     free(sim->phi_bg);
     free(sim->Ax_bg);
     free(sim->Ay_bg);
+    free(sim->particles);
     free(sim);
 }
 
@@ -114,6 +115,8 @@ void gr_sim_step(gr_sim_t* sim) {
         sim->fields[f].curr  = sim->fields[f].next;
         sim->fields[f].next  = tmp;
     }
+    /* Stage 7+: push particles each step (Boris-leapfrog kick-drift). */
+    if (sim->n_particles > 0) gr_particle_push_all(sim);
     sim->step_count++;
 }
 
