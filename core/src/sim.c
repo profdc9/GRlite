@@ -20,20 +20,40 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
     sim->dx     = dx;
     sim->c_eff  = c_eff;
     sim->cfl    = cfl;
+    sim->G_eff  = 1.0f;
     /* dt from CFL — gr_sandbox_v32.tex §9.2: dt = cfl * dx / c_eff, with stability requiring
      * cfl <= 1/sqrt(d) in d spatial dimensions. We do not enforce here so callers can
      * deliberately exceed the limit for the Stage 1 instability test (§12.1). */
     sim->dt = cfl * dx / c_eff;
 
     const size_t n = (size_t) width * (size_t) height;
-    sim->phi_prev = (float*) calloc(n, sizeof(float));
-    sim->phi_curr = (float*) calloc(n, sizeof(float));
-    sim->phi_next = (float*) calloc(n, sizeof(float));
-    if (!sim->phi_prev || !sim->phi_curr || !sim->phi_next) {
+    sim->phi_prev   = (float*) calloc(n, sizeof(float));
+    sim->phi_curr   = (float*) calloc(n, sizeof(float));
+    sim->phi_next   = (float*) calloc(n, sizeof(float));
+    sim->rho_matter = (float*) calloc(n, sizeof(float));  /* Stage 3 — always allocated */
+    if (!sim->phi_prev || !sim->phi_curr || !sim->phi_next || !sim->rho_matter) {
         gr_sim_destroy(sim);
         return NULL;
     }
     return sim;
+}
+
+void  gr_sim_set_G_eff(gr_sim_t* sim, float G_eff) { if (sim) sim->G_eff = G_eff; }
+float gr_sim_get_G_eff(const gr_sim_t* sim)        { return sim ? sim->G_eff : 0.0f; }
+
+const float* gr_sim_rho_matter_ptr(const gr_sim_t* sim) {
+    return sim ? sim->rho_matter : NULL;
+}
+
+void gr_sim_clear_sources(gr_sim_t* sim) {
+    if (!sim || !sim->rho_matter) return;
+    const size_t n = (size_t) sim->width * (size_t) sim->height;
+    for (size_t k = 0; k < n; k++) sim->rho_matter[k] = 0.0f;
+}
+
+void gr_sim_deposit_point_mass(gr_sim_t* sim, float x, float y, float mass) {
+    if (!sim || !sim->rho_matter) return;
+    gr_cic_deposit_scalar(sim->rho_matter, sim->width, sim->height, sim->dx, x, y, mass);
 }
 
 void gr_sim_destroy(gr_sim_t* sim) {
@@ -41,6 +61,7 @@ void gr_sim_destroy(gr_sim_t* sim) {
     free(sim->phi_prev);
     free(sim->phi_curr);
     free(sim->phi_next);
+    free(sim->rho_matter);
     free(sim->damping_d);
     /* Background arrays — see background.c. */
     free(sim->phi_g_bg);

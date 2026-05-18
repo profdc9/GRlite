@@ -34,9 +34,14 @@ typedef enum {
  * CFL stability: gr_sandbox_v32.tex §9.2 eq:cfl requires cfl <= 1/sqrt(d), so
  * cfl <= 1/sqrt(2) ~= 0.7071 in 2D. Values above will diverge.
  *
- * Returns NULL on invalid parameters or allocation failure.
- */
+ * Returns NULL on invalid parameters or allocation failure. G_eff defaults to
+ * 1.0 (set via gr_sim_set_G_eff). */
 gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl);
+
+/* Set the effective gravitational constant (Stage 3+). The Phi_g leapfrog
+ * source term is -4*pi*G_eff*rho_matter per gr_sandbox_v32.tex §9.7. */
+void  gr_sim_set_G_eff(gr_sim_t* sim, float G_eff);
+float gr_sim_get_G_eff(const gr_sim_t* sim);
 
 /* Free the simulation. Safe to pass NULL. */
 void gr_sim_destroy(gr_sim_t* sim);
@@ -62,6 +67,29 @@ int   gr_sim_height(const gr_sim_t* sim);
  * The pointer remains valid until gr_sim_destroy or the next gr_sim_step (the
  * leapfrog rotates three internal buffers — see src/sim_internal.h). */
 float* gr_sim_field_ptr(gr_sim_t* sim, gr_field_id_t which);
+
+/* ----------------------------------------------------------------------------
+ * Static source deposition (Stage 3)
+ *
+ * Sources for the wave-equation RHS are stored on the grid (same staggering
+ * as Phi). A scenario builds the source distribution at setup; the leapfrog
+ * reads it but never modifies it (Stage 3 == static sources). The discrete
+ * Poisson convergence condition at static equilibrium is, for the Phi_g
+ * equation,
+ *    Lap Phi_g = 4*pi*G_eff * rho_matter
+ * which is the v32 §9.7 leapfrog form (-4*pi*G_eff*rho) evaluated when the
+ * field has stopped changing.
+ *
+ * gr_sim_deposit_point_mass implements eq:cic_deposit (§9.5) — bilinear
+ * sub-cell weights, four-cell support, total deposited integral = mass.
+ * --------------------------------------------------------------------------*/
+
+void gr_sim_clear_sources(gr_sim_t* sim);
+void gr_sim_deposit_point_mass(gr_sim_t* sim, float x, float y, float mass);
+
+/* Read access to the gravitational mass-density source array (rho_matter).
+ * Always non-NULL after gr_sim_create. */
+const float* gr_sim_rho_matter_ptr(const gr_sim_t* sim);
 
 /* ----------------------------------------------------------------------------
  * Sampled background field arrays (Stage 6)

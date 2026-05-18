@@ -20,11 +20,17 @@ struct gr_sim {
     float c_eff;
     float dt;
     float cfl;
+    float G_eff;        /* effective gravitational constant (Stage 3+); default 1.0 */
     int   step_count;
 
     float* phi_prev;   /* Phi^{n-1} */
     float* phi_curr;   /* Phi^n     */
     float* phi_next;   /* Phi^{n+1} (scratch) */
+
+    /* Stage 3 static source — same staggering as phi_g (cell-centered).
+     * Always allocated by gr_sim_create (zero-filled); deposited into by
+     * scenarios via the CIC kernel gr_cic_deposit_scalar (eq:cic_deposit). */
+    float* rho_matter;
 
     /* Damping layer (Stage 2, gr_sandbox_v32.tex §9.6).
      *   n_damping       : layer thickness on each edge (0 = no damping)
@@ -50,6 +56,12 @@ struct gr_sim {
 
 /* Defined in field.c — fills sim->phi_next from sim->phi_curr and sim->phi_prev. */
 void gr_field_leapfrog_step(struct gr_sim* sim);
+
+/* Defined in deposit.c — CIC deposition of a scalar value at sub-cell position.
+ * Used by scenarios to set up rho_matter (Stage 3) and, later, particle
+ * source deposition (Stage 9+). */
+void gr_cic_deposit_scalar(float* rho, int W, int H, float dx,
+                           float x_p, float y_p, float value);
 
 /* Defined in scenarios/registry.c. */
 const gr_scenario_t* gr_scenario_find(const char* name);

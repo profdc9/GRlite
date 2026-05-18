@@ -30,10 +30,11 @@ const gr_scenario_t* gr_scenario_find(const char* name) {
 /* Each new scenario .c file declares its registration function here and calls
  * it from gr_scenarios_init. */
 extern void gr_scenario_register_wave_pulse(void);
+extern void gr_scenario_register_static_source(void);
 
 void gr_scenarios_init(void) {
     if (g_initialized) return;
     g_initialized = 1;
     gr_scenario_register_wave_pulse();
-    /* Future scenarios: add registration calls here. */
+    gr_scenario_register_static_source();
 }

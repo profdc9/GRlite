@@ -30,21 +30,32 @@ void gr_field_leapfrog_step(struct gr_sim* sim) {
     const float c2dt2   = sim->c_eff * sim->c_eff * sim->dt * sim->dt;
     const float inv_dx2 = 1.0f / (sim->dx * sim->dx);
 
+    /* gr_sandbox_v32.tex §9.7 (and the Stage 3 leapfrog form): the wave equation
+     *    Phi^{n+1} = 2 Phi^n - Phi^{n-1} + (c dt)^2 [Lap Phi^n - 4 pi G_eff rho_n]
+     * adds a -4 pi G_eff rho term inside the bracket. Stage 1/2 callers that
+     * don't deposit any source see rho == 0 everywhere, so the result is
+     * bit-identical to the pre-Stage-3 leapfrog. */
+    const float source_coeff = -4.0f * 3.14159265358979323846f * sim->G_eff;
+
     const float* prev = sim->phi_prev;
     const float* curr = sim->phi_curr;
     float* next       = sim->phi_next;
     const float* damp = sim->damping_d;  /* may be NULL (Stage 1) */
+    const float* rho  = sim->rho_matter;  /* always non-NULL after gr_sim_create */
 
     if (damp) {
-        /* Eq. (eq:leapfrog_field) with absorbing layer (eq:damp_profile, §9.6):
-         * Phi^{n+1} = (2 Phi^n - Phi^{n-1} + (c dt)^2 Lap) * (1 - d_{i,j}) */
+        /* Eq. (eq:leapfrog_field) with absorbing layer (eq:damp_profile, §9.6)
+         * and the Stage 3 source term:
+         *   Phi^{n+1} = (2 Phi^n - Phi^{n-1}
+         *               + (c dt)^2 (Lap Phi^n - 4 pi G_eff rho)) * (1 - d_{i,j}) */
         for (int j = 1; j < H - 1; j++) {
             const int row = j * W;
             for (int i = 1; i < W - 1; i++) {
                 const int k    = row + i;
                 const float lap = (curr[k - 1] + curr[k + 1] + curr[k - W] + curr[k + W]
                                   - 4.0f * curr[k]) * inv_dx2;
-                next[k] = (2.0f * curr[k] - prev[k] + c2dt2 * lap) * (1.0f - damp[k]);
+                next[k] = (2.0f * curr[k] - prev[k]
+                          + c2dt2 * (lap + source_coeff * rho[k])) * (1.0f - damp[k]);
             }
         }
     } else {
@@ -54,7 +65,8 @@ void gr_field_leapfrog_step(struct gr_sim* sim) {
                 const int k    = row + i;
                 const float lap = (curr[k - 1] + curr[k + 1] + curr[k - W] + curr[k + W]
                                   - 4.0f * curr[k]) * inv_dx2;
-                next[k] = 2.0f * curr[k] - prev[k] + c2dt2 * lap;
+                next[k] = 2.0f * curr[k] - prev[k]
+                       + c2dt2 * (lap + source_coeff * rho[k]);
             }
         }
     }
