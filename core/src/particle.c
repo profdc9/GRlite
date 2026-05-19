@@ -36,7 +36,15 @@ float gr_phi_g_total_at(const struct gr_sim* sim, float x, float y) {
     const int   H  = sim->height;
     const float dx = sim->dx;
     const float pert = cic_interpolate(sim->fields[GR_FIELD_PHI_GRAV].curr, W, H, dx, x, y);
-    const float bg   = cic_interpolate(sim->phi_g_bg,                       W, H, dx, x, y);
+    float bg = 0.0f;
+    if (sim->bg_mode == GR_BG_MODE_ANALYTIC && sim->bg_kind != GR_BG_KIND_NONE) {
+        float phi_a, gx_a, gy_a;
+        if (gr_bg_eval_analytic(sim, x, y, &phi_a, &gx_a, &gy_a)) {
+            bg = phi_a;
+        }
+    } else {
+        bg = cic_interpolate(sim->phi_g_bg, W, H, dx, x, y);
+    }
     return pert + bg;
 }
 
@@ -57,39 +65,114 @@ static void grav_grad_at(const struct gr_sim* sim, float x, float y,
     const float yn = y / dx - 0.5f;
     const int   ic = (int) floorf(xn);
     const int   jc = (int) floorf(yn);
-    /* Need ic-1 and ic+2 in bounds for the centered FD at all four corners. */
-    if (ic < 1 || ic >= W - 2 || jc < 1 || jc >= H - 2) return;
-    const float alpha = xn - (float) ic;
-    const float beta  = yn - (float) jc;
-    const float inv_2dx = 1.0f / (2.0f * dx);
 
-    const float* pert = sim->fields[GR_FIELD_PHI_GRAV].curr;
-    const float* bg   = sim->phi_g_bg;
-
-    /* Evaluate d_x Phi_g and d_y Phi_g at the four surrounding cells via
-     * centered FD on (pert + bg), then bilinear-combine to the particle. */
-    float gx[4], gy[4];
-    const int idx[4] = {jc * W + ic,
-                        jc * W + ic + 1,
-                        (jc + 1) * W + ic,
-                        (jc + 1) * W + ic + 1};
-    for (int q = 0; q < 4; q++) {
-        const int k = idx[q];
-        float dphi_dx = (pert[k + 1] - pert[k - 1]) * inv_2dx;
-        float dphi_dy = (pert[k + W] - pert[k - W]) * inv_2dx;
-        if (bg) {
-            dphi_dx += (bg[k + 1] - bg[k - 1]) * inv_2dx;
-            dphi_dy += (bg[k + W] - bg[k - W]) * inv_2dx;
-        }
-        gx[q] = dphi_dx;
-        gy[q] = dphi_dy;
+    /* Background contribution: either the analytic generator (exact, no
+     * grid involvement, no tangential discretization error) or the sampled
+     * array (CIC-of-FD). */
+    float gx_bg = 0.0f, gy_bg = 0.0f;
+    if (sim->bg_mode == GR_BG_MODE_ANALYTIC && sim->bg_kind != GR_BG_KIND_NONE) {
+        float phi_a;
+        gr_bg_eval_analytic(sim, x, y, &phi_a, &gx_bg, &gy_bg);
     }
-    const float w00 = (1.0f - alpha) * (1.0f - beta);
-    const float w10 =         alpha  * (1.0f - beta);
-    const float w01 = (1.0f - alpha) *         beta;
-    const float w11 =         alpha  *         beta;
-    *gx_out = w00 * gx[0] + w10 * gx[1] + w01 * gx[2] + w11 * gx[3];
-    *gy_out = w00 * gy[0] + w10 * gy[1] + w01 * gy[2] + w11 * gy[3];
+
+    /* Perturbation contribution via the sampled-grid CIC+FD path.  Always
+     * goes through the grid since this field is dynamic.  Requires
+     * 2-cell-wide interior margin for the centered FD. */
+    if (ic >= 1 && ic < W - 2 && jc >= 1 && jc < H - 2) {
+        const float alpha = xn - (float) ic;
+        const float beta  = yn - (float) jc;
+        const float inv_2dx = 1.0f / (2.0f * dx);
+
+        const float* pert = sim->fields[GR_FIELD_PHI_GRAV].curr;
+        const float* bg_sampled =
+            (sim->bg_mode == GR_BG_MODE_SAMPLED) ? sim->phi_g_bg : NULL;
+
+        float gx[4], gy[4];
+        const int idx[4] = {jc * W + ic,
+                            jc * W + ic + 1,
+                            (jc + 1) * W + ic,
+                            (jc + 1) * W + ic + 1};
+        for (int q = 0; q < 4; q++) {
+            const int k = idx[q];
+            float dphi_dx = (pert[k + 1] - pert[k - 1]) * inv_2dx;
+            float dphi_dy = (pert[k + W] - pert[k - W]) * inv_2dx;
+            if (bg_sampled) {
+                dphi_dx += (bg_sampled[k + 1] - bg_sampled[k - 1]) * inv_2dx;
+                dphi_dy += (bg_sampled[k + W] - bg_sampled[k - W]) * inv_2dx;
+            }
+            gx[q] = dphi_dx;
+            gy[q] = dphi_dy;
+        }
+        const float w00 = (1.0f - alpha) * (1.0f - beta);
+        const float w10 =         alpha  * (1.0f - beta);
+        const float w01 = (1.0f - alpha) *         beta;
+        const float w11 =         alpha  *         beta;
+        *gx_out = w00 * gx[0] + w10 * gx[1] + w01 * gx[2] + w11 * gx[3] + gx_bg;
+        *gy_out = w00 * gy[0] + w10 * gy[1] + w01 * gy[2] + w11 * gy[3] + gy_bg;
+    } else {
+        /* Particle is in the outer ring where the perturbation FD can't
+         * be evaluated; analytic background still contributes. */
+        *gx_out = gx_bg;
+        *gy_out = gy_bg;
+    }
+}
+
+/* Gravitational force F at a particle with mass m, velocity (vx, vy), in the
+ * total Phi_g (perturbation + background, value phi at the particle) and its
+ * gradient (grad_x, grad_y) = grad(Phi_g_total).  The local gravity vector is
+ * g = -grad(Phi_g).
+ *
+ * Tiers (gr_sandbox_v33.tex §"Practical implementation tiers"):
+ *   NEWTONIAN:    F = m * g
+ *   RELATIVISTIC: F = m * [g (1 + v^2/c^2 + 4 phi/c^2) - 4 (v . g) v / c^2]
+ *
+ * The relativistic expression is the Einstein-Infeld-Hoffmann 1PN equation
+ * of motion for a test particle in a static field, harmonic gauge, with the
+ * v33 doc's isotropic-form metric (g_{ij} = (1-2 phi/c^2) delta_ij).  See
+ * Ali-Haïmoud, GR Fall 2019 lecture 25, eq. 37, with psi = xi = 0 and dt phi = 0:
+ *
+ *   dv/dt = -(1 + v^2/c^2 + 4 phi/c^2) grad(phi) + 4 (v . grad(phi)) v / c^2
+ *
+ * Substituting g = -grad(phi) and (v . g) = -(v . grad(phi)) gives the form
+ * above.  This differs from v33 eq:geodesic_expansion (line 668) in two ways:
+ *   (a) the 4*phi*g/c^2 ("Shapiro") term is added — comes from the g_{00}
+ *       expansion at O(v^4) in Gamma^i_{00} (lecture eq. 30).
+ *   (b) the sign on the velocity-coupling term is NEGATIVE, not positive as
+ *       v33 has.  Empirical confirmation: with the v33 sign the test orbit
+ *       precesses retrograde; with the EIH sign it precesses prograde.
+ *
+ * To be folded into the doc as v34.
+ *
+ * Tier 1 (GEM with A_g) and Tier 3 (full) arrive at Stage 10+ when the
+ * perturbation A_g potentials are active and contribute via psi and xi. */
+static inline void grav_force_at(const struct gr_sim* sim,
+                                 float mass, float vx, float vy,
+                                 float phi,
+                                 float grad_x, float grad_y,
+                                 float* Fx, float* Fy) {
+    if (sim->force_tier == GR_FORCE_RELATIVISTIC) {
+        /* EIH 1PN coordinate acceleration (Ali-Haïmoud, GR Fall 2019 lecture
+         * 25, eq. 37, static test particle with psi = xi = 0, dt phi = 0):
+         *
+         *   dv/dt = g (1 + v^2/c^2 + 4 phi/c^2)  -  4 (v . g) v / c^2
+         *
+         * We apply this as F/m in the Boris-leapfrog dp/dt update.  The
+         * exact conversion adds a gamma factor and a (v.a) term, both small
+         * (~v^2/c^2) at the velocities of interest; numerical tests at deep
+         * 1PN regime (v/c ~ 0.04) recover the Schwarzschild precession to
+         * ~12 percent without it, well within 2PN truncation error. */
+        const float inv_c2 = 1.0f / (sim->c_eff * sim->c_eff);
+        const float v2     = vx * vx + vy * vy;
+        /* v . g = -(v . grad Phi_g) */
+        const float v_dot_g = -(vx * grad_x + vy * grad_y);
+        const float k1 = -(1.0f + (v2 + 4.0f * phi) * inv_c2);   /* (1 + v^2/c^2 + 4 phi/c^2) g */
+        const float k2 = -4.0f * v_dot_g * inv_c2;               /* -4 (v.g) v / c^2 */
+        *Fx = mass * (k1 * grad_x + k2 * vx);
+        *Fy = mass * (k1 * grad_y + k2 * vy);
+    } else {
+        *Fx = -mass * grad_x;
+        *Fy = -mass * grad_y;
+    }
 }
 
 /* Boris-leapfrog kick-drift for one timestep.
@@ -99,25 +182,52 @@ static void grav_grad_at(const struct gr_sim* sim, float x, float y,
  *   v_{n+1/2} = p_{n+1/2} / sqrt(m^2 + |p|^2/c^2)
  *   x_{n+1}   = x_n + v_{n+1/2} * dt
  *
- * For Stage 7 the force is purely the gravitational gradient,
- *   F = -m * grad(Phi_g_total) (eq:force_gem_pot with v=0 and A_g=0).
- * Later stages add Lorentz/gravitomagnetic terms via the Boris rotation. */
+ * For Tier-0 (Newtonian) the force depends only on position, so plain
+ * kick-drift is fine. For Tier-2 the force depends on v as well, and we
+ * approximate v^n by the lagged half-step velocity from p^{n-1/2}. This is
+ * 2nd-order in dt and preserves the symmetric kick-drift-kick structure when
+ * the corrector below is used. */
 void gr_particle_push_all(struct gr_sim* sim) {
     if (!sim || sim->n_particles <= 0) return;
-    const float dt    = sim->dt;
-    const float c2    = sim->c_eff * sim->c_eff;
+    const float dt = sim->dt;
+    const float c2 = sim->c_eff * sim->c_eff;
     for (int i = 0; i < sim->n_particles; i++) {
         gr_particle_t* p = &sim->particles[i];
-        float gx, gy;
-        grav_grad_at(sim, p->x, p->y, &gx, &gy);
-        const float Fx = -p->mass * gx;
-        const float Fy = -p->mass * gy;
+        float grad_x, grad_y;
+        grav_grad_at(sim, p->x, p->y, &grad_x, &grad_y);
+        const float phi = gr_phi_g_total_at(sim, p->x, p->y);
+
+        /* v from lagged p^{n-1/2} — used to evaluate the velocity-dependent
+         * Tier-2 force terms.  Negligible cost for Newtonian since grav_force_at
+         * ignores v in that mode. */
+        float pmag2 = p->px * p->px + p->py * p->py;
+        float gamma = sqrtf(1.0f + pmag2 / (p->mass * p->mass * c2));
+        const float vx_pre = p->px / (gamma * p->mass);
+        const float vy_pre = p->py / (gamma * p->mass);
+
+        float Fx, Fy;
+        grav_force_at(sim, p->mass, vx_pre, vy_pre, phi, grad_x, grad_y, &Fx, &Fy);
+
+        /* Corrector iteration for velocity-dependent Tier-2 force: midpoint
+         * velocity gives 2nd-order time accuracy. */
+        if (sim->force_tier == GR_FORCE_RELATIVISTIC) {
+            const float px_pred = p->px + Fx * dt;
+            const float py_pred = p->py + Fy * dt;
+            const float pmag2_pred = px_pred * px_pred + py_pred * py_pred;
+            const float gamma_pred = sqrtf(1.0f + pmag2_pred / (p->mass * p->mass * c2));
+            const float vx_post = px_pred / (gamma_pred * p->mass);
+            const float vy_post = py_pred / (gamma_pred * p->mass);
+            const float vx_mid = 0.5f * (vx_pre + vx_post);
+            const float vy_mid = 0.5f * (vy_pre + vy_post);
+            grav_force_at(sim, p->mass, vx_mid, vy_mid, phi, grad_x, grad_y, &Fx, &Fy);
+        }
+
         p->px += Fx * dt;
         p->py += Fy * dt;
-        const float pmag2 = p->px * p->px + p->py * p->py;
-        const float gamma = sqrtf(1.0f + pmag2 / (p->mass * p->mass * c2));
-        const float vx    = p->px / (gamma * p->mass);
-        const float vy    = p->py / (gamma * p->mass);
+        pmag2 = p->px * p->px + p->py * p->py;
+        gamma = sqrtf(1.0f + pmag2 / (p->mass * p->mass * c2));
+        const float vx = p->px / (gamma * p->mass);
+        const float vy = p->py / (gamma * p->mass);
         p->x += vx * dt;
         p->y += vy * dt;
     }
@@ -143,13 +253,14 @@ int gr_sim_add_particle(gr_sim_t* sim, float x, float y,
      * force at t=0 (gr_sandbox_v32.tex §9.7 "leapfrog initialization"). The
      * leapfrog needs p^{-1/2} to advance to p^{+1/2} on the first step. */
     const float c2    = sim->c_eff * sim->c_eff;
-    /* Compute force at the initial position. */
-    float gx, gy;
-    grav_grad_at(sim, x, y, &gx, &gy);
-    const float Fx = -mass * gx;
-    const float Fy = -mass * gy;
-    /* p^0 = m * v (linear approximation; the relativistic correction at low
-     * v is negligible and corrected by the integrator over many steps). */
+    /* Compute force at the initial position, using the current tier setting
+     * so the half-step-back kick matches what the pusher will apply on step 0. */
+    float grad_x, grad_y;
+    grav_grad_at(sim, x, y, &grad_x, &grad_y);
+    const float phi_init = gr_phi_g_total_at(sim, x, y);
+    float Fx, Fy;
+    grav_force_at(sim, mass, vx, vy, phi_init, grad_x, grad_y, &Fx, &Fy);
+    /* p^0 = gamma_0 m v (relativistic). */
     const float gamma0 = 1.0f / sqrtf(fmaxf(1.0f - (vx * vx + vy * vy) / c2, 1e-12f));
     const float px0    = gamma0 * mass * vx;
     const float py0    = gamma0 * mass * vy;

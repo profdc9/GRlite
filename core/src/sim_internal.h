@@ -62,6 +62,28 @@ struct gr_sim {
     gr_particle_t* particles;
     int            n_particles;
     int            particles_capacity;
+
+    /* Stage 8 — selects Newtonian vs Tier-2 relativistic gravity force. */
+    gr_force_tier_t force_tier;
+
+    /* If 0, the per-step wave-equation leapfrog on the six perturbation
+     * fields is skipped (along with the buffer rotation).  Used by Stage 7/8
+     * static-background-only tests to avoid the cost of evolving zero fields
+     * for tens of thousands of steps.  Default 1 (full step). */
+    int field_evolution_enabled;
+
+    /* Background generator parameters — kept alongside the sampled phi_g_bg
+     * array so the user can switch between SAMPLED and ANALYTIC at runtime.
+     * Only the currently installed kind's fields are meaningful. */
+    gr_bg_kind_t bg_kind;
+    gr_bg_mode_t bg_mode;
+    float        bg_x0, bg_y0;
+    float        bg_GM;
+    float        bg_eps;
+    /* Future-use slots for spinning / charged variants — kept as zeros until
+     * the corresponding generator is implemented. */
+    float        bg_charge;
+    float        bg_spin;
 };
 
 /* Defined in field.c — steps all six fields in parallel. */
@@ -89,5 +111,15 @@ const gr_scenario_t* gr_scenario_find(const char* name);
 /* Defined in sim.c — refresh the per-field source coefficients after G_eff
  * or k_e changes. */
 void gr_sim_recompute_source_coeffs(struct gr_sim* sim);
+
+/* Defined in background.c — analytic-mode evaluation of the installed
+ * background generator at an exact spatial position (x, y).  Returns 1 if a
+ * background is installed and was evaluated, 0 otherwise (caller leaves
+ * *phi_out / *gx_out / *gy_out as the caller initialized them).  Output:
+ *   *phi_out  : value of Phi_g^{bg}(x, y)
+ *   *gx_out   : d/dx Phi_g^{bg}(x, y)
+ *   *gy_out   : d/dy Phi_g^{bg}(x, y) */
+int gr_bg_eval_analytic(const struct gr_sim* sim, float x, float y,
+                        float* phi_out, float* gx_out, float* gy_out);
 
 #endif /* GRLITE_SIM_INTERNAL_H */

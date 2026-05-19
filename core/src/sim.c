@@ -37,8 +37,9 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
     sim->dx     = dx;
     sim->c_eff  = c_eff;
     sim->cfl    = cfl;
-    sim->G_eff  = 1.0f;
-    sim->k_e    = 1.0f;
+    sim->G_eff                   = 1.0f;
+    sim->k_e                     = 1.0f;
+    sim->field_evolution_enabled = 1;
     /* dt from CFL — gr_sandbox_v32.tex §9.2 eq:cfl. Not enforced to allow
      * the Stage 1 instability test (§12.1) to deliberately exceed the limit. */
     sim->dt = cfl * dx / c_eff;
@@ -107,17 +108,43 @@ void gr_sim_destroy(gr_sim_t* sim) {
 
 void gr_sim_step(gr_sim_t* sim) {
     if (!sim) return;
-    gr_field_leapfrog_step_all(sim);
-    /* Three-pointer rotation per field. */
-    for (int f = 0; f < GR_FIELD_COUNT; f++) {
-        float* tmp           = sim->fields[f].prev;
-        sim->fields[f].prev  = sim->fields[f].curr;
-        sim->fields[f].curr  = sim->fields[f].next;
-        sim->fields[f].next  = tmp;
+    if (sim->field_evolution_enabled) {
+        gr_field_leapfrog_step_all(sim);
+        /* Three-pointer rotation per field. */
+        for (int f = 0; f < GR_FIELD_COUNT; f++) {
+            float* tmp           = sim->fields[f].prev;
+            sim->fields[f].prev  = sim->fields[f].curr;
+            sim->fields[f].curr  = sim->fields[f].next;
+            sim->fields[f].next  = tmp;
+        }
     }
     /* Stage 7+: push particles each step (Boris-leapfrog kick-drift). */
     if (sim->n_particles > 0) gr_particle_push_all(sim);
     sim->step_count++;
+}
+
+/* Stage 8 — skip the per-step leapfrog when no perturbation dynamics are
+ * active. The perturbation fields stay at zero (as initialized) and the
+ * particle pusher reads only the background array. */
+void gr_sim_set_field_evolution(gr_sim_t* sim, int enabled) {
+    if (!sim) return;
+    sim->field_evolution_enabled = enabled ? 1 : 0;
+}
+int gr_sim_get_field_evolution(const gr_sim_t* sim) {
+    return sim ? sim->field_evolution_enabled : 1;
+}
+
+/* Background evaluation mode — runtime switch between sampled-grid and
+ * closed-form analytic paths for the installed background generator. */
+void gr_sim_set_bg_mode(gr_sim_t* sim, gr_bg_mode_t mode) {
+    if (!sim) return;
+    sim->bg_mode = mode;
+}
+gr_bg_mode_t gr_sim_get_bg_mode(const gr_sim_t* sim) {
+    return sim ? sim->bg_mode : GR_BG_MODE_SAMPLED;
+}
+gr_bg_kind_t gr_sim_get_bg_kind(const gr_sim_t* sim) {
+    return sim ? sim->bg_kind : GR_BG_KIND_NONE;
 }
 
 void gr_sim_step_n(gr_sim_t* sim, int n) {
@@ -150,6 +177,16 @@ void  gr_sim_set_k_e(gr_sim_t* sim, float k_e) {
     gr_sim_recompute_source_coeffs(sim);
 }
 float gr_sim_get_k_e(const gr_sim_t* sim) { return sim ? sim->k_e : 0.0f; }
+
+/* Stage 8 — force-tier selector. calloc-zero gives GR_FORCE_NEWTONIAN by
+ * default, matching Stage 7 behavior. */
+void gr_sim_set_force_tier(gr_sim_t* sim, gr_force_tier_t tier) {
+    if (!sim) return;
+    sim->force_tier = tier;
+}
+gr_force_tier_t gr_sim_get_force_tier(const gr_sim_t* sim) {
+    return sim ? sim->force_tier : GR_FORCE_NEWTONIAN;
+}
 
 const float* gr_sim_rho_matter_ptr(const gr_sim_t* sim) {
     return sim ? sim->rho_matter : NULL;

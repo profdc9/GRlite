@@ -51,6 +51,15 @@ static int build_kepler_orbit(gr_sim_t* sim, const float* params, int n_params) 
     gr_sim_set_background_point_mass(sim, x0, y0, GM, eps);
     gr_sim_clear_particles(sim);
 
+    /* No perturbation dynamics in Stage 7 — fields stay at zero. Skip the
+     * wave-equation leapfrog to save compute. */
+    gr_sim_set_field_evolution(sim, 0);
+    /* Evaluate the point-mass background analytically at the particle
+     * position (rather than CIC-interpolating the cell-centered sample).
+     * Removes the O((dx/r)^2) tangential force error that otherwise
+     * shows up as a small radial drift / spurious precession. */
+    gr_sim_set_bg_mode(sim, GR_BG_MODE_ANALYTIC);
+
     /* Relativistic circular-orbit velocity for the softened force law.
      *
      * The Boris pusher is fully relativistic, so the centripetal condition is

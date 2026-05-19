@@ -162,6 +162,28 @@ typedef struct {
     float charge;
 } gr_particle_t;
 
+/* Force tier — selects which terms enter the gravitational force.
+ * (Spec: gr_sandbox_v33.tex §"Practical implementation tiers", line 685.)
+ *
+ *   NEWTONIAN   — F = m*g, with g = -grad(Phi_g_total). Relativistic momentum
+ *                 is still tracked. Valid v/c < 0.01. This is the Stage 7
+ *                 behavior.
+ *   RELATIVISTIC — Adds the Tier-2 O(v^2/c^2) terms from the geodesic
+ *                  expansion (eq:geodesic_expansion §"Expansion of the
+ *                  geodesic equation"):
+ *                    F = m * [ g + (v^2/c^2)*g + 4*(v.g)*v/c^2 ]
+ *                  Required for Stage 8 (perihelion precession). Valid up to
+ *                  v/c ~ 0.5; full Tier-3 (with A_g terms) arrives at Stage 10.
+ *
+ * Default at gr_sim_create: NEWTONIAN. */
+typedef enum {
+    GR_FORCE_NEWTONIAN   = 0,
+    GR_FORCE_RELATIVISTIC = 1
+} gr_force_tier_t;
+
+void            gr_sim_set_force_tier(gr_sim_t* sim, gr_force_tier_t tier);
+gr_force_tier_t gr_sim_get_force_tier(const gr_sim_t* sim);
+
 int  gr_sim_add_particle(gr_sim_t* sim, float x, float y,
                          float mass, float charge,
                          float vx, float vy);
@@ -173,6 +195,14 @@ void gr_sim_clear_particles(gr_sim_t* sim);
  * Used as the conservation diagnostic in Stage 7+. Returns 0 if idx is out
  * of range. */
 float gr_sim_particle_energy(const gr_sim_t* sim, int idx);
+
+/* Enable/disable the per-step wave-equation leapfrog on the six perturbation
+ * fields.  When all source arrays are zero and the perturbation fields are
+ * zero (e.g., Stage 7/8 — a single test particle in a fixed background, no
+ * deposition), the leapfrog step does no useful work and dominates the cost
+ * of long-running orbital tests.  Default at gr_sim_create: enabled. */
+void gr_sim_set_field_evolution(gr_sim_t* sim, int enabled);
+int  gr_sim_get_field_evolution(const gr_sim_t* sim);
 
 /* ----------------------------------------------------------------------------
  * Sampled background field arrays (Stage 6)
@@ -198,10 +228,54 @@ void   gr_sim_clear_background(gr_sim_t* sim);
  *   -G*M / sqrt(|x - x0|^2 + epsilon^2)
  * sampled at cell centers. epsilon (in simulation length units) is a smoothing
  * length, recommended ~ few cells, that avoids the 1/r singularity at the
- * source. Calls clear of any previous Phi_g^{bg} and allocates fresh. */
+ * source. Calls clear of any previous Phi_g^{bg} and allocates fresh.
+ *
+ * Also stores the analytic parameters (kind = POINT_MASS, x0, y0, GM, eps)
+ * so the background may be evaluated either through the cell-centered sample
+ * (GR_BG_MODE_SAMPLED, default) or directly from the closed-form expression
+ * at the particle's exact position (GR_BG_MODE_ANALYTIC). See
+ * gr_sim_set_bg_mode below. */
 void gr_sim_set_background_point_mass(gr_sim_t* sim,
                                       float x0, float y0,
                                       float GM, float epsilon);
+
+/* ----------------------------------------------------------------------------
+ * Background evaluation mode
+ *
+ * The sampled-grid path (SAMPLED, default) evaluates Phi_g^{bg} and its
+ * gradient via CIC interpolation of the cell-centered array plus a centered
+ * finite-difference. This is the path used in Stage 6's tests and the only
+ * path that supports arbitrary user-supplied background fields, but it
+ * introduces an O((dx/r)^2) discretization error: at a generic non-grid-
+ * aligned particle position the FD gradient picks up a small tangential
+ * component that breaks the exact spherical symmetry of the underlying
+ * analytic field, producing a small spurious precession even in pure
+ * Keplerian dynamics.
+ *
+ * The analytic path (ANALYTIC) evaluates the background generator (point
+ * mass, eventually spinning/charged variants) at the particle's exact
+ * position with no grid involvement. The perturbation field — when active
+ * in Stage 10+ — still flows through the sampled CIC+FD path; the analytic
+ * branch only replaces the background contribution.
+ *
+ * Default: SAMPLED. Switch with gr_sim_set_bg_mode. The choice is independent
+ * of which background generator was last installed.
+ * --------------------------------------------------------------------------*/
+
+typedef enum {
+    GR_BG_KIND_NONE       = 0,
+    GR_BG_KIND_POINT_MASS = 1
+    /* Future: SPINNING_POINT_MASS, CHARGED_POINT_MASS, KERR_NEWMAN, ... */
+} gr_bg_kind_t;
+
+typedef enum {
+    GR_BG_MODE_SAMPLED  = 0,
+    GR_BG_MODE_ANALYTIC = 1
+} gr_bg_mode_t;
+
+void         gr_sim_set_bg_mode(gr_sim_t* sim, gr_bg_mode_t mode);
+gr_bg_mode_t gr_sim_get_bg_mode(const gr_sim_t* sim);
+gr_bg_kind_t gr_sim_get_bg_kind(const gr_sim_t* sim);
 
 /* ----------------------------------------------------------------------------
  * Absorbing damping layer (Stage 2)

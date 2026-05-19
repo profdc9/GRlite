@@ -33,6 +33,7 @@ extern void gr_scenario_register_wave_pulse(void);
 extern void gr_scenario_register_static_source(void);
 extern void gr_scenario_register_moving_source(void);
 extern void gr_scenario_register_kepler_orbit(void);
+extern void gr_scenario_register_eccentric_orbit(void);
 
 void gr_scenarios_init(void) {
     if (g_initialized) return;
@@ -41,4 +42,5 @@ void gr_scenarios_init(void) {
     gr_scenario_register_static_source();
     gr_scenario_register_moving_source();
     gr_scenario_register_kepler_orbit();
+    gr_scenario_register_eccentric_orbit();
 }
