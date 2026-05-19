@@ -2562,6 +2562,90 @@ visualization is online; the radiation pattern is qualitatively visible
 in the perturbation field and is the cleanest visual demonstration of
 gravitational radiation in the sandbox.
 
+\subsubsection*{The grid-heating problem: why orbits unbind, not spiral in}
+\label{sec:stage10_heating}
+
+A physical orbiting mass should LOSE energy to outgoing gravitational
+waves and slowly spiral inward (the binary-pulsar story).  In our
+simulation we observe the opposite: the orbit \emph{gains} energy and
+unbinds.  This is the well-known PIC \textbf{grid-heating} artifact
+applied to a gravitational-source setup, with the same sign and
+mechanism as in plasma-PIC codes.
+
+The Hockney--Eastwood theorem guarantees zero self-force for a
+\emph{stationary} particle in the statically-converged field (verified
+quantitatively by Test~C).  For a \emph{moving} particle the
+adjoint-condition cancellation fails by a residual proportional to the
+deposited density's time and space derivatives.  In a
+charge-conserving deposition scheme (e.g.\ Esirkepov 2001 on a Yee
+staggered grid) this residual is bit-zero by construction.  In our
+simpler CIC$+$FD setup on a cell-centered grid, the residual is small
+but nonzero, and its sign systematically pumps energy \emph{into} the
+particle rather than out of it.
+
+The numerical-self-force-to-physical-centripetal ratio scales as
+$m_{\mathrm{test}}\,r/M_{\mathrm{bg}}$ in our units, while the
+condition for the linearized GR equations themselves to hold scales as
+$r_s^{\mathrm{test}}/r = 2 G m_{\mathrm{test}}/(c^2 r)$ — the numerical
+condition is the tighter one, with an extra factor of $r/r_s^{\mathrm{bg}}$.
+For $G = c = M_{\mathrm{bg}} = 1$, $r = 20$: the linearization
+threshold is $m \ll 10$ but the numerical-stability threshold is
+$m \ll 0.05$.
+
+\paragraph{Cell-centered Esirkepov is not available.}
+Esirkepov's exact-discrete-continuity recurrence is built around the Yee
+staggered grid ($\rho$ at corners, $J_i$ at face centers) and its
+particular divergence stencil.  Our cell-centered storage (Section~\ref{sec:numerical})
+uses a different divergence operator (typically 2-point centered, spanning
+$2\Delta x$), for which Esirkepov's local recurrence does not directly apply.
+Adapting it would be a research-level exercise, and migrating the whole
+grid to Yee staggering — which we explicitly considered and rejected in
+the Stage 4/5 design — is not worth the refactor for a pedagogical sandbox.
+
+\paragraph{Mitigations available on the cell-centered grid.}
+\begin{itemize}
+  \item \emph{Stay weak-coupling.}  The path Stage 10 takes.  Doesn't
+    model radiation reaction; correctly models the
+    static and quasi-static dynamics the sandbox is built for.
+  \item \emph{Higher-order kernel.}  Promoting matter deposition from CIC
+    ($W_2$, 2-cell support) to TSC / quadratic B-spline ($W_3$,
+    3-cell support) reduces the high-spatial-frequency content of the
+    deposit and correspondingly reduces heating by ${\sim}10\times$.
+    The $W_3$ kernel infrastructure is already planned for Stage 13's
+    spin-dipole sources and can be promoted to matter sources when
+    convenient.
+  \item \emph{Symmetric binomial smoothing.}  Apply a $(1,2,1)/4$
+    binomial filter $B$ to the source arrays after deposition AND to
+    the field slab before particle interpolation, using the same $B$
+    on both sides.  The effective deposition and interpolation kernels
+    become $W_2 \star B$ and $B \star W_2$ respectively — equal, so the
+    Hockney--Eastwood adjoint condition is \emph{preserved}.  $B$'s
+    Fourier transform is $\cos^2(k\Delta x/2)$, which exactly nulls the
+    Nyquist mode and strongly suppresses content near it — exactly where
+    the heating residual is largest.  Trade-off: the effective particle
+    size grows to ${\sim}4\Delta x$ instead of $2\Delta x$, a slight
+    pedagogical-visualization cost.  Order-of-magnitude reduction in
+    heating, not orders.
+  \item \emph{Accept and document.}  Frame Stage 10 as ``the
+    perturbation FDTD chain is verified to work in the linearization
+    regime; quantitative radiation-reaction physics is outside the
+    sandbox's current scope.''  The visual radiation pattern in the
+    perturbation field remains a clean qualitative demonstration of
+    gravitational waves regardless.
+\end{itemize}
+
+Asymmetric smoothing (filtering only the source, OR only the field) is
+the wrong path: it shifts the effective deposition kernel without
+shifting the interpolation kernel, breaking the adjoint condition and
+introducing a static self-force that didn't exist before — trading one
+artifact for another, possibly worse, one.  The symmetric form above is
+the correct pedagogical recipe.
+
+For the current sandbox, ``stay weak-coupling'' is the working
+strategy; the upgrade to $W_3$ matter deposition and/or symmetric
+binomial smoothing is the natural extension when Stage 13 brings the
+$W_3$ kernel online.
+
 \subsection{Stage 11: Two-particle gravitational interaction}
 
 Two particles mutually attracting via the FDTD perturbation field, no analytic background.
