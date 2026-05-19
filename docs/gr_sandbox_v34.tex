@@ -677,7 +677,7 @@ This is implemented in the simulator by stepping the EM wave equation with $c_{\
 \label{sec:geodesic_expansion}
 
 The relativistic correction terms used here are those of the
-\textbf{Einstein--Infeld--Hoffmann (EIH) equation}, the standard
+\textbf{Einstein--Infeld--Hoffmann (EIH) equation}~\cite{Will1993,AliHaimoud2019}, the standard
 post-Newtonian (1PN) equation of motion for self-gravitating particles
 in harmonic gauge.  For a test particle in a (possibly moving) gravitational
 source, EIH may be written
@@ -717,8 +717,7 @@ grid array (Section~\ref{sec:force_potential}).
 velocity-coupling term with a $+$ sign, $+4(\vv{v}\cdot\vv{g})v^i/c^2$, and
 omitted the $4\Phig\vv{g}/c^2$ ``Shapiro'' radial term.  Both have been
 corrected here against the canonical EIH derivation
-(e.g.\ Ali-Ha\"\i moud, ``Introduction to the post-Newtonian expansion'',
-NYU GR Fall 2019 Lecture~25, eq.~37).  The sign error was confirmed
+(e.g.\ \cite{AliHaimoud2019} eq.~37; \cite{Will1993} \S6.2).  The sign error was confirmed
 empirically: with the v33 sign the Stage~8 perihelion test precesses
 \emph{retrograde}; with the EIH sign and the Shapiro term included the test
 recovers the Schwarzschild precession to better than $1\%$ in the
@@ -861,7 +860,7 @@ linearized expression for $\dd\tau/\dd t$ becomes:
 \label{eq:proper_time_full}
   \frac{\dd\tau}{\dd t} = \sqrt{\left(1+\frac{2\Phig}{c^2}\right) - \left(1-\frac{2\Phig}{c^2}\right)\frac{v^2}{c^2} - \frac{8\,\Ag\cdot\vv{v}}{c^2}}.
 \end{equation}
-The $-8\Ag\cdot\vv{v}/c^2$ term has opposite sign for prograde and retrograde orbits around a spinning mass (since $\vv{v}$ reverses but $\Ag$ does not), producing a proper time difference between co- and counter-rotating clocks at the same orbital radius --- the gravitomagnetic clock effect.  The negative sign means \emph{prograde} clocks run slower than retrograde clocks at the same orbital radius, consistent with the standard Cohen--Mashhoon result for Kerr.  For a non-rotating background $\Ag = 0$ and Eq.~(\ref{eq:proper_time_full}) reduces to the simpler form.
+The $-8\Ag\cdot\vv{v}/c^2$ term has opposite sign for prograde and retrograde orbits around a spinning mass (since $\vv{v}$ reverses but $\Ag$ does not), producing a proper time difference between co- and counter-rotating clocks at the same orbital radius --- the gravitomagnetic clock effect.  The negative sign means \emph{prograde} clocks run slower than retrograde clocks at the same orbital radius, consistent with the standard Cohen--Mashhoon result for Kerr~\cite{CohenMashhoon1993,Mashhoon2003}.  For a non-rotating background $\Ag = 0$ and Eq.~(\ref{eq:proper_time_full}) reduces to the simpler form.
 
 To first order:
 \begin{equation}
@@ -871,8 +870,7 @@ The exact expression is used in the integrator; the first-order form is shown fo
 
 \paragraph{Provenance and v34 correction.}  The linearized line element
 underlying Eq.~(\ref{eq:proper_time_full}) is the one given in
-Ali-Ha\"\i moud, ``Introduction to gravitational lensing and the
-post-Newtonian expansion'' (NYU GR Fall 2019, Lecture~25), eq.~41:
+\cite{AliHaimoud2019} eq.~41:
 $\dd s^2 = -(1+2\phi+\ldots)\dd t^2 + 2\xi_i\,\dd t\,\dd x^i + (1-2\phi)\delta_{ij}\dd x^i\dd x^j$
 in geometric units.  The lecture's gravitomagnetic potential $\xi_i$ equals
 $4A_{g,i}/c$ in the doc's GEM-with-spin-2-factor-in-force convention (since
@@ -881,9 +879,8 @@ $\vv{v}\times(\nabla\times\xi)$ whereas this document's force law carries
 coefficient~4 on $\vv{v}\times(\nabla\times\Ag)$).  Substituting
 $\xi_i = 4A_{g,i}/c$ into $\dd\tau^2 = -\dd s^2$ and restoring $c$ gives
 Eq.~(\ref{eq:proper_time_full}) directly.  For an explicit gravitomagnetic
-proper-time formula in a different (factor-of-2-in-force) GEM convention,
-see Mashhoon, ``Gravitoelectromagnetism: a brief review'',
-arXiv:gr-qc/0311030, \S2; results agree up to an overall $\Ag$
+proper-time formula in a different (factor-of-2-in-force) GEM convention
+see \cite{Mashhoon2003} \S2; results agree up to an overall $\Ag$
 normalization.
 
 v33 of this document wrote $h_{0i} = 2A_{g,i}/c$ and a corresponding
@@ -901,7 +898,7 @@ The gravitomagnetic term $-4\Ag\cdot\vv{v}/c^2$ is nonzero only around rotating 
 \begin{equation}
   \Delta\tau = \tau_+ - \tau_- = -\frac{8}{c^2}\oint\Ag\cdot\dd\vv{x} = -\frac{8}{c^2}\int(\nabla\times\Ag)\cdot\dd\vv{A} = -\frac{8}{c^2}\int\vv{B}_g\cdot\dd\vv{A},
 \end{equation}
-by Stokes' theorem --- the proper time difference is proportional to (minus) the gravitomagnetic flux through the orbit.  This is the gravitomagnetic clock effect, and it is a direct consequence of the same $\Ag$ that appears in the GEM force expression.  Cohen \& Mashhoon (Phys.\ Lett.\ A 181, 353, 1993) gave the original Kerr derivation; expressed in this document's $\Ag$ convention the prograde-minus-retrograde clock difference matches the formula above up to the overall $\Ag$ normalization (Mashhoon, arXiv:gr-qc/0311030, has the same effect expressed in his factor-of-2 GEM convention).
+by Stokes' theorem --- the proper time difference is proportional to (minus) the gravitomagnetic flux through the orbit.  This is the gravitomagnetic clock effect, and it is a direct consequence of the same $\Ag$ that appears in the GEM force expression.  \cite{CohenMashhoon1993} gave the original Kerr derivation; \cite{Iorio2001} and \cite{Tartaglia2000} re-derive and discuss detectability.  Expressed in this document's $\Ag$ convention the prograde-minus-retrograde clock difference matches the formula above up to the overall $\Ag$ normalization (\cite{Mashhoon2003} expresses the same effect in his factor-of-2 GEM convention).
 
 \subsection{Integration}
 
@@ -1010,7 +1007,7 @@ In Mode~2, the perturbation fields are sourced only by non-background particles.
 
 The simulation is formulated primarily in terms of the scalar and vector \emph{potentials} rather than the derived field vectors $\vv{E}$, $\vv{B}$, $\vv{g}$, $\vv{B}_g$.  The potentials are the quantities evolved by the wave equations and stored on the grid.  The derived field vectors are gauge-invariant and are computed on demand --- at particle positions during force evaluation, and over the full grid only for visualization.  This eliminates four grid arrays ($g_x$, $g_y$, $E_x$, $E_y$, $B_{g,z}$, $B_z$ as persistent arrays) and the associated full-grid curl passes from the per-timestep inner loop.
 
-The potentials are discretized on a staggered Yee grid, which assigns different components to different spatial locations within each grid cell.  The staggering ensures that finite-difference gradient and curl operations on the potentials are exact --- no interpolation is needed.
+The potentials are discretized on a staggered Yee grid~\cite{Yee1966,TafloveHagness2005}, which assigns different components to different spatial locations within each grid cell.  The staggering ensures that finite-difference gradient and curl operations on the potentials are exact --- no interpolation is needed.
 
 \subsubsection*{The 2D Yee grid layout}
 
@@ -1209,7 +1206,7 @@ The full force stencil touches the same $4$ corners and $8$ edge points as the C
 
 \subsubsection*{The Boris pusher and on-the-fly curl}
 
-The Boris algorithm requires the magnetic rotation step, which needs $B_{g,z}$ and $B_z$ at the particle position.  These are computed on the fly from the surrounding edge potentials using Eq.~(\ref{eq:yee_curl}), evaluated at the few cell centers near the particle and then CIC-interpolated to the particle position:
+The Boris algorithm~\cite{Boris1970,BirdsallLangdon1991} requires the magnetic rotation step, which needs $B_{g,z}$ and $B_z$ at the particle position.  These are computed on the fly from the surrounding edge potentials using Eq.~(\ref{eq:yee_curl}), evaluated at the few cell centers near the particle and then CIC-interpolated to the particle position:
 \begin{equation}
   B_{z}(\vv{x}_p) \approx \sum_{j,k} B_{z,j+1/2,k+1/2} \cdot W_2(\vv{x}_{j+1/2,k+1/2} - \vv{x}_p),
 \end{equation}
@@ -1354,7 +1351,7 @@ So running well below the stability limit does worsen the overall dispersion (la
 \subsection{Source deposition: approximating the delta function}
 \label{sec:deposition}
 
-The physical sources involve $\delta(\vv{x}-\vv{x}_i)$ and for spin sources $\nabla\times[\boldsymbol{\mu}\,\delta(\vv{x}-\vv{x}_i)]$, neither of which can exist on a discrete grid.  They must be replaced by smooth kernel functions $W(\vv{x}-\vv{x}_i)$ that approximate the delta function on the grid scale.  Three competing requirements must be balanced:
+The source-deposition strategy follows standard particle-in-cell (PIC) practice~\cite{HockneyEastwood1988,BirdsallLangdon1991}.  The physical sources involve $\delta(\vv{x}-\vv{x}_i)$ and for spin sources $\nabla\times[\boldsymbol{\mu}\,\delta(\vv{x}-\vv{x}_i)]$, neither of which can exist on a discrete grid.  They must be replaced by smooth kernel functions $W(\vv{x}-\vv{x}_i)$ that approximate the delta function on the grid scale.  Three competing requirements must be balanced:
 
 \begin{enumerate}
   \item \textbf{Sub-cell position accuracy:} the kernel must encode the particle's position within a cell, not just which cell it occupies.
@@ -1509,7 +1506,7 @@ and the interpolation operator $I$ maps a grid field back to the particle:
 \begin{equation}
   E_p = [I\,E](\vv{x}_p) = \sum_j E(\vv{x}_j)\,\tilde{W}(\vv{x}_j - \vv{x}_p).
 \end{equation}
-The \textbf{adjoint condition} requires $\tilde{W} = W$---the same kernel is used for both operations.
+The \textbf{adjoint condition}~\cite{HockneyEastwood1988} requires $\tilde{W} = W$---the same kernel is used for both operations.
 
 To see why this cancels the static self-force, write the force of the particle's own field on itself:
 \begin{equation}
@@ -1645,7 +1642,7 @@ Without special treatment at the grid edges the leapfrog FDTD scheme imposes ref
 
 \subsubsection*{The damping layer}
 
-The recommended approach for the sandbox is a \textbf{damping layer}: a border region of $N_d$ cells on each side of the grid where the field is multiplied by a spatially varying attenuation factor at each timestep.  Outgoing waves entering the layer are attenuated gradually and the small residual that reaches the hard boundary is attenuated again on the return trip, making double-pass reflections negligible.
+The recommended approach for the sandbox is a \textbf{damping layer}: a border region of $N_d$ cells on each side of the grid where the field is multiplied by a spatially varying attenuation factor at each timestep.  This is a simplification of the perfectly matched layer (PML)~\cite{Berenger1994,TafloveHagness2005}; the quadratic profile used here is a degenerate matched-impedance case suitable for the qualitative pedagogical purpose of the sandbox.  Outgoing waves entering the layer are attenuated gradually and the small residual that reaches the hard boundary is attenuated again on the return trip, making double-pass reflections negligible.
 
 The damping factor at position $x$ within the layer (measured from the inner edge of the layer, $0 \leq x \leq L = N_d\Delta x$) is:
 \begin{equation}
@@ -2471,7 +2468,7 @@ $v_{\mathrm{circ}}$).  The proper-time difference between the two clocks is
 \label{eq:clock_effect_linear}
   \Delta\tau \;=\; \tau_+ - \tau_- \;\approx\; -\frac{8\pi G_{\mathrm{eff}} J_z}{c_{\mathrm{eff}}^4\,r}
 \end{equation}
-per orbit at leading order (Cohen \& Mashhoon 1993, in this document's
+per orbit at leading order (\cite{CohenMashhoon1993}, in this document's
 factor-of-4-in-force GEM convention).  For exact agreement with the
 implementation use
 $\Delta\tau = T_{\mathrm{coord}}\!\left[(\dd\tau/\dd t)_+ - (\dd\tau/\dd
@@ -2590,6 +2587,165 @@ Spin-orbit coupling & Spinning particle orbit precesses differently from non-spi
 \end{center}
 
 All scenarios should produce qualitatively correct behavior and agree with the corresponding analytic predictions to within the expected numerical accuracy of the linearized GEM approximation.
+
+%====================================================================
+\section{References}
+\label{sec:refs}
+%====================================================================
+
+This bibliography collects the works used directly in this design
+document along with foundational references for the numerical techniques
+the sandbox implements.  References cited inline above are marked with
+keys here; the remaining entries are recommended further reading for
+extending the implementation into stages not yet covered.
+
+\subsubsection*{General relativity, weak-field, post-Newtonian}
+
+\begin{thebibliography}{99}\setlength{\itemsep}{2pt}\small
+
+\bibitem{AliHaimoud2019}
+Y.~Ali-Ha\"\i moud, \emph{Introduction to gravitational lensing and the
+post-Newtonian expansion}, NYU General Relativity Fall 2019 lecture
+notes, Lecture~25.  Provides the linearized 1PN line element (eq.~41)
+and the Einstein--Infeld--Hoffmann equation (eq.~37) in the form used
+to derive the doc's Tier-2 force and Eq.~(\ref{eq:proper_time_full}).
+A copy is in \texttt{docs/lecture25.pdf}.
+
+\bibitem{Will1993}
+C.~M.~Will, \emph{Theory and Experiment in Gravitational Physics},
+2nd ed., Cambridge University Press, 2018 (1st ed.\ 1993).  The
+canonical reference for the post-Newtonian formalism and the
+parameterized-PN framework.  EIH 1PN equation in harmonic gauge:
+\S6.2 / eq.~6.45.
+
+\bibitem{MTW1973}
+C.~W.~Misner, K.~S.~Thorne, J.~A.~Wheeler, \emph{Gravitation},
+W.~H.~Freeman, 1973.  Kerr metric and frame dragging: \S33.  Geodesic
+equation, linearized theory: chapters 18--19.
+
+\bibitem{Wald1984}
+R.~M.~Wald, \emph{General Relativity}, University of Chicago Press,
+1984.  Slow-rotation limit and gravitomagnetic effects: \S6.6.
+Linearized gravity: chapter 4.
+
+\bibitem{Hartle2003}
+J.~B.~Hartle, \emph{Gravity: An Introduction to Einstein's General
+Relativity}, Addison-Wesley, 2003.  Lense--Thirring and the
+gravitomagnetic limit: \S14.2.
+
+\bibitem{Carroll2004}
+S.~M.~Carroll, \emph{Spacetime and Geometry: An Introduction to
+General Relativity}, Addison-Wesley, 2004.  Slow rotation and Kerr:
+chapter~7.
+
+\bibitem{Weinberg1972}
+S.~Weinberg, \emph{Gravitation and Cosmology}, Wiley, 1972.  PN
+expansion of the field equations follow Weinberg's chapter 9
+treatment, the same one followed in \cite{AliHaimoud2019}.
+
+\subsubsection*{Gravitoelectromagnetism and the clock effect}
+
+\bibitem{Mashhoon2003}
+B.~Mashhoon, \emph{Gravitoelectromagnetism: a brief review},
+arXiv:gr-qc/0311030, 2003.  GEM-form line element and Lorentz
+force, in a factor-of-2-in-force normalization that differs from this
+document's factor-of-4-in-force convention by an overall $\Ag$
+rescaling.
+
+\bibitem{CohenMashhoon1993}
+J.~M.~Cohen, B.~Mashhoon, \emph{Standard clocks, interferometry, and
+gravitomagnetism}, Phys.~Lett.~A \textbf{181}, 353--358 (1993).  The
+original derivation of the gravitomagnetic clock effect for prograde
+and retrograde circular orbits in Kerr.  Direction of the effect
+(prograde clocks accumulate proper time more slowly) is set by this
+paper.
+
+\bibitem{Iorio2001}
+L.~Iorio, \emph{Satellite gravitational orbital perturbations and the
+gravitomagnetic clock effect}, Int.~J.~Mod.~Phys.~D \textbf{10}, 465
+(2001).  Re-derivation of the clock effect with explicit numerical
+estimates for Earth satellites.
+
+\bibitem{Tartaglia2000}
+A.~Tartaglia, \emph{Detection of the gravitomagnetic clock effect},
+Class.~Quantum Grav.~\textbf{17}, 783 (2000).  Discussion of
+experimental detectability.
+
+\bibitem{CiufoliniWheeler1995}
+I.~Ciufolini, J.~A.~Wheeler, \emph{Gravitation and Inertia},
+Princeton University Press, 1995.  Comprehensive treatment of frame
+dragging including \S6.10 on the clock effect.
+
+\bibitem{DamourDeruelle1985}
+T.~Damour, N.~Deruelle, \emph{General relativistic celestial
+mechanics of binary systems. I.~The post-Newtonian motion},
+Ann.~Inst.~Henri Poincar\'e A \textbf{43}, 107 (1985).  The
+Damour--Deruelle solution of the EIH equations of motion for binary
+systems; used implicitly when the perihelion-precession test of
+Stage~8 is compared against $\Delta\phi = 6\pi GM/(c^2 a(1-e^2))$.
+
+\subsubsection*{FDTD, Yee grid, and absorbing boundaries}
+
+\bibitem{Yee1966}
+K.~S.~Yee, \emph{Numerical solution of initial boundary value problems
+involving Maxwell's equations in isotropic media}, IEEE
+Trans.~Antennas Propag.~\textbf{14}, 302 (1966).  The original Yee
+staggered grid used for the perturbation FDTD; the layout in
+\S\ref{sec:numerical} is its standard 2D form.
+
+\bibitem{TafloveHagness2005}
+A.~Taflove, S.~C.~Hagness, \emph{Computational Electrodynamics: The
+Finite-Difference Time-Domain Method}, 3rd ed., Artech House, 2005.
+Comprehensive FDTD reference; CFL stability, dispersion analysis, and
+absorbing-boundary techniques in chapters~4--7.
+
+\bibitem{Berenger1994}
+J.-P.~B\'erenger, \emph{A perfectly matched layer for the absorption
+of electromagnetic waves}, J.~Comput.~Phys.~\textbf{114}, 185 (1994).
+Originator of the PML; the simpler quadratic-profile damping layer
+used in \S\ref{sec:abc} is a degenerate matched-impedance case.
+
+\subsubsection*{PIC and particle deposition}
+
+\bibitem{HockneyEastwood1988}
+R.~W.~Hockney, J.~W.~Eastwood, \emph{Computer Simulation Using
+Particles}, Adam Hilger / IOP, 1988 (corrected reprint of the 1981
+edition).  The standard PIC reference.  CIC ($W_2$) and TSC ($W_3$)
+deposition kernels and the adjoint condition (\S5.4) cited
+throughout \S\ref{sec:deposition}.  The Hockney--Eastwood self-force
+cancellation theorem underlies the choice of identical kernels for
+deposition and force interpolation.
+
+\bibitem{BirdsallLangdon1991}
+C.~K.~Birdsall, A.~B.~Langdon, \emph{Plasma Physics via Computer
+Simulation}, Adam Hilger, 1991.  Standard PIC textbook complementary
+to \cite{HockneyEastwood1988}; the leapfrog with Boris rotation is
+treated in chapter~4.
+
+\bibitem{Boris1970}
+J.~P.~Boris, \emph{Relativistic plasma simulation--optimization of a
+hybrid code}, Proc.~Fourth Conf.~on Numerical Simulation of Plasmas,
+NRL, Washington DC, pp.~3--67 (1970).  Original presentation of the
+Boris pusher; the relativistic magnetic-rotation step in
+\S\ref{sec:numerical} follows this scheme exactly.
+
+\bibitem{Esirkepov2001}
+T.~Zh.~Esirkepov, \emph{Exact charge conservation scheme for
+particle-in-cell simulation with an arbitrary form-factor},
+Comp.~Phys.~Commun.~\textbf{135}, 144 (2001).  Local-recurrence
+deposition that exactly satisfies discrete continuity; reserved for
+adoption in later stages when the GEM perturbation FDTD is driven by
+moving particle sources (Stage~10+).
+
+\bibitem{VayBoris2008}
+J.-L.~Vay, \emph{Simulation of beams or plasmas crossing at
+relativistic velocity}, Phys.~Plasmas \textbf{15}, 056701 (2008).
+Variant of the Boris pusher that fixes the residual $E\times B$
+drift error at ultra-relativistic velocities; not currently used,
+but relevant if photon-like ($v/c \to 1$) trajectories are ever
+needed.
+
+\end{thebibliography}
 
 %====================================================================
 \end{document}
