@@ -72,6 +72,12 @@ struct gr_sim {
      * for tens of thousands of steps.  Default 1 (full step). */
     int field_evolution_enabled;
 
+    /* Stage 10: when nonzero, gr_sim_step auto-deposits every particle's
+     * mass, charge, and currents onto the source arrays before each field
+     * leapfrog runs.  Default 0 (no automatic deposition; scenarios deposit
+     * manually if needed, e.g., Stage 5's static moving_source). */
+    int particle_source_deposition;
+
     /* Background generator parameters — kept alongside the sampled phi_g_bg
      * array so the user can switch between SAMPLED and ANALYTIC at runtime.
      * Only the currently installed kind's fields are meaningful. */

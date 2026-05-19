@@ -211,6 +211,24 @@ float gr_sim_particle_energy(const gr_sim_t* sim, int idx);
 void gr_sim_set_field_evolution(gr_sim_t* sim, int enabled);
 int  gr_sim_get_field_evolution(const gr_sim_t* sim);
 
+/* Stage 10 — enable automatic per-step deposition of every particle's mass
+ * and current (rho_matter, J_mx, J_my) and, if charged, charge and current
+ * (rho_q, J_qx, J_qy) onto the grid before each gr_sim_step's leapfrog runs.
+ * When enabled, gr_sim_step performs the equivalent of:
+ *
+ *   gr_sim_clear_sources(sim);
+ *   for each particle p:
+ *     gr_sim_deposit_point_particle(sim, p->x, p->y, p->mass, p->charge,
+ *                                   v_x(p), v_y(p));
+ *   ... then the field leapfrog runs as usual.
+ *
+ * Velocity is read from p^{n-1/2} (lagged half-step), the same convention
+ * as the force evaluation.  Default: disabled.  Stage 10+ scenarios turn
+ * this on; earlier stages either deposit manually (Stage 5) or skip
+ * deposition entirely (Stage 7/8/9, fixed background). */
+void gr_sim_set_particle_source_deposition(gr_sim_t* sim, int enabled);
+int  gr_sim_get_particle_source_deposition(const gr_sim_t* sim);
+
 /* ----------------------------------------------------------------------------
  * Sampled background field arrays (Stage 6)
  *

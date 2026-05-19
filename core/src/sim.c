@@ -108,6 +108,24 @@ void gr_sim_destroy(gr_sim_t* sim) {
 
 void gr_sim_step(gr_sim_t* sim) {
     if (!sim) return;
+
+    /* Stage 10: deposit every particle's sources onto the grid before the
+     * field leapfrog reads them.  Velocity for the current density is taken
+     * from p^{n-1/2}, matching the force-evaluation convention. */
+    if (sim->particle_source_deposition && sim->n_particles > 0) {
+        gr_sim_clear_sources(sim);
+        const float c2 = sim->c_eff * sim->c_eff;
+        for (int i = 0; i < sim->n_particles; i++) {
+            const gr_particle_t* p = &sim->particles[i];
+            const float pmag2 = p->px * p->px + p->py * p->py;
+            const float gamma = sqrtf(1.0f + pmag2 / (p->mass * p->mass * c2));
+            const float vx    = p->px / (gamma * p->mass);
+            const float vy    = p->py / (gamma * p->mass);
+            gr_sim_deposit_point_particle(sim, p->x, p->y,
+                                          p->mass, p->charge, vx, vy);
+        }
+    }
+
     if (sim->field_evolution_enabled) {
         gr_field_leapfrog_step_all(sim);
         /* Three-pointer rotation per field. */
@@ -132,6 +150,14 @@ void gr_sim_set_field_evolution(gr_sim_t* sim, int enabled) {
 }
 int gr_sim_get_field_evolution(const gr_sim_t* sim) {
     return sim ? sim->field_evolution_enabled : 1;
+}
+
+void gr_sim_set_particle_source_deposition(gr_sim_t* sim, int enabled) {
+    if (!sim) return;
+    sim->particle_source_deposition = enabled ? 1 : 0;
+}
+int gr_sim_get_particle_source_deposition(const gr_sim_t* sim) {
+    return sim ? sim->particle_source_deposition : 0;
 }
 
 /* Background evaluation mode — runtime switch between sampled-grid and

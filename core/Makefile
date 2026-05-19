@@ -19,7 +19,7 @@ CC      ?= gcc
 # -Wpedantic intentionally omitted: we rely on the well-established GCC
 # ##__VA_ARGS__ extension in the test assertion macro (TEST_ASSERT) for
 # zero-format-arg assertions. Everything else is strict C11.
-CFLAGS  ?= -O2 -g -std=c11 -Wall -Wextra -Wno-unused-parameter
+CFLAGS  ?= -O3 -g -std=c11 -Wall -Wextra -Wno-unused-parameter
 INCLUDES = -Iinclude -Isrc
 
 ifdef SANITIZE
@@ -39,7 +39,7 @@ EMCC_FLAGS = -O3 -std=c11 -Wall -Wextra -msimd128 \
              -s MODULARIZE=1 \
              -s EXPORT_ES6=1 \
              -s ALLOW_MEMORY_GROWTH=1 \
-             -s EXPORTED_FUNCTIONS='["_gr_sim_create","_gr_sim_destroy","_gr_sim_step","_gr_sim_step_n","_gr_sim_step_count","_gr_sim_time","_gr_sim_dt","_gr_sim_dx","_gr_sim_width","_gr_sim_height","_gr_sim_field_ptr","_gr_sim_load_scenario","_gr_sim_set_damping","_gr_sim_damping_layers","_gr_sim_set_G_eff","_gr_sim_get_G_eff","_gr_sim_set_k_e","_gr_sim_get_k_e","_gr_sim_clear_sources","_gr_sim_deposit_point_mass","_gr_sim_deposit_point_charge","_gr_sim_deposit_point_particle","_gr_sim_rho_matter_ptr","_gr_sim_rho_q_ptr","_gr_sim_J_mx_ptr","_gr_sim_J_my_ptr","_gr_sim_J_qx_ptr","_gr_sim_J_qy_ptr","_gr_sim_gauge_residual_grav","_gr_sim_gauge_residual_em","_gr_sim_background_ptr","_gr_sim_clear_background","_gr_sim_set_background_point_mass","_gr_sim_set_background_spinning_point_mass","_gr_sim_add_particle","_gr_sim_particle_count","_gr_sim_get_particle","_gr_sim_clear_particles","_gr_sim_particle_energy","_gr_sim_set_force_tier","_gr_sim_get_force_tier","_gr_sim_set_field_evolution","_gr_sim_get_field_evolution","_gr_sim_set_bg_mode","_gr_sim_get_bg_mode","_gr_sim_get_bg_kind","_malloc","_free"]' \
+             -s EXPORTED_FUNCTIONS='["_gr_sim_create","_gr_sim_destroy","_gr_sim_step","_gr_sim_step_n","_gr_sim_step_count","_gr_sim_time","_gr_sim_dt","_gr_sim_dx","_gr_sim_width","_gr_sim_height","_gr_sim_field_ptr","_gr_sim_load_scenario","_gr_sim_set_damping","_gr_sim_damping_layers","_gr_sim_set_G_eff","_gr_sim_get_G_eff","_gr_sim_set_k_e","_gr_sim_get_k_e","_gr_sim_clear_sources","_gr_sim_deposit_point_mass","_gr_sim_deposit_point_charge","_gr_sim_deposit_point_particle","_gr_sim_rho_matter_ptr","_gr_sim_rho_q_ptr","_gr_sim_J_mx_ptr","_gr_sim_J_my_ptr","_gr_sim_J_qx_ptr","_gr_sim_J_qy_ptr","_gr_sim_gauge_residual_grav","_gr_sim_gauge_residual_em","_gr_sim_background_ptr","_gr_sim_clear_background","_gr_sim_set_background_point_mass","_gr_sim_set_background_spinning_point_mass","_gr_sim_add_particle","_gr_sim_particle_count","_gr_sim_get_particle","_gr_sim_clear_particles","_gr_sim_particle_energy","_gr_sim_set_force_tier","_gr_sim_get_force_tier","_gr_sim_set_field_evolution","_gr_sim_get_field_evolution","_gr_sim_set_particle_source_deposition","_gr_sim_get_particle_source_deposition","_gr_sim_set_bg_mode","_gr_sim_get_bg_mode","_gr_sim_get_bg_kind","_malloc","_free"]' \
              -s EXPORTED_RUNTIME_METHODS='["HEAPF32","HEAPU8","ccall","cwrap","UTF8ToString","stringToUTF8"]'
 
 # --- Sources -------------------------------------------------------------
@@ -47,7 +47,9 @@ CORE_SRCS = src/sim.c src/field.c src/background.c src/deposit.c src/gauge.c \
             src/particle.c \
             scenarios/registry.c scenarios/wave_pulse.c scenarios/static_source.c \
             scenarios/moving_source.c scenarios/kepler_orbit.c \
-            scenarios/eccentric_orbit.c scenarios/spinning_orbit.c
+            scenarios/eccentric_orbit.c scenarios/spinning_orbit.c \
+            scenarios/pic_static.c scenarios/pic_constant_v.c \
+            scenarios/pic_orbiting.c
 TEST_SRCS = $(wildcard tests/*.c)
 
 BUILD       = build

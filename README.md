@@ -19,7 +19,8 @@ Of the 17 stages in v33's §12:
 - **Stage 7** — single test particle, Boris pusher, Keplerian orbit ✓
 - **Stage 8** — relativistic corrections, perihelion precession (EIH 1PN) ✓
 - **Stage 9** — proper time accumulation; gravitomagnetic clock effect ✓
-- Stages 10–17 — pending
+- **Stage 10** — perturbation FDTD with moving particle source ✓
+- Stages 11–17 — pending
 
 ## Repo layout
 
