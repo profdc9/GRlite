@@ -80,10 +80,11 @@ struct gr_sim {
     float        bg_x0, bg_y0;
     float        bg_GM;
     float        bg_eps;
-    /* Future-use slots for spinning / charged variants — kept as zeros until
-     * the corresponding generator is implemented. */
+    /* Spin angular momentum of the spinning point-mass generator (z-component
+     * only in 2D — the spin axis is perpendicular to the simulation plane). */
+    float        bg_Jz;
+    /* Reserved slot for the charged variants (Stage 11+). */
     float        bg_charge;
-    float        bg_spin;
 };
 
 /* Defined in field.c — steps all six fields in parallel. */
@@ -114,12 +115,18 @@ void gr_sim_recompute_source_coeffs(struct gr_sim* sim);
 
 /* Defined in background.c — analytic-mode evaluation of the installed
  * background generator at an exact spatial position (x, y).  Returns 1 if a
- * background is installed and was evaluated, 0 otherwise (caller leaves
- * *phi_out / *gx_out / *gy_out as the caller initialized them).  Output:
+ * background is installed and was evaluated, 0 otherwise.  Output:
  *   *phi_out  : value of Phi_g^{bg}(x, y)
  *   *gx_out   : d/dx Phi_g^{bg}(x, y)
  *   *gy_out   : d/dy Phi_g^{bg}(x, y) */
 int gr_bg_eval_analytic(const struct gr_sim* sim, float x, float y,
                         float* phi_out, float* gx_out, float* gy_out);
+
+/* Defined in background.c — analytic-mode evaluation of the gravitomagnetic
+ * vector potential A_g(x, y) for the installed background generator.  Returns
+ * 1 if the installed kind supplies a nonzero A_g (i.e., SPINNING_POINT_MASS),
+ * 0 otherwise.  When 0 is returned the caller should treat A_g as zero. */
+int gr_bg_eval_A_g(const struct gr_sim* sim, float x, float y,
+                   float* Ax_out, float* Ay_out);
 
 #endif /* GRLITE_SIM_INTERNAL_H */

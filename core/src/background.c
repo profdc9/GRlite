@@ -14,8 +14,11 @@ static float** background_slot(gr_sim_t* sim, gr_field_id_t which) {
     if (!sim) return NULL;
     switch (which) {
     case GR_FIELD_PHI_GRAV: return &sim->phi_g_bg;
-    /* Future field IDs (vector potentials, EM scalar) plug in here as those
-     * generators are added in later stages — Stage 12 onward per v33 §12. */
+    case GR_FIELD_A_GX:     return &sim->Agx_bg;
+    case GR_FIELD_A_GY:     return &sim->Agy_bg;
+    case GR_FIELD_PHI_EM:   return &sim->phi_bg;
+    case GR_FIELD_A_X:      return &sim->Ax_bg;
+    case GR_FIELD_A_Y:      return &sim->Ay_bg;
     default: return NULL;
     }
 }
@@ -41,7 +44,7 @@ void gr_sim_clear_background(gr_sim_t* sim) {
     sim->bg_GM     = 0.0f;
     sim->bg_eps    = 0.0f;
     sim->bg_charge = 0.0f;
-    sim->bg_spin   = 0.0f;
+    sim->bg_Jz     = 0.0f;
 }
 
 /* Lazily allocate and zero a background array if not already present. */
@@ -92,6 +95,63 @@ void gr_sim_set_background_point_mass(gr_sim_t* sim,
     sim->bg_y0   = y0;
     sim->bg_GM   = GM;
     sim->bg_eps  = epsilon;
+    sim->bg_Jz   = 0.0f;
+}
+
+/* Spinning softened point mass — fills Phi_g^{bg} via the same generator as
+ * gr_sim_set_background_point_mass, then additionally fills the A_{g,x} and
+ * A_{g,y} cell-centered arrays with the gravitomagnetic dipole field
+ *
+ *   A_g(x) = (G_eff/(2 c^2)) * J × r / (r^2 + epsilon^2)^{3/2}
+ *
+ * For a spin axis along +z and 2D in-plane positions this is:
+ *
+ *   A_{g,x}(x,y) = -(G_eff J_z / (2 c^2)) * dy / s^{3/2}
+ *   A_{g,y}(x,y) = +(G_eff J_z / (2 c^2)) * dx / s^{3/2}
+ *
+ * with dx = x - x0, dy = y - y0, s = dx^2 + dy^2 + eps^2.  The 1/(2 c^2)
+ * factor is the dipole-moment coefficient in the simulation's GEM
+ * convention (vector-potential source equation
+ * grad^2 A_g = -(4 pi G / c^2) j_mass, identical to EM up to sign;
+ * the doc's spin-2 factor of 4 sits in the FORCE law, not in A_g itself). */
+void gr_sim_set_background_spinning_point_mass(gr_sim_t* sim,
+                                               float x0, float y0,
+                                               float GM, float epsilon,
+                                               float Jz) {
+    if (!sim) return;
+    /* First fill the scalar piece using the same generator as the
+     * non-spinning case (and stash kind/params), then overwrite kind and
+     * fill the vector potential arrays. */
+    gr_sim_set_background_point_mass(sim, x0, y0, GM, epsilon);
+    sim->bg_kind = GR_BG_KIND_SPINNING_POINT_MASS;
+    sim->bg_Jz   = Jz;
+
+    float* Agx = ensure_bg_alloc(sim, GR_FIELD_A_GX);
+    float* Agy = ensure_bg_alloc(sim, GR_FIELD_A_GY);
+    if (!Agx || !Agy) return;
+
+    const int   W      = sim->width;
+    const int   H      = sim->height;
+    const float dx     = sim->dx;
+    const float eps2   = epsilon * epsilon;
+    /* Dipole coefficient: A_g = (k/(s^{3/2})) * (J × r),
+     * with k = G_eff J_z / (2 c^2).  We also include the G_eff factor here
+     * for consistency with the rest of the GEM-source convention. */
+    const float coeff  = sim->G_eff * Jz
+                       / (2.0f * sim->c_eff * sim->c_eff);
+    for (int j = 0; j < H; j++) {
+        const float y  = ((float) j + 0.5f) * dx;
+        const float dyc = y - y0;
+        const int   row = j * W;
+        for (int i = 0; i < W; i++) {
+            const float xc   = ((float) i + 0.5f) * dx;
+            const float dxc  = xc - x0;
+            const float s2   = dxc * dxc + dyc * dyc + eps2;
+            const float inv_s3 = 1.0f / (s2 * sqrtf(s2));
+            Agx[row + i] = -coeff * dyc * inv_s3;
+            Agy[row + i] = +coeff * dxc * inv_s3;
+        }
+    }
 }
 
 /* Analytic-mode evaluation of the installed background generator at the
@@ -105,8 +165,9 @@ int gr_bg_eval_analytic(const struct gr_sim* sim, float x, float y,
     if (!sim || sim->bg_kind == GR_BG_KIND_NONE) return 0;
 
     switch (sim->bg_kind) {
-    case GR_BG_KIND_POINT_MASS: {
-        /* Softened Newtonian potential (eq:bg_softened_point_mass): */
+    case GR_BG_KIND_POINT_MASS:
+    case GR_BG_KIND_SPINNING_POINT_MASS: {
+        /* Scalar piece is identical for both kinds — only A_g differs. */
         /*   Phi(x,y) = -G*M / sqrt(r^2 + eps^2)                    */
         /*   grad     =  G*M * (r - r0) / (r^2 + eps^2)^{3/2}       */
         const float dxi = x - sim->bg_x0;
@@ -123,4 +184,24 @@ int gr_bg_eval_analytic(const struct gr_sim* sim, float x, float y,
     default:
         return 0;
     }
+}
+
+int gr_bg_eval_A_g(const struct gr_sim* sim, float x, float y,
+                   float* Ax_out, float* Ay_out) {
+    if (!sim) return 0;
+    if (sim->bg_kind != GR_BG_KIND_SPINNING_POINT_MASS) {
+        *Ax_out = 0.0f;
+        *Ay_out = 0.0f;
+        return 0;
+    }
+    /* Same dipole formula used in the sampler. */
+    const float dxi = x - sim->bg_x0;
+    const float dyi = y - sim->bg_y0;
+    const float s2  = dxi * dxi + dyi * dyi + sim->bg_eps * sim->bg_eps;
+    const float inv_s3 = 1.0f / (s2 * sqrtf(s2));
+    const float coeff  = sim->G_eff * sim->bg_Jz
+                       / (2.0f * sim->c_eff * sim->c_eff);
+    *Ax_out = -coeff * dyi * inv_s3;
+    *Ay_out =  coeff * dxi * inv_s3;
+    return 1;
 }

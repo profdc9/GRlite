@@ -5,6 +5,7 @@
  * does not touch background arrays. */
 
 #include "grlite.h"
+#include "sim_internal.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -179,17 +180,141 @@ static int test_damping_does_not_touch_background(void) {
     return 0;
 }
 
+static int test_spinning_point_mass(void) {
+    /* Stage-9 prerequisite (added in v34): verify the gravitomagnetic
+     * vector-potential generator for a spinning softened point mass agrees
+     * with the closed-form dipole expression at FP precision, that calling
+     * with J_z = 0 reduces to the non-spinning generator bit-for-bit, and
+     * that the analytic-mode evaluator matches the sampled values to within
+     * the CIC interpolation tolerance. */
+    const int   W      = 128, H = 128;
+    const float dx     = 1.0f;
+    const float c_eff  = 2.0f;     /* nontrivial c so the 1/(2 c^2) prefactor isn't unity */
+    const float cfl    = 1.0f / sqrtf(2.0f);
+    const float GM     = 5.0f;
+    const float eps    = 4.0f * dx;
+    const float Jz     = 10.0f;
+    const float x0     = ((float) W * 0.5f) * dx;
+    const float y0     = ((float) H * 0.5f) * dx;
+
+    gr_sim_t* sim = gr_sim_create(W, H, dx, c_eff, cfl);
+    TEST_ASSERT(sim != NULL, "gr_sim_create failed");
+
+    gr_sim_set_background_spinning_point_mass(sim, x0, y0, GM, eps, Jz);
+    const float* phi_bg = gr_sim_background_ptr(sim, GR_FIELD_PHI_GRAV);
+    const float* Agx_bg = gr_sim_background_ptr(sim, GR_FIELD_A_GX);
+    const float* Agy_bg = gr_sim_background_ptr(sim, GR_FIELD_A_GY);
+    TEST_ASSERT(phi_bg && Agx_bg && Agy_bg,
+                "spinning point mass: bg arrays not allocated");
+
+    /* (a) Sampled A_g matches the closed-form dipole at FP precision. */
+    const float G_eff = gr_sim_get_G_eff(sim);
+    const float coeff = G_eff * Jz / (2.0f * c_eff * c_eff);
+    const struct { int i, j; } pts[] = {
+        {W / 2 + 16, H / 2}, {W / 2, H / 2 + 16},
+        {W / 2 + 12, H / 2 + 12}, {W / 2 - 20, H / 2 + 8},
+    };
+    const int n_pts = sizeof(pts) / sizeof(pts[0]);
+    for (int k = 0; k < n_pts; k++) {
+        const int   i = pts[k].i, j = pts[k].j;
+        const float xc = ((float) i + 0.5f) * dx;
+        const float yc = ((float) j + 0.5f) * dx;
+        const float dxc = xc - x0;
+        const float dyc = yc - y0;
+        const float s2  = dxc * dxc + dyc * dyc + eps * eps;
+        const float inv_s3 = 1.0f / (s2 * sqrtf(s2));
+        const float Ax_ana = -coeff * dyc * inv_s3;
+        const float Ay_ana =  coeff * dxc * inv_s3;
+        const float Ax_obs = Agx_bg[j * W + i];
+        const float Ay_obs = Agy_bg[j * W + i];
+        const float relx = fabsf(Ax_obs - Ax_ana)
+                         / fmaxf(fabsf(Ax_ana), 1e-30f);
+        const float rely = fabsf(Ay_obs - Ay_ana)
+                         / fmaxf(fabsf(Ay_ana), 1e-30f);
+        TEST_ASSERT(relx < 1.0e-5f && rely < 1.0e-5f,
+                    "cell (%d,%d): A_g obs=(%.6g, %.6g) ana=(%.6g, %.6g)"
+                    " rel=(%.2e, %.2e)",
+                    i, j, Ax_obs, Ay_obs, Ax_ana, Ay_ana, relx, rely);
+    }
+    printf("  sampling matches analytic dipole at %d points (rel.err < 1e-5)\n",
+           n_pts);
+
+    /* (b) Jz = 0 must yield exactly the same sampled scalar as the
+     * non-spinning generator and identically zero vector arrays. */
+    gr_sim_t* zero = gr_sim_create(W, H, dx, c_eff, cfl);
+    TEST_ASSERT(zero, "create zero failed");
+    gr_sim_set_background_spinning_point_mass(zero, x0, y0, GM, eps, 0.0f);
+    const float* z_phi = gr_sim_background_ptr(zero, GR_FIELD_PHI_GRAV);
+    const float* z_Agx = gr_sim_background_ptr(zero, GR_FIELD_A_GX);
+    const float* z_Agy = gr_sim_background_ptr(zero, GR_FIELD_A_GY);
+
+    gr_sim_t* plain = gr_sim_create(W, H, dx, c_eff, cfl);
+    gr_sim_set_background_point_mass(plain, x0, y0, GM, eps);
+    const float* p_phi = gr_sim_background_ptr(plain, GR_FIELD_PHI_GRAV);
+
+    for (int k = 0; k < W * H; k++) {
+        TEST_ASSERT(z_phi[k] == p_phi[k],
+                    "Jz=0 spinning Phi differs from plain Phi at cell %d", k);
+        if (z_Agx) TEST_ASSERT(z_Agx[k] == 0.0f,
+                               "Jz=0 spinning has nonzero A_gx at cell %d", k);
+        if (z_Agy) TEST_ASSERT(z_Agy[k] == 0.0f,
+                               "Jz=0 spinning has nonzero A_gy at cell %d", k);
+    }
+    printf("  Jz=0 spinning reduces to non-spinning (bit-identical Phi, zero A_g)\n");
+    gr_sim_destroy(plain);
+    gr_sim_destroy(zero);
+
+    /* (c) gr_bg_eval_A_g (analytic-mode) at an off-grid point matches the
+     * closed-form dipole within FP precision. */
+    {
+        const float xp = x0 + 23.5f, yp = y0 + 7.25f;
+        const float dxc = xp - x0, dyc = yp - y0;
+        const float s2  = dxc * dxc + dyc * dyc + eps * eps;
+        const float inv_s3 = 1.0f / (s2 * sqrtf(s2));
+        const float Ax_ana = -coeff * dyc * inv_s3;
+        const float Ay_ana =  coeff * dxc * inv_s3;
+        float Ax_eval = 0.0f, Ay_eval = 0.0f;
+        const int ok = gr_bg_eval_A_g(sim, xp, yp, &Ax_eval, &Ay_eval);
+        TEST_ASSERT(ok == 1, "gr_bg_eval_A_g returned 0 for spinning kind");
+        TEST_ASSERT(fabsf(Ax_eval - Ax_ana) < 1.0e-6f
+                 && fabsf(Ay_eval - Ay_ana) < 1.0e-6f,
+                    "analytic A_g eval: got (%.6g, %.6g) expected (%.6g, %.6g)",
+                    Ax_eval, Ay_eval, Ax_ana, Ay_ana);
+        printf("  gr_bg_eval_A_g at off-grid point matches closed form\n");
+    }
+
+    /* (d) Calling the non-spinning installer overrides any previously
+     * installed spin parameters (kind reverts to POINT_MASS). */
+    gr_sim_set_background_point_mass(sim, x0, y0, GM, eps);
+    TEST_ASSERT(gr_sim_get_bg_kind(sim) == GR_BG_KIND_POINT_MASS,
+                "non-spinning installer should reset kind to POINT_MASS");
+    {
+        float Ax = 0.0f, Ay = 0.0f;
+        const int ok = gr_bg_eval_A_g(sim, x0 + 5.0f, y0, &Ax, &Ay);
+        TEST_ASSERT(ok == 0, "A_g eval should report 0 for POINT_MASS kind");
+        TEST_ASSERT(Ax == 0.0f && Ay == 0.0f,
+                    "A_g eval returned nonzero for POINT_MASS kind");
+    }
+    printf("  point-mass override correctly clears the spinning kind\n");
+
+    gr_sim_destroy(sim);
+    return 0;
+}
+
 int main(void) {
     printf("=== stage06_background: gr_sandbox_v33.tex §12.6 ===\n");
 
-    printf("\n[1/3] softened point-mass sampling and gradient\n");
+    printf("\n[1/4] softened point-mass sampling and gradient\n");
     if (test_softened_point_mass_sampling() != 0) return 1;
 
-    printf("\n[2/3] perturbation FDTD unaffected by installed background\n");
+    printf("\n[2/4] perturbation FDTD unaffected by installed background\n");
     if (test_perturbation_unaffected_by_background() != 0) return 1;
 
-    printf("\n[3/3] damping does not touch background array\n");
+    printf("\n[3/4] damping does not touch background array\n");
     if (test_damping_does_not_touch_background() != 0) return 1;
+
+    printf("\n[4/4] spinning point mass: scalar + vector potentials (v34)\n");
+    if (test_spinning_point_mass() != 0) return 1;
 
     printf("\nALL CHECKS PASSED.\n");
     return 0;

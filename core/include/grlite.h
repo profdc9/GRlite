@@ -239,6 +239,27 @@ void gr_sim_set_background_point_mass(gr_sim_t* sim,
                                       float x0, float y0,
                                       float GM, float epsilon);
 
+/* Softened spinning point mass — fills Phi_g^{bg} as in the non-spinning
+ * case and also fills A_{g,x}^{bg}, A_{g,y}^{bg} with the gravitomagnetic
+ * dipole field for a point spin J_z along +z:
+ *
+ *   A_g(x) = (G_eff / (2 c^2)) * J × r / (r^2 + epsilon^2)^{3/2}
+ *
+ * which in 2D with the spin axis perpendicular to the simulation plane
+ * reduces to
+ *
+ *   A_{g,x}(x,y) = -(G_eff J_z / (2 c^2)) * (y - y0) / s^{3/2},
+ *   A_{g,y}(x,y) = +(G_eff J_z / (2 c^2)) * (x - x0) / s^{3/2},
+ *   s = (x-x0)^2 + (y-y0)^2 + epsilon^2.
+ *
+ * Stores the kind = SPINNING_POINT_MASS along with (x0, y0, GM, epsilon, J_z)
+ * for the analytic-mode evaluator.  Calling this with J_z = 0 is equivalent
+ * to gr_sim_set_background_point_mass.  Overrides any previous background. */
+void gr_sim_set_background_spinning_point_mass(gr_sim_t* sim,
+                                               float x0, float y0,
+                                               float GM, float epsilon,
+                                               float Jz);
+
 /* ----------------------------------------------------------------------------
  * Background evaluation mode
  *
@@ -263,9 +284,10 @@ void gr_sim_set_background_point_mass(gr_sim_t* sim,
  * --------------------------------------------------------------------------*/
 
 typedef enum {
-    GR_BG_KIND_NONE       = 0,
-    GR_BG_KIND_POINT_MASS = 1
-    /* Future: SPINNING_POINT_MASS, CHARGED_POINT_MASS, KERR_NEWMAN, ... */
+    GR_BG_KIND_NONE                = 0,
+    GR_BG_KIND_POINT_MASS          = 1,
+    GR_BG_KIND_SPINNING_POINT_MASS = 2
+    /* Future: CHARGED_POINT_MASS, KERR_NEWMAN, ... */
 } gr_bg_kind_t;
 
 typedef enum {

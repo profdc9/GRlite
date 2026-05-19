@@ -91,9 +91,19 @@
   \vspace{1.2cm}
   {\large\bfseries\color{midblue} Revision v34\par}
   \vspace{0.2cm}
-  {\small\color{gray} Replaces v33 Tier-2 force with Einstein--Infeld--Hoffmann 1PN equation
-  (sign fix on velocity-coupling term, adds Shapiro $4\Phi_g\vec g/c^2$ term);
-  adds analytic-background evaluation mode (point mass; spinning / charged variants reserved).\par}
+  {\small\color{gray}
+  (1)~Replaces v33 Tier-2 force with the Einstein--Infeld--Hoffmann 1PN
+  equation: sign fix on the velocity-coupling term and adds the Shapiro
+  $4\Phi_g\vec g/c^2$ term.\par
+  (2)~Adds analytic-background evaluation mode; registers point-mass and
+  spinning-point-mass generators (charged variants reserved).\par
+  (3)~Fixes the gravitomagnetic proper-time formula (Eq.~\ref{eq:proper_time_full}):
+  v33 had a sign error and a factor-of-2 magnitude error on the
+  $\Ag\cdot\vec v$ cross term, both traceable to an internal inconsistency
+  between v33's force-law factor (4) and its asserted $h_{0i} = 2A_{g,i}/c$.
+  Correct form is $-8\Ag\cdot\vec v/c^2$ inside the square root,
+  consistent with $g_{0i} = 4A_{g,i}/c$ and the Cohen--Mashhoon sign for
+  the gravitomagnetic clock effect.\par}
   \vspace{1.5cm}
   \hrule
 \end{titlepage}
@@ -837,34 +847,67 @@ For a non-rotating background the proper time rate is determined by the gravitoe
 \begin{equation}
   \frac{\dd\tau}{\dd t} = \sqrt{\left(1+\frac{2\Phig}{c^2}\right) - \left(1-\frac{2\Phig}{c^2}\right)\frac{v^2}{c^2}}.
 \end{equation}
-For a rotating background the off-diagonal metric components $h_{0i} = 2A_{g,i}/c$ (Section~\ref{sec:gem_metric}) contribute an additional term via $g_{0i}\dd x^i\dd t = (2A_{g,i}/c)v^i\dd t^2$.  The full linearized expression is:
+For a rotating background the off-diagonal metric components contribute an
+additional term.  To fix the cross-term coefficient consistently with the
+doc's force-law convention --- the GEM Lorentz force has a factor of 4 from
+the spin-2 nature of gravity, $\vv{F}/m \supset 4\vv{v}\times(\nabla\times\Ag)$
+--- the linearized metric perturbation must be $h_{0i} = 4A_{g,i}/c$, not
+the $2A_{g,i}/c$ written in v33 of this document (which was inconsistent with
+its own force law).  See the note at the end of this subsection for the
+v34 corrections.  The cross term therefore contributes
+$g_{0i}\dd x^i\dd t = (4A_{g,i}/c)v^i\dd t^2$ to $\dd s^2$, and the full
+linearized expression for $\dd\tau/\dd t$ becomes:
 \begin{equation}
 \label{eq:proper_time_full}
-  \frac{\dd\tau}{\dd t} = \sqrt{\left(1+\frac{2\Phig}{c^2}\right) - \left(1-\frac{2\Phig}{c^2}\right)\frac{v^2}{c^2} + \frac{4\Ag\cdot\vv{v}}{c^2}}.
+  \frac{\dd\tau}{\dd t} = \sqrt{\left(1+\frac{2\Phig}{c^2}\right) - \left(1-\frac{2\Phig}{c^2}\right)\frac{v^2}{c^2} - \frac{8\,\Ag\cdot\vv{v}}{c^2}}.
 \end{equation}
-The $4\Ag\cdot\vv{v}/c^2$ term has opposite sign for prograde and retrograde orbits around a spinning mass (since $\vv{v}$ reverses but $\Ag$ does not), producing a proper time difference between co- and counter-rotating clocks at the same orbital radius --- the gravitomagnetic clock effect.  For a non-rotating background $\Ag = 0$ and Eq.~(\ref{eq:proper_time_full}) reduces to the simpler form.
+The $-8\Ag\cdot\vv{v}/c^2$ term has opposite sign for prograde and retrograde orbits around a spinning mass (since $\vv{v}$ reverses but $\Ag$ does not), producing a proper time difference between co- and counter-rotating clocks at the same orbital radius --- the gravitomagnetic clock effect.  The negative sign means \emph{prograde} clocks run slower than retrograde clocks at the same orbital radius, consistent with the standard Cohen--Mashhoon result for Kerr.  For a non-rotating background $\Ag = 0$ and Eq.~(\ref{eq:proper_time_full}) reduces to the simpler form.
 
 To first order:
 \begin{equation}
-  \frac{\dd\tau}{\dd t} \approx 1 + \underbrace{\frac{\Phig}{c^2}}_{\text{gravitational}} - \underbrace{\frac{v^2}{2c^2}}_{\text{kinematic}} + \underbrace{\frac{2\Ag\cdot\vv{v}}{c^2}}_{\text{gravitomagnetic}}.
+  \frac{\dd\tau}{\dd t} \approx 1 + \underbrace{\frac{\Phig}{c^2}}_{\text{gravitational}} - \underbrace{\frac{v^2}{2c^2}}_{\text{kinematic}} - \underbrace{\frac{4\,\Ag\cdot\vv{v}}{c^2}}_{\text{gravitomagnetic}}.
 \end{equation}
 The exact expression is used in the integrator; the first-order form is shown for interpretation.
+
+\paragraph{Provenance and v34 correction.}  The linearized line element
+underlying Eq.~(\ref{eq:proper_time_full}) is the one given in
+Ali-Ha\"\i moud, ``Introduction to gravitational lensing and the
+post-Newtonian expansion'' (NYU GR Fall 2019, Lecture~25), eq.~41:
+$\dd s^2 = -(1+2\phi+\ldots)\dd t^2 + 2\xi_i\,\dd t\,\dd x^i + (1-2\phi)\delta_{ij}\dd x^i\dd x^j$
+in geometric units.  The lecture's gravitomagnetic potential $\xi_i$ equals
+$4A_{g,i}/c$ in the doc's GEM-with-spin-2-factor-in-force convention (since
+the lecture's geodesic equation eq.~37 carries coefficient~1 on
+$\vv{v}\times(\nabla\times\xi)$ whereas this document's force law carries
+coefficient~4 on $\vv{v}\times(\nabla\times\Ag)$).  Substituting
+$\xi_i = 4A_{g,i}/c$ into $\dd\tau^2 = -\dd s^2$ and restoring $c$ gives
+Eq.~(\ref{eq:proper_time_full}) directly.  For an explicit gravitomagnetic
+proper-time formula in a different (factor-of-2-in-force) GEM convention,
+see Mashhoon, ``Gravitoelectromagnetism: a brief review'',
+arXiv:gr-qc/0311030, \S2; results agree up to an overall $\Ag$
+normalization.
+
+v33 of this document wrote $h_{0i} = 2A_{g,i}/c$ and a corresponding
+$+(4\Ag\cdot\vv{v})/c^2$ inside the square root (linearized
+$+(2\Ag\cdot\vv{v})/c^2$).  Both the magnitude and the sign were wrong;
+the magnitude conflicted with v33's own force-law factor of~4, and the
+sign would have predicted prograde clocks running \emph{faster} than
+retrograde, opposite to the canonical clock-effect direction.
 
 \subsection{Physical interpretation}
 
 The kinematic term $-v^2/(2c^2)$ always slows the clock.  The gravitational term $\Phig/c^2$ also slows it in a well ($\Phig<0$), and speeds it up at high altitude ($\Phig$ less negative).  For GPS satellites the two terms compete: the satellite is high up (gravitational term speeds clock) but moving fast (kinematic term slows clock).  The gravitational effect wins, so GPS clocks run fast by $38\,\mu$s/day and must be corrected.
 
-The gravitomagnetic term $2\Ag\cdot\vv{v}/c^2$ is nonzero only around rotating masses.  It has opposite sign for co- and counter-rotating orbits because $\vv{v}$ reverses direction while $\Ag$ does not.  Integrating around a full orbit the difference in accumulated proper time between prograde ($+$) and retrograde ($-$) orbits is:
+The gravitomagnetic term $-4\Ag\cdot\vv{v}/c^2$ is nonzero only around rotating masses.  It has opposite sign for co- and counter-rotating orbits because $\vv{v}$ reverses direction while $\Ag$ does not, and with the minus sign \emph{prograde} clocks accumulate proper time more slowly than retrograde clocks at the same orbital radius.  Integrating around a full orbit the difference in accumulated proper time between prograde ($+$) and retrograde ($-$) orbits is:
 \begin{equation}
-  \Delta\tau = \tau_+ - \tau_- = \frac{4}{c^2}\oint\Ag\cdot\dd\vv{x} = \frac{4}{c^2}\int(\nabla\times\Ag)\cdot\dd\vv{A} = \frac{4}{c^2}\int\vv{B}_g\cdot\dd\vv{A},
+  \Delta\tau = \tau_+ - \tau_- = -\frac{8}{c^2}\oint\Ag\cdot\dd\vv{x} = -\frac{8}{c^2}\int(\nabla\times\Ag)\cdot\dd\vv{A} = -\frac{8}{c^2}\int\vv{B}_g\cdot\dd\vv{A},
 \end{equation}
-by Stokes' theorem --- the proper time difference is proportional to the gravitomagnetic flux through the orbit.  This is the gravitomagnetic clock effect, and it is a direct consequence of the same $\Ag$ that appears in the GEM force expression.
+by Stokes' theorem --- the proper time difference is proportional to (minus) the gravitomagnetic flux through the orbit.  This is the gravitomagnetic clock effect, and it is a direct consequence of the same $\Ag$ that appears in the GEM force expression.  Cohen \& Mashhoon (Phys.\ Lett.\ A 181, 353, 1993) gave the original Kerr derivation; expressed in this document's $\Ag$ convention the prograde-minus-retrograde clock difference matches the formula above up to the overall $\Ag$ normalization (Mashhoon, arXiv:gr-qc/0311030, has the same effect expressed in his factor-of-2 GEM convention).
 
 \subsection{Integration}
 
 Using the total potential $\Phig^{\mathrm{total}} = \Phig^{\mathrm{bg}} + \Phig^{\mathrm{pert}}$ and total vector potential $\Ag^{\mathrm{total}} = \Ag^{\mathrm{bg}} + \Ag^{\mathrm{pert}}$, both already evaluated during force calculation:
 \begin{equation}
-  \dd\tau_i = \dd t\,\sqrt{1 + \frac{2\Phig}{c^2} - \left(1-\frac{2\Phig}{c^2}\right)\beta^2 + \frac{4\Ag\cdot\vv{v}}{c^2}},
+  \dd\tau_i = \dd t\,\sqrt{1 + \frac{2\Phig}{c^2} - \left(1-\frac{2\Phig}{c^2}\right)\beta^2 - \frac{8\,\Ag\cdot\vv{v}}{c^2}},
   \qquad \beta^2 = v^2/c^2,
 \end{equation}
 \begin{equation}
