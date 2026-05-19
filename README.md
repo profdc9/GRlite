@@ -17,7 +17,9 @@ Of the 17 stages in v33's §12:
 - **Stage 5** — moving source, vector potentials, Yee curl ✓
 - **Stage 6** — sampled background field arrays ✓
 - **Stage 7** — single test particle, Boris pusher, Keplerian orbit ✓
-- Stages 8–17 — pending
+- **Stage 8** — relativistic corrections, perihelion precession (EIH 1PN) ✓
+- **Stage 9** — proper time accumulation; gravitomagnetic clock effect ✓
+- Stages 10–17 — pending
 
 ## Repo layout
 

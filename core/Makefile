@@ -47,7 +47,7 @@ CORE_SRCS = src/sim.c src/field.c src/background.c src/deposit.c src/gauge.c \
             src/particle.c \
             scenarios/registry.c scenarios/wave_pulse.c scenarios/static_source.c \
             scenarios/moving_source.c scenarios/kepler_orbit.c \
-            scenarios/eccentric_orbit.c
+            scenarios/eccentric_orbit.c scenarios/spinning_orbit.c
 TEST_SRCS = $(wildcard tests/*.c)
 
 BUILD       = build

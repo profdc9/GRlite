@@ -228,6 +228,29 @@ void gr_particle_push_all(struct gr_sim* sim) {
         gamma = sqrtf(1.0f + pmag2 / (p->mass * p->mass * c2));
         const float vx = p->px / (gamma * p->mass);
         const float vy = p->py / (gamma * p->mass);
+
+        /* Stage 9: accumulate proper time over [t_n, t_{n+1}] using v^{n+1/2}
+         * (just computed) and the (Phi, A_g) at the particle's current
+         * position x_n.  This is 2nd-order accurate since v^{n+1/2} sits at
+         * the midpoint of the drift interval.  Formula (v34 Eq. 75 with
+         * v34 sign + factor corrections):
+         *   d_tau = dt * sqrt(1 + 2 Phi/c^2 - (1 - 2 Phi/c^2) v^2/c^2
+         *                       - 8 (v . A_g)/c^2)
+         * A_g is zero unless a SPINNING_POINT_MASS background is installed. */
+        {
+            const float inv_c2 = 1.0f / c2;
+            float Agx = 0.0f, Agy = 0.0f;
+            gr_bg_eval_A_g(sim, p->x, p->y, &Agx, &Agy);
+            const float v2      = vx * vx + vy * vy;
+            const float two_phi = 2.0f * phi * inv_c2;
+            const float v_dot_A = vx * Agx + vy * Agy;
+            const float radicand = 1.0f + two_phi
+                                 - (1.0f - two_phi) * v2 * inv_c2
+                                 - 8.0f * v_dot_A * inv_c2;
+            const float dtau = (radicand > 0.0f) ? dt * sqrtf(radicand) : 0.0f;
+            p->proper_time += dtau;
+        }
+
         p->x += vx * dt;
         p->y += vy * dt;
     }
@@ -267,12 +290,13 @@ int gr_sim_add_particle(gr_sim_t* sim, float x, float y,
     /* p^{-1/2} = p^0 - F^0 * dt/2 */
     const float half_dt = 0.5f * sim->dt;
     const int   idx = sim->n_particles++;
-    sim->particles[idx].x      = x;
-    sim->particles[idx].y      = y;
-    sim->particles[idx].px     = px0 - Fx * half_dt;
-    sim->particles[idx].py     = py0 - Fy * half_dt;
-    sim->particles[idx].mass   = mass;
-    sim->particles[idx].charge = charge;
+    sim->particles[idx].x           = x;
+    sim->particles[idx].y           = y;
+    sim->particles[idx].px          = px0 - Fx * half_dt;
+    sim->particles[idx].py          = py0 - Fy * half_dt;
+    sim->particles[idx].mass        = mass;
+    sim->particles[idx].charge      = charge;
+    sim->particles[idx].proper_time = 0.0f;
     return idx;
 }
 

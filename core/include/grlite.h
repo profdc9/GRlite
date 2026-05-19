@@ -160,6 +160,13 @@ typedef struct {
     float px, py;
     float mass;
     float charge;
+    /* Stage 9: accumulated proper time along the particle's worldline.
+     * Updated each gr_sim_step from
+     *   d_tau = dt * sqrt(1 + 2 Phi/c^2 - (1 - 2 Phi/c^2) v^2/c^2
+     *                       - 8 (v . A_g) / c^2)
+     * with Phi, A_g evaluated at the particle's current position.
+     * Initialized to 0 in gr_sim_add_particle. */
+    float proper_time;
 } gr_particle_t;
 
 /* Force tier — selects which terms enter the gravitational force.
