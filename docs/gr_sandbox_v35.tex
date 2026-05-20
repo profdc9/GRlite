@@ -92,25 +92,28 @@
   {\large\bfseries\color{midblue} Revision v35\par}
   \vspace{0.2cm}
   {\small\color{gray}
-  \textbf{Major architectural pivot}: migrates the sandbox from a
-  cell-centered grid to the proper Yee staggered grid, enabling
-  Esirkepov-grade charge-conserving current deposition.  Motivation
-  documented in the new Section~\ref{sec:yee_pivot}: at the cell-centered
-  layout with CIC deposition, the numerical PIC ``grid-heating''
-  self-force scales like the physical mutual-gravity force on a
-  test particle in mutual orbit, so quantitative dynamic-field PIC
-  is fundamentally limited.  Stages 10 and 11 in v34 worked only in
-  the weak-coupling test-particle regime; with Yee$+$Esirkepov the
-  Hockney--Eastwood adjoint cancellation becomes exact \emph{and}
-  preserved under particle motion, unlocking quantitative two-body
-  gravitational dynamics (Stage~11+) and quantitative gravitational
-  radiation (later stages).\par
-  Section~\ref{sec:yee_pivot} also includes the migration plan with
-  save points S1--S7; intermediate cell-centered version preserved on
-  the \texttt{v34-cell-centered} git branch.\par
-  All v34 physics corrections (EIH 1PN sign$+$Shapiro term, proper-time
-  Eq.~\ref{eq:proper_time_full}, analytic-background mode) carry forward
-  unchanged.\par}
+  \textbf{Implementation alignment with §\ref{sec:numerical}'s Yee
+  specification, plus opt-in Esirkepov current deposition}.
+  Section~\ref{sec:numerical} already specifies the Yee staggered
+  grid and the discrete continuity equation as the gauge-preservation
+  defense; the v32--v34 implementation departed from that spec by
+  using cell-centered storage, which broke discrete continuity and
+  produced ``grid-heating'' self-forces strong enough that Stage~11
+  (mutual gravity via FDTD) is unreachable.  v35 brings the storage
+  layout, deposition kernels, and force-evaluation operators into
+  line with what Section~\ref{sec:numerical} prescribes, and adds
+  Esirkepov current deposition~\cite{Esirkepov2001} as an opt-in
+  path beyond the truncation-order accuracy of
+  Section~\ref{sec:numerical}'s CIC-on-Yee recipe, giving exact
+  discrete continuity and structural cancellation of the moving-
+  particle self-force.\par
+  Section~\ref{sec:yee_pivot} contains the motivation and migration
+  plan (save points S1--S7); intermediate cell-centered version
+  preserved on the \texttt{v34-cell-centered} git branch.\par
+  All v34 physics corrections (EIH 1PN sign$+$Shapiro term,
+  proper-time Eq.~\ref{eq:proper_time_full}, analytic-background
+  mode) carry forward unchanged: they are independent of the grid
+  layout.\par}
   \vspace{1.5cm}
   \hrule
 \end{titlepage}
@@ -134,37 +137,52 @@ All physics chapters (§\ref{sec:gem_metric} through §\ref{sec:abc} and beyond)
 \newpage
 
 %====================================================================
-\section{Architectural Pivot in v35: Cell-Centered to Yee Staggered Grid}
+\section{Implementation Alignment with §\ref{sec:numerical} (v35): Yee + Esirkepov}
 \label{sec:yee_pivot}
 %====================================================================
 
-\subsection{Why this pivot is being made}
+\subsection{Why this work is being done}
 
-The v32--v34 design used a \emph{cell-centered} grid: all six potentials,
-all six source arrays, and all derived field quantities lived at the
-same set of cell-center sample points $(i+\tfrac{1}{2}, j+\tfrac{1}{2})\Delta x$.
-Source-deposition followed the standard particle-in-cell (PIC) recipe
-with the W$_2$ (cloud-in-cell, CIC) kernel, and force interpolation
-used a CIC-of-FD-gradient operator with the same kernel weights to
-satisfy the Hockney--Eastwood adjoint condition for self-force
-cancellation.
+The Yee staggered grid is already specified in
+Section~\ref{sec:numerical} (``Field grid'' and ``Why this staggering:
+exact gradient and curl operations'').  Source deposition placed at
+the correct sublattices is also specified there, as is the discrete
+continuity equation as the primary defense against gauge drift
+(``The discrete continuity equation: the primary defense'' in
+Section~\ref{sec:numerical}'s gauge-condition subsection).
+\textbf{This section is not introducing a new architecture; it is
+documenting the migration of the v32--v34 implementation to match
+what the doc already specifies, plus one addition (Esirkepov current
+deposition) that goes beyond the truncation-order accuracy of
+Section~\ref{sec:numerical}'s CIC-on-Yee recipe.}
 
-Stages 1--9 of the v34 implementation worked correctly under this
-layout, because they each rely on at most a \emph{static} particle in a
-\emph{fixed} background.  The Hockney--Eastwood theorem applies and
-the self-force on a stationary particle is exactly zero (verified
-quantitatively in v34's Stage 10 Test C: drift $< 10^{-5}$ cells over
-$10^4$ timesteps).
+\paragraph{What the v32--v34 implementation actually did.}  Rather
+than the Yee layout specified in Section~\ref{sec:numerical}, the
+implementation stored all six potentials, all six source arrays, and
+all derived field quantities on a single cell-centered grid at
+$(i+\tfrac{1}{2}, j+\tfrac{1}{2})\Delta x$, with CIC deposition into a
+single $\rho_{\mathrm{matter}}$ array at cell centers and a
+CIC-of-FD operator for the force gradient.  This was the simpler
+path to a working scalar wave equation (Stages 1--4), and Stages 5--9
+each rely on at most a \emph{static} particle in a \emph{fixed}
+background where the Hockney--Eastwood theorem still gives zero
+self-force regardless of the underlying grid placement.  Stage 10's
+self-force-cancellation test (drift $< 10^{-5}$ cells over $10^4$
+timesteps) passes in the cell-centered code at $m = 10^{-3}$.
 
-\paragraph{The breakdown in v34 Stage 10+.}  Once particles \emph{move}
-and \emph{deposit dynamic sources}, the adjoint cancellation no longer
-applies pointwise.  The residual takes the form of a numerical
-``grid-heating'' self-force, with magnitude scaling like the
-gradient of the particle's own deposited perturbation field at its
-current position.  Crucially, in our cell-centered + CIC setup, the
-\emph{sign} of this residual is such that it \emph{adds} energy to the
-particle's orbit rather than removing it (the opposite of physical
-radiation reaction).  The scaling, in our natural units:
+\paragraph{Where the cell-centered implementation breaks down.}  Once
+particles \emph{move} and \emph{deposit dynamic sources}, the
+cell-centered code shows pathological behavior.  Both $\rho$ and
+$\vv{J}$ live at the same cell-centered nodes there, so the discrete
+continuity equation that Section~\ref{sec:numerical} writes for the
+Yee layout (with $\rho$ at corners and $J_i$ at edges and a
+staggered divergence stencil) is not even satisfied to truncation
+order in the cell-centered code.  The 2-point centered FD divergence
+at the cell-center $\rho$ position uses $J$ values two cells away,
+breaking the consistency that would damp gauge drift.  The numerical
+residual takes the form of a ``grid-heating'' self-force on the
+moving particle, with the wrong sign — energy is pumped \emph{into}
+the orbit rather than radiated out.  Scaling, in our natural units:
 \begin{equation}
   \frac{a_{\mathrm{heat}}}{a_{\mathrm{phys}}} \;\sim\; \alpha\,\frac{r}{m_{\mathrm{src}}},
   \qquad \alpha = \mathcal{O}(1)\text{ dimensionless heating coefficient},
@@ -184,93 +202,56 @@ down before heating becomes negligible.  Stage 11 (two-body
 gravitational interaction via FDTD) is therefore unreachable in the
 cell-centered framework.
 
-\paragraph{What this means for the original sandbox ambition.}  The
-v32--v34 architecture limits FDTD's role to \emph{visualization} of
-fields and to \emph{quantitative tests with analytic backgrounds};
-quantitative dynamic-field PIC for mutual gravity is out of reach.
-That undermines the original framing of the project (``a dynamic-field
-2D linearized GR PIC simulation''): the FDTD is mostly carrying
-weight as visualization scaffolding around an analytic backbone.
+\paragraph{What this implies for the project.}  The cell-centered
+implementation effectively limits FDTD's role to visualization of
+fields and to quantitative tests with analytic backgrounds; the
+mutual-gravity Stage~11 case is unreachable.  That undermines the
+project's framing as a dynamic-field PIC simulation, since the FDTD
+ends up carrying weight only as scaffolding around an analytic
+backbone.  v35 fixes this by aligning the implementation with the
+Section~\ref{sec:numerical} Yee specification.
 
-\subsection{The Yee + Esirkepov fix}
+\subsection{Esirkepov current deposition: the one addition beyond §\ref{sec:numerical}}
 
-The standard remedy in PIC plasma simulation is the \emph{Yee
-staggered grid}~\cite{Yee1966,TafloveHagness2005} paired with
-\emph{Esirkepov current deposition}~\cite{Esirkepov2001}.  Together
-they enforce \emph{exact discrete charge conservation} on the
-discretized grid, which makes the moving-particle self-force residual
-identically zero by construction (modulo the underlying linearization
-truncation, which is the irreducible part).
+Section~\ref{sec:numerical}'s gauge subsection notes that ``using a
+consistent CIC kernel for both $\rho$ and $\vv{J}$ deposition
+satisfies [the discrete continuity equation] to the accuracy of the
+kernel,'' i.e.\ to $\mathcal{O}((k\Delta x)^2)$ truncation error.  That
+truncation is the source of the residual grid-heating self-force on
+moving particles; on the Yee grid the heating is much smaller than on
+cell-centered storage (the discrete divergence stencil now matches
+the source-deposition staggering), but not zero.
 
-\paragraph{Yee lattice layout (2D).}  We adopt the standard Yee
-placement, re-mapped to our six-potential GEM$+$EM list:
-\begin{center}
-\begin{tabular}{@{}L{4.5cm}L{4.5cm}L{4.5cm}@{}}
-\toprule
-\textbf{Quantity} & \textbf{Lattice node} & \textbf{Index} \\
-\midrule
-$\Phig$, $\phi_{\mathrm{em}}$, $\rho_{\mathrm{matter}}$, $\rho_q$
-  & Cell corners & $(i, j) \cdot \Delta x$ \\
-$A_{g,x}$, $A_x$, $J_{m,x}$, $J_{q,x}$
-  & Horizontal edge centers & $(i+\tfrac{1}{2}, j) \cdot \Delta x$ \\
-$A_{g,y}$, $A_y$, $J_{m,y}$, $J_{q,y}$
-  & Vertical edge centers & $(i, j+\tfrac{1}{2}) \cdot \Delta x$ \\
-$B_{g,z}$, $B_z$ (derived, not stored)
-  & Cell centers & $(i+\tfrac{1}{2}, j+\tfrac{1}{2}) \cdot \Delta x$ \\
-\bottomrule
-\end{tabular}
-\end{center}
-
-In storage, each of the 12 grid arrays continues to be an $N_x \times
-N_y$ float array; \emph{their conceptual lattice positions differ}.
-The interpretation of array index $(i,j)$ depends on which field it
-belongs to, per the table above.
-
-\paragraph{Natural Yee operators.}  Several finite-difference
-operations become exact on the staggered lattice without
-interpolation:
-\begin{align}
-  \text{Gradient of scalar}: && (\partial_x \Phig)_{i+1/2,j}
-    &= \frac{\Phig_{i+1,j} - \Phig_{i,j}}{\Delta x}, \\
-  \text{Yee curl (in 2D)}: && (B_z)_{i+1/2,j+1/2}
-    &= \frac{A_{y,i+1,j+1/2} - A_{y,i,j+1/2}}{\Delta x}
-    - \frac{A_{x,i+1/2,j+1} - A_{x,i+1/2,j}}{\Delta x}, \\
-  \text{Vector-potential time deriv}: && (\partial_t A_x)_{i+1/2,j}
-    &= \frac{A_{x,i+1/2,j}^{n+1} - A_{x,i+1/2,j}^{n-1}}{2\Delta t}.
-\end{align}
-Note that $\partial_x \Phig$ at $(i+\tfrac{1}{2}, j)$ lives on the
-\emph{same} sublattice as $A_x$, so the local gravity vector
-$g_x = -\partial_x \Phig - \partial_t A_x$ is computable with no
-interpolation.  This is the architectural advantage of Yee for
-field theories: derivative operators preserve sublattice membership.
-
-\paragraph{Wave-equation leapfrog.}  The leapfrog update remains
-\begin{equation}
-  \Phi^{n+1} = 2\Phi^n - \Phi^{n-1} + (c\,\dd t)^2 \left( \nabla^2_h \Phi^n + s_{\mathrm{coeff}} \cdot \mathrm{source}^n \right),
-\end{equation}
-applied identically to each of the six potentials.  The only change is
-that each field's discrete Laplacian uses its own sublattice's
-neighbors, and the boundary-cell indexing is shifted by half a cell
-for the edge-component fields.
-
-\paragraph{Esirkepov current deposition.}  Given a particle's positions
-$\vv{x}^n$ and $\vv{x}^{n+1}$, Esirkepov's recurrence directly computes
-$J_x$ at the relevant horizontal-edge cells and $J_y$ at the relevant
-vertical-edge cells such that the \emph{exact discrete continuity
-equation}
+v35 adds \emph{Esirkepov current deposition}~\cite{Esirkepov2001} as
+an opt-in code path beyond what Section~\ref{sec:numerical}
+specifies.  Given a particle's positions $\vv{x}^n$ and
+$\vv{x}^{n+1}$, Esirkepov's local recurrence computes the deposited
+$J_x$ values at horizontal-edge cells and $J_y$ values at
+vertical-edge cells such that the discrete continuity equation of
+Section~\ref{sec:numerical}
 \begin{equation}
 \label{eq:discrete_continuity_yee}
   \frac{\rho^{n+1}_{i,j} - \rho^n_{i,j}}{\Delta t}
   + \frac{J_x^{n+1/2}_{i+1/2,j} - J_x^{n+1/2}_{i-1/2,j}}{\Delta x}
-  + \frac{J_y^{n+1/2}_{i,j+1/2} - J_y^{n+1/2}_{i,j-1/2}}{\Delta x}
+  + \frac{J_y^{n+1/2}_{i,j+1/2} - J_y^{n+1/2}_{i,j-1/2}}{\Delta y}
   \;=\; 0
 \end{equation}
-holds at every corner $(i,j)$.  The recurrence is local (involves
-only the cells touched by the particle's trajectory across one
-timestep) and is $\sim 50$ lines in 2D.  Once $\rho$ and $\vv{J}$
-satisfy Eq.~(\ref{eq:discrete_continuity_yee}) exactly, the
-Hockney--Eastwood-style residual self-force vanishes by construction
-under any rigid motion of the particle.
+holds \emph{exactly} (not just to truncation order) at every corner
+$(i,j)$.  The recurrence is local (involves only the cells touched by
+the particle's trajectory in one timestep) and is roughly 50 lines in
+2D.  Once Eq.~(\ref{eq:discrete_continuity_yee}) is satisfied exactly,
+the Hockney--Eastwood-style residual self-force on a moving particle
+is structurally zero, and the parabolic / hyperbolic cleaning steps
+described in Section~\ref{sec:numerical} are not needed to keep gauge
+drift bounded.
+
+The opt-in flag lets us keep simple CIC-on-Yee deposition (as
+specified in Section~\ref{sec:numerical}) as the default for tests
+that don't involve dynamic mutual sources, and switch on Esirkepov
+for stages that do (Stages 10--11+).  This matches
+Section~\ref{sec:numerical}'s framing of parabolic/hyperbolic cleaning
+as optional refinements: the simple recipe works for the common case;
+the exact-continuity recipe is brought in when needed.
 
 \subsection{What this enables}
 
