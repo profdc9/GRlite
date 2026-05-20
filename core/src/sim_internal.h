@@ -107,9 +107,15 @@ void gr_particle_push_all(struct gr_sim* sim);
  * energy diagnostic. */
 float gr_phi_g_total_at(const struct gr_sim* sim, float x, float y);
 
-/* Defined in deposit.c — CIC deposition of a scalar value at sub-cell position.
- * Used by scenarios and by gr_sim_deposit_point_{mass,charge}. */
-void gr_cic_deposit_scalar(float* rho, int W, int H, float dx,
+/* Defined in deposit.c — per-sublattice CIC deposition (v35 Yee layout).
+ * Each variant deposits `value` into the four cells surrounding the
+ * sub-cell position (x_p, y_p), with bilinear weights computed against
+ * the sublattice's own node offsets. */
+void gr_cic_deposit_corner(float* arr, int W, int H, float dx,
+                           float x_p, float y_p, float value);
+void gr_cic_deposit_xedge (float* arr, int W, int H, float dx,
+                           float x_p, float y_p, float value);
+void gr_cic_deposit_yedge (float* arr, int W, int H, float dx,
                            float x_p, float y_p, float value);
 
 /* Defined in scenarios/registry.c. */

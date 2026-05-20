@@ -288,11 +288,12 @@ void gr_sim_clear_sources(gr_sim_t* sim) {
 
 void gr_sim_deposit_point_mass(gr_sim_t* sim, float x, float y, float mass) {
     if (!sim || !sim->rho_matter) return;
-    gr_cic_deposit_scalar(sim->rho_matter, sim->width, sim->height, sim->dx, x, y, mass);
+    /* rho_matter lives on the CORNER sublattice (§9, v35). */
+    gr_cic_deposit_corner(sim->rho_matter, sim->width, sim->height, sim->dx, x, y, mass);
 }
 void gr_sim_deposit_point_charge(gr_sim_t* sim, float x, float y, float charge) {
     if (!sim || !sim->rho_q) return;
-    gr_cic_deposit_scalar(sim->rho_q, sim->width, sim->height, sim->dx, x, y, charge);
+    gr_cic_deposit_corner(sim->rho_q, sim->width, sim->height, sim->dx, x, y, charge);
 }
 
 /* Stage 5 — composite deposit for a moving particle. Uses a single CIC kernel
@@ -308,12 +309,13 @@ void gr_sim_deposit_point_particle(gr_sim_t* sim, float x, float y,
     const int   W  = sim->width;
     const int   H  = sim->height;
     const float dx = sim->dx;
-    if (mass   != 0.0f) gr_cic_deposit_scalar(sim->rho_matter, W, H, dx, x, y, mass);
-    if (charge != 0.0f) gr_cic_deposit_scalar(sim->rho_q,      W, H, dx, x, y, charge);
-    if (mass   != 0.0f && vx != 0.0f) gr_cic_deposit_scalar(sim->J_mx, W, H, dx, x, y, mass   * vx);
-    if (mass   != 0.0f && vy != 0.0f) gr_cic_deposit_scalar(sim->J_my, W, H, dx, x, y, mass   * vy);
-    if (charge != 0.0f && vx != 0.0f) gr_cic_deposit_scalar(sim->J_qx, W, H, dx, x, y, charge * vx);
-    if (charge != 0.0f && vy != 0.0f) gr_cic_deposit_scalar(sim->J_qy, W, H, dx, x, y, charge * vy);
+    /* Per §9, rho deposits to CORNER, J_x to X_EDGE, J_y to Y_EDGE. */
+    if (mass   != 0.0f) gr_cic_deposit_corner(sim->rho_matter, W, H, dx, x, y, mass);
+    if (charge != 0.0f) gr_cic_deposit_corner(sim->rho_q,      W, H, dx, x, y, charge);
+    if (mass   != 0.0f && vx != 0.0f) gr_cic_deposit_xedge(sim->J_mx, W, H, dx, x, y, mass   * vx);
+    if (mass   != 0.0f && vy != 0.0f) gr_cic_deposit_yedge(sim->J_my, W, H, dx, x, y, mass   * vy);
+    if (charge != 0.0f && vx != 0.0f) gr_cic_deposit_xedge(sim->J_qx, W, H, dx, x, y, charge * vx);
+    if (charge != 0.0f && vy != 0.0f) gr_cic_deposit_yedge(sim->J_qy, W, H, dx, x, y, charge * vy);
 }
 
 const float* gr_sim_J_mx_ptr(const gr_sim_t* sim) { return sim ? sim->J_mx : NULL; }
