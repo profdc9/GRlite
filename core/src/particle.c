@@ -85,27 +85,29 @@ float gr_phi_g_total_at(const struct gr_sim* sim, float x, float y) {
     return pert + bg;
 }
 
-/* Yee gradient of Phi_g_total at (x, y) (v35 §sec:yee_pivot, answer C2).
+/* Gradient of Phi_g_total at (x, y) on the CORNER sublattice.
  *
- * Phi_g lives on the CORNER sublattice; its gradient components naturally
- * live on the edge sublattices:
+ * Centered finite difference on corners + corner-CIC interpolation to the
+ * particle.  This is the Hockney-Eastwood-preserving chain: deposit kernel
+ * (corner-CIC) and force-interp kernel (corner-CIC) are identical, the
+ * discrete corner Laplacian Green's function is symmetric, and the centered
+ * FD matrix is antisymmetric in (i, j).  Self-force on a stationary
+ * particle vanishes identically for ALL sub-cell positions, not just at
+ * symmetric points.
  *
- *   (d Phi / d x)[i+0.5, j] = (Phi[i+1, j] - Phi[i, j]) / dx     - X_EDGE
- *   (d Phi / d y)[i, j+0.5] = (Phi[i, j+1] - Phi[i, j]) / dx     - Y_EDGE
+ *   (d Phi / d x)_corner[c]  = (Phi[c+1] - Phi[c-1]) / (2 dx)
+ *   (d Phi / d y)_corner[c]  = (Phi[c+W] - Phi[c-W]) / (2 dx)
  *
- * After computing the gradient samples on their natural sublattices, we
- * CIC-interpolate to the particle position using x-edge / y-edge bilinear
- * weights — which exactly match the deposit kernels gr_cic_deposit_xedge /
- * yedge.  This pairing closes the Hockney-Eastwood adjoint chain end-to-end:
+ *   particle -> rho deposit (corner-CIC) -> Phi (corner Laplacian)
+ *           -> grad (centered FD on corners)
+ *           -> force interp (corner-CIC back to particle).
  *
- *   particle -> rho deposit (corner-CIC) -> Phi (5-point on corners)
- *           -> gradient (corner -> edge, forward FD)
- *           -> force interp (edge-CIC back to particle).
- *
- * The 5-point Laplacian on corners is symmetric, so the discrete Green's
- * function is symmetric and its x-direction first difference is antisymmetric
- * in (k_left, k_right) — yielding zero self-force on a stationary particle
- * with matched deposit/interp weights. */
+ * Trade-off vs the natural Yee corner->edge forward FD: we give up the
+ * sublattice-elegance of having grad components live on edges, but in
+ * exchange the adjoint condition is restored end-to-end.  The Esirkepov
+ * current (J on edges) is independent and unaffected — currents still
+ * sit on edges to give exact continuity at corners; only the *force*
+ * evaluation goes corner->corner here. */
 static void grav_grad_at(const struct gr_sim* sim, float x, float y,
                          float* gx_out, float* gy_out) {
     *gx_out = 0.0f;
@@ -114,7 +116,7 @@ static void grav_grad_at(const struct gr_sim* sim, float x, float y,
     const int   W  = sim->width;
     const int   H  = sim->height;
     const float dx = sim->dx;
-    const float inv_dx = 1.0f / dx;
+    const float inv_2dx = 1.0f / (2.0f * dx);
 
     /* Background contribution. */
     float gx_bg = 0.0f, gy_bg = 0.0f;
@@ -129,73 +131,43 @@ static void grav_grad_at(const struct gr_sim* sim, float x, float y,
     /* Perturbation Phi_g is always on the corner sublattice. */
     const float* pert = sim->fields[GR_FIELD_PHI_GRAV].curr;
 
-    /* === d Phi / d x on X_EDGE sublattice ============================= */
-    {
-        const float xn = x / dx - 0.5f;
-        const float yn = y / dx;
-        const int   ic = (int) floorf(xn);
-        const int   jc = (int) floorf(yn);
-        /* Need 4 x-edge cells (ic..ic+1) x (jc..jc+1); each x-edge value
-         * is (Phi[corner i+1, j] - Phi[corner i, j]) / dx, so we need
-         * corners (ic..ic+2) x (jc..jc+1).  Interior margin: ic in [0, W-3],
-         * jc in [0, H-2]. */
-        if (ic >= 0 && ic < W - 2 && jc >= 0 && jc < H - 1) {
-            const float alpha = xn - (float) ic;
-            const float beta  = yn - (float) jc;
-            float gx[4];
-            for (int dq = 0; dq < 2; dq++) {
-                const int jj = jc + dq;
-                const int row = jj * W;
-                for (int dp = 0; dp < 2; dp++) {
-                    const int ii = ic + dp;
-                    float v = (pert[row + ii + 1] - pert[row + ii]) * inv_dx;
-                    if (bg_corner) {
-                        v += (bg_corner[row + ii + 1] - bg_corner[row + ii]) * inv_dx;
-                    }
-                    gx[dq * 2 + dp] = v;
-                }
-            }
-            const float w00 = (1.0f - alpha) * (1.0f - beta);
-            const float w10 =         alpha  * (1.0f - beta);
-            const float w01 = (1.0f - alpha) *         beta;
-            const float w11 =         alpha  *         beta;
-            *gx_out = w00 * gx[0] + w10 * gx[1] + w01 * gx[2] + w11 * gx[3] + gx_bg;
-        } else {
-            *gx_out = gx_bg;
-        }
-    }
+    /* Corner-CIC interp at (x, y): xn = x/dx, no sublattice offset. */
+    const float xn = x / dx;
+    const float yn = y / dx;
+    const int   ic = (int) floorf(xn);
+    const int   jc = (int) floorf(yn);
 
-    /* === d Phi / d y on Y_EDGE sublattice ============================= */
-    {
-        const float xn = x / dx;
-        const float yn = y / dx - 0.5f;
-        const int   ic = (int) floorf(xn);
-        const int   jc = (int) floorf(yn);
-        if (ic >= 0 && ic < W - 1 && jc >= 0 && jc < H - 2) {
-            const float alpha = xn - (float) ic;
-            const float beta  = yn - (float) jc;
-            float gy[4];
-            for (int dq = 0; dq < 2; dq++) {
-                const int jj = jc + dq;
-                const int row = jj * W;
-                const int row_next = (jj + 1) * W;
-                for (int dp = 0; dp < 2; dp++) {
-                    const int ii = ic + dp;
-                    float v = (pert[row_next + ii] - pert[row + ii]) * inv_dx;
-                    if (bg_corner) {
-                        v += (bg_corner[row_next + ii] - bg_corner[row + ii]) * inv_dx;
-                    }
-                    gy[dq * 2 + dp] = v;
+    /* Need 4 corners (ic..ic+1) x (jc..jc+1), each reading a centered-FD
+     * neighbor stencil one cell in each direction.  Interior margin:
+     * ic in [1, W-3], jc in [1, H-3]. */
+    if (ic >= 1 && ic < W - 2 && jc >= 1 && jc < H - 2) {
+        const float alpha = xn - (float) ic;
+        const float beta  = yn - (float) jc;
+        float gx[4], gy[4];
+        for (int dq = 0; dq < 2; dq++) {
+            const int jj  = jc + dq;
+            const int row = jj * W;
+            for (int dp = 0; dp < 2; dp++) {
+                const int ii = ic + dp;
+                float vgx = (pert[row + ii + 1] - pert[row + ii - 1]) * inv_2dx;
+                float vgy = (pert[row + W + ii] - pert[row - W + ii]) * inv_2dx;
+                if (bg_corner) {
+                    vgx += (bg_corner[row + ii + 1] - bg_corner[row + ii - 1]) * inv_2dx;
+                    vgy += (bg_corner[row + W + ii] - bg_corner[row - W + ii]) * inv_2dx;
                 }
+                gx[dq * 2 + dp] = vgx;
+                gy[dq * 2 + dp] = vgy;
             }
-            const float w00 = (1.0f - alpha) * (1.0f - beta);
-            const float w10 =         alpha  * (1.0f - beta);
-            const float w01 = (1.0f - alpha) *         beta;
-            const float w11 =         alpha  *         beta;
-            *gy_out = w00 * gy[0] + w10 * gy[1] + w01 * gy[2] + w11 * gy[3] + gy_bg;
-        } else {
-            *gy_out = gy_bg;
         }
+        const float w00 = (1.0f - alpha) * (1.0f - beta);
+        const float w10 =         alpha  * (1.0f - beta);
+        const float w01 = (1.0f - alpha) *         beta;
+        const float w11 =         alpha  *         beta;
+        *gx_out = w00 * gx[0] + w10 * gx[1] + w01 * gx[2] + w11 * gx[3] + gx_bg;
+        *gy_out = w00 * gy[0] + w10 * gy[1] + w01 * gy[2] + w11 * gy[3] + gy_bg;
+    } else {
+        *gx_out = gx_bg;
+        *gy_out = gy_bg;
     }
 }
 

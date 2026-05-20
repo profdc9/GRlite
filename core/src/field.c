@@ -46,8 +46,16 @@ static void leapfrog_field_damped(gr_field_state_t* f, const float* damp,
         const int row = j * W;
         for (int i = 1; i < W - 1; i++) {
             const int   k   = row + i;
-            const float lap = (curr[k - 1] + curr[k + 1] + curr[k - W] + curr[k + W]
-                              - 4.0f * curr[k]) * inv_dx2;
+            /* Sum x-pair and y-pair separately, then combine.  This preserves
+             * the lattice's reflection-and-transpose (D4) symmetry under float
+             * arithmetic: cells related by the symmetry produce bit-identical
+             * lap values because the pairwise sums avoid the x-before-y bias
+             * of a left-to-right (((curr[k-1]+curr[k+1])+curr[k-W])+curr[k+W])
+             * evaluation.  Critical for HE self-force stability over many
+             * steps (v35 §sec:yee_pivot, post-S6 stability fix). */
+            const float sum_x = curr[k - 1] + curr[k + 1];
+            const float sum_y = curr[k - W] + curr[k + W];
+            const float lap   = ((sum_x + sum_y) - 4.0f * curr[k]) * inv_dx2;
             next[k] = (2.0f * curr[k] - prev[k]
                       + c2dt2 * (lap + sc * src[k])) * (1.0f - damp[k]);
         }
@@ -75,8 +83,16 @@ static void leapfrog_field_undamped(gr_field_state_t* f,
         const int row = j * W;
         for (int i = 1; i < W - 1; i++) {
             const int   k   = row + i;
-            const float lap = (curr[k - 1] + curr[k + 1] + curr[k - W] + curr[k + W]
-                              - 4.0f * curr[k]) * inv_dx2;
+            /* Sum x-pair and y-pair separately, then combine.  This preserves
+             * the lattice's reflection-and-transpose (D4) symmetry under float
+             * arithmetic: cells related by the symmetry produce bit-identical
+             * lap values because the pairwise sums avoid the x-before-y bias
+             * of a left-to-right (((curr[k-1]+curr[k+1])+curr[k-W])+curr[k+W])
+             * evaluation.  Critical for HE self-force stability over many
+             * steps (v35 §sec:yee_pivot, post-S6 stability fix). */
+            const float sum_x = curr[k - 1] + curr[k + 1];
+            const float sum_y = curr[k - W] + curr[k + W];
+            const float lap   = ((sum_x + sum_y) - 4.0f * curr[k]) * inv_dx2;
             next[k] = 2.0f * curr[k] - prev[k] + c2dt2 * (lap + sc * src[k]);
         }
     }
