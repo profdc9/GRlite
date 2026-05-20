@@ -71,8 +71,12 @@ float gr_phi_g_total_at(const struct gr_sim* sim, float x, float y) {
     const int   W  = sim->width;
     const int   H  = sim->height;
     const float dx = sim->dx;
-    /* Phi_g lives on the CORNER sublattice (v35 §9). */
-    const float pert = cic_interp_corner(sim->fields[GR_FIELD_PHI_GRAV].curr, W, H, dx, x, y);
+    /* Phi_g lives on the CORNER sublattice (v35 §9).  Use TSC interp when
+     * selected to match the TSC deposit kernel (HE adjoint pairing). */
+    const int use_tsc = (sim->shape_function == GR_SHAPE_TSC);
+    const float pert = use_tsc
+        ? gr_tsc_interp_corner(sim->fields[GR_FIELD_PHI_GRAV].curr, W, H, dx, x, y)
+        :     cic_interp_corner(sim->fields[GR_FIELD_PHI_GRAV].curr, W, H, dx, x, y);
     float bg = 0.0f;
     if (sim->bg_mode == GR_BG_MODE_ANALYTIC && sim->bg_kind != GR_BG_KIND_NONE) {
         float phi_a, gx_a, gy_a;
@@ -80,7 +84,9 @@ float gr_phi_g_total_at(const struct gr_sim* sim, float x, float y) {
             bg = phi_a;
         }
     } else {
-        bg = cic_interp_corner(sim->phi_g_bg, W, H, dx, x, y);
+        bg = use_tsc
+            ? gr_tsc_interp_corner(sim->phi_g_bg, W, H, dx, x, y)
+            :     cic_interp_corner(sim->phi_g_bg, W, H, dx, x, y);
     }
     return pert + bg;
 }
@@ -130,6 +136,46 @@ static void grav_grad_at(const struct gr_sim* sim, float x, float y,
 
     /* Perturbation Phi_g is always on the corner sublattice. */
     const float* pert = sim->fields[GR_FIELD_PHI_GRAV].curr;
+
+    if (sim->shape_function == GR_SHAPE_TSC) {
+        /* TSC corner interp: 3x3 stencil anchored at nearest corner. */
+        const float xn = x / dx;
+        const float yn = y / dx;
+        const int   ic = (int) floorf(xn + 0.5f);
+        const int   jc = (int) floorf(yn + 0.5f);
+        /* Need ic-1..ic+1 corners plus their ±1 neighbors for centered FD,
+         * so ic in [2, W-3], jc in [2, H-3]. */
+        if (ic >= 2 && ic < W - 2 && jc >= 2 && jc < H - 2) {
+            const float u = xn - (float) ic;
+            const float v = yn - (float) jc;
+            const float a = 0.5f - u, b = 0.5f + u;
+            const float c = 0.5f - v, d = 0.5f + v;
+            const float wx[3] = {0.5f * a * a, 0.75f - u * u, 0.5f * b * b};
+            const float wy[3] = {0.5f * c * c, 0.75f - v * v, 0.5f * d * d};
+            float gx_sum = 0.0f, gy_sum = 0.0f;
+            for (int dj = -1; dj <= 1; dj++) {
+                const int row = (jc + dj) * W;
+                for (int di = -1; di <= 1; di++) {
+                    const int k = row + ic + di;
+                    float vgx = (pert[k + 1] - pert[k - 1]) * inv_2dx;
+                    float vgy = (pert[k + W] - pert[k - W]) * inv_2dx;
+                    if (bg_corner) {
+                        vgx += (bg_corner[k + 1] - bg_corner[k - 1]) * inv_2dx;
+                        vgy += (bg_corner[k + W] - bg_corner[k - W]) * inv_2dx;
+                    }
+                    const float w = wx[di + 1] * wy[dj + 1];
+                    gx_sum += w * vgx;
+                    gy_sum += w * vgy;
+                }
+            }
+            *gx_out = gx_sum + gx_bg;
+            *gy_out = gy_sum + gy_bg;
+        } else {
+            *gx_out = gx_bg;
+            *gy_out = gy_bg;
+        }
+        return;
+    }
 
     /* Corner-CIC interp at (x, y): xn = x/dx, no sublattice offset. */
     const float xn = x / dx;

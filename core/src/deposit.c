@@ -97,6 +97,74 @@ void gr_cic_deposit_yedge(float* arr, int W, int H, float dx,
     arr[(jc + 1) * W + ic + 1] += value *         alpha  *         beta  * inv_area;
 }
 
+/* TSC (W_3 / quadratic B-spline) deposit + interp on the CORNER sublattice.
+ *
+ * 1D shape, anchored at nearest-integer corner inew with u = x_p/dx - inew
+ * in [-0.5, 0.5):
+ *   w_left   = 0.5 * (0.5 - u)^2
+ *   w_center = 0.75 - u^2
+ *   w_right  = 0.5 * (0.5 + u)^2
+ * Weights sum to 1 by construction.  2D shape is the outer product, giving
+ * a 3x3 = 9-cell footprint smoother than the CIC 2x2 = 4-cell footprint.
+ *
+ * Same kernel used for both deposit and interp preserves the Hockney-
+ * Eastwood adjoint condition end-to-end at any sub-cell particle position
+ * (combined with centered FD on corners for gradient evaluation). */
+static inline void tsc_weights_1d(float u, float w[3]) {
+    const float a = 0.5f - u;  /* in (0, 1] */
+    const float b = 0.5f + u;  /* in [0, 1) */
+    w[0] = 0.5f * a * a;
+    w[1] = 0.75f - u * u;
+    w[2] = 0.5f * b * b;
+}
+
+void gr_tsc_deposit_corner(float* arr, int W, int H, float dx,
+                           float x_p, float y_p, float value) {
+    if (!arr) return;
+    const float xn = x_p / dx;
+    const float yn = y_p / dx;
+    const int   ic = (int) floorf(xn + 0.5f);  /* nearest corner */
+    const int   jc = (int) floorf(yn + 0.5f);
+    /* Need indices ic-1, ic, ic+1 (resp. jc) in range. */
+    if (ic < 1 || ic > W - 2 || jc < 1 || jc > H - 2) return;
+    const float u = xn - (float) ic;  /* in [-0.5, 0.5) */
+    const float v = yn - (float) jc;
+    float wx[3], wy[3];
+    tsc_weights_1d(u, wx);
+    tsc_weights_1d(v, wy);
+    const float inv_area = 1.0f / (dx * dx);
+    for (int dj = -1; dj <= 1; dj++) {
+        const int j = jc + dj;
+        const int row = j * W;
+        for (int di = -1; di <= 1; di++) {
+            arr[row + ic + di] += value * wx[di + 1] * wy[dj + 1] * inv_area;
+        }
+    }
+}
+
+float gr_tsc_interp_corner(const float* arr, int W, int H, float dx,
+                           float x_p, float y_p) {
+    if (!arr) return 0.0f;
+    const float xn = x_p / dx;
+    const float yn = y_p / dx;
+    const int   ic = (int) floorf(xn + 0.5f);
+    const int   jc = (int) floorf(yn + 0.5f);
+    if (ic < 1 || ic > W - 2 || jc < 1 || jc > H - 2) return 0.0f;
+    const float u = xn - (float) ic;
+    const float v = yn - (float) jc;
+    float wx[3], wy[3];
+    tsc_weights_1d(u, wx);
+    tsc_weights_1d(v, wy);
+    float result = 0.0f;
+    for (int dj = -1; dj <= 1; dj++) {
+        const int row = (jc + dj) * W;
+        for (int di = -1; di <= 1; di++) {
+            result += wx[di + 1] * wy[dj + 1] * arr[row + ic + di];
+        }
+    }
+    return result;
+}
+
 /* 1D CIC (W_2) kernel: w(u) = max(1 - |u|, 0). */
 static inline float cic_w1(float u) {
     const float au = (u < 0.0f) ? -u : u;

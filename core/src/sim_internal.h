@@ -90,6 +90,8 @@ struct gr_sim {
      * after deposit, before the field leapfrog reads them.  Each pass is
      * the [[1,2,1],[2,4,2],[1,2,1]]/16 3x3 stencil.  Default 0 (no smoothing). */
     int rho_smooth_passes;
+    /* Shape function for rho deposit + force interp.  Default CIC. */
+    gr_shape_function_t shape_function;
     /* Count of timesteps in which a particle's motion exceeded 1 cell in x
      * or y (the 2-cell assumption is violated under CFL but a stiff force
      * impulse could still violate it).  On violation, Esirkepov falls back
@@ -137,6 +139,17 @@ void gr_cic_deposit_xedge (float* arr, int W, int H, float dx,
                            float x_p, float y_p, float value);
 void gr_cic_deposit_yedge (float* arr, int W, int H, float dx,
                            float x_p, float y_p, float value);
+
+/* TSC (W_3 / quadratic B-spline) deposit + interp on the CORNER
+ * sublattice.  3x3 cell support per particle, smoother than CIC,
+ * matched deposit/interp kernels preserve HE self-force adjoint at any
+ * sub-cell position.  Used for rho_matter / rho_q in Tier-0 orbits to
+ * suppress moving-particle deposit aliasing (the dominant PIC heating
+ * mode) without resorting to ad-hoc binomial smoothing. */
+void  gr_tsc_deposit_corner(float* arr, int W, int H, float dx,
+                            float x_p, float y_p, float value);
+float gr_tsc_interp_corner (const float* arr, int W, int H, float dx,
+                            float x_p, float y_p);
 
 /* Defined in deposit.c — Esirkepov 2D current deposition for a particle
  * moving from (x0, y0) to (x1, y1) over a timestep of length dt with

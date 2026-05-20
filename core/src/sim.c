@@ -44,6 +44,7 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
     sim->esirkepov_enabled       = 1;
     sim->esirkepov_violations    = 0;
     sim->rho_smooth_passes       = 0;
+    sim->shape_function          = GR_SHAPE_CIC;
     /* dt from CFL — gr_sandbox_v32.tex §9.2 eq:cfl. Not enforced to allow
      * the Stage 1 instability test (§12.1) to deliberately exceed the limit. */
     sim->dt = cfl * dx / c_eff;
@@ -130,9 +131,15 @@ void gr_sim_step(gr_sim_t* sim) {
             const float vx    = p->px / (gamma * p->mass);
             const float vy    = p->py / (gamma * p->mass);
 
-            /* Deposit rho^n at the current particle position. */
-            if (p->mass   != 0.0f) gr_cic_deposit_corner(sim->rho_matter, W, H, dx, p->x, p->y, p->mass);
-            if (p->charge != 0.0f) gr_cic_deposit_corner(sim->rho_q,      W, H, dx, p->x, p->y, p->charge);
+            /* Deposit rho^n at the current particle position.  Use TSC
+             * (3x3, smoother) if selected; otherwise CIC (2x2). */
+            if (sim->shape_function == GR_SHAPE_TSC) {
+                if (p->mass   != 0.0f) gr_tsc_deposit_corner(sim->rho_matter, W, H, dx, p->x, p->y, p->mass);
+                if (p->charge != 0.0f) gr_tsc_deposit_corner(sim->rho_q,      W, H, dx, p->x, p->y, p->charge);
+            } else {
+                if (p->mass   != 0.0f) gr_cic_deposit_corner(sim->rho_matter, W, H, dx, p->x, p->y, p->mass);
+                if (p->charge != 0.0f) gr_cic_deposit_corner(sim->rho_q,      W, H, dx, p->x, p->y, p->charge);
+            }
 
             /* Deposit J^{n-1/2} for the trajectory x^{n-1} -> x^n.
              * x^{n-1} = x^n - v^{n-1/2} * dt is exact under leapfrog drift. */
@@ -253,6 +260,14 @@ void gr_sim_set_rho_smooth_passes(gr_sim_t* sim, int passes) {
 }
 int gr_sim_get_rho_smooth_passes(const gr_sim_t* sim) {
     return sim ? sim->rho_smooth_passes : 0;
+}
+
+void gr_sim_set_shape_function(gr_sim_t* sim, gr_shape_function_t s) {
+    if (!sim) return;
+    sim->shape_function = s;
+}
+gr_shape_function_t gr_sim_get_shape_function(const gr_sim_t* sim) {
+    return sim ? sim->shape_function : GR_SHAPE_CIC;
 }
 
 /* Background evaluation mode — runtime switch between sampled-grid and

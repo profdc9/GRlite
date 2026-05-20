@@ -329,6 +329,19 @@ int  gr_sim_esirkepov_violations(const gr_sim_t* sim);
 void gr_sim_set_rho_smooth_passes(gr_sim_t* sim, int passes);
 int  gr_sim_get_rho_smooth_passes(const gr_sim_t* sim);
 
+/* Shape function for rho deposit + force interp (matched pair preserves
+ * Hockney-Eastwood adjoint condition).
+ *   GR_SHAPE_CIC: linear bilinear (W_2), 2x2 cell footprint. Default.
+ *   GR_SHAPE_TSC: quadratic B-spline (W_3), 3x3 cell footprint.  Smoother;
+ *     reduces moving-particle deposit aliasing further than CIC + binomial
+ *     smoothing.  Cost: ~2.25x more cells per deposit/interp. */
+typedef enum {
+    GR_SHAPE_CIC = 0,
+    GR_SHAPE_TSC = 1
+} gr_shape_function_t;
+void                gr_sim_set_shape_function(gr_sim_t* sim, gr_shape_function_t s);
+gr_shape_function_t gr_sim_get_shape_function(const gr_sim_t* sim);
+
 /* ----------------------------------------------------------------------------
  * Sampled background field arrays (Stage 6)
  *
