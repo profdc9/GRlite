@@ -1,6 +1,17 @@
 /* Background field array management and generators.
- * Spec reference: gr_sandbox_v33.tex §12.6 (sec:stage_bg)
- *                 "Stage 6: Sampled background field arrays". */
+ * Spec reference: gr_sandbox_vNN.tex §12.6 (sec:stage_bg)
+ *                 "Stage 6: Sampled background field arrays" +
+ *                 §sec:yee_pivot (v35 Yee sublattice layout).
+ *
+ * Per §9 each background array lives on its own Yee sublattice:
+ *   phi_g_bg, phi_bg : GR_LATTICE_CORNER  - nodes at (i,   j  ) * dx
+ *   Agx_bg,   Ax_bg  : GR_LATTICE_X_EDGE  - nodes at (i+0.5, j ) * dx
+ *   Agy_bg,   Ay_bg  : GR_LATTICE_Y_EDGE  - nodes at (i,   j+0.5) * dx
+ *
+ * The installers below sample the analytic generator at each array's own
+ * sublattice node positions.  The analytic-mode evaluators
+ * (gr_bg_eval_analytic, gr_bg_eval_A_g) read the closed form directly at
+ * an arbitrary (x, y), so they are sublattice-agnostic. */
 
 #include "grlite.h"
 #include "sim_internal.h"
@@ -57,15 +68,13 @@ static float* ensure_bg_alloc(gr_sim_t* sim, gr_field_id_t which) {
     return *slot;
 }
 
-/* Eq. (eq:bg_softened_point_mass) — gr_sandbox_v33.tex §12.6
- * "Stage 6: Sampled background field arrays".
+/* Eq. (eq:bg_softened_point_mass) — gr_sandbox_vNN.tex §12.6.
  *
  *   Phi_g^{bg}(x) = -G_eff * M / sqrt(|x - x0|^2 + epsilon^2)
  *
- * Cell-centered sampling: cell (i,j) covers [i, i+1) x [j, j+1) in cell units,
- * sampled at its center (i + 0.5, j + 0.5) * dx, matching the wave_pulse
- * scenario's convention (see scenarios/wave_pulse.c). The smoothing length
- * epsilon avoids the 1/r singularity; ~few cells is typical. */
+ * Sampled onto the CORNER sublattice: phi_g_bg[j*W + i] holds the value at
+ * position (i, j) * dx (v35 §sec:yee_pivot).  The smoothing length epsilon
+ * avoids the 1/r singularity; ~few cells is typical. */
 void gr_sim_set_background_point_mass(gr_sim_t* sim,
                                       float x0, float y0,
                                       float GM, float epsilon) {
@@ -78,12 +87,13 @@ void gr_sim_set_background_point_mass(gr_sim_t* sim,
     const float dx   = sim->dx;
     const float eps2 = epsilon * epsilon;
 
+    /* CORNER sublattice: nodes at (i, j) * dx — no offset. */
     for (int j = 0; j < H; j++) {
-        const float y  = ((float) j + 0.5f) * dx;
+        const float y  = (float) j * dx;
         const float dy = y - y0;
         const int   row = j * W;
         for (int i = 0; i < W; i++) {
-            const float x   = ((float) i + 0.5f) * dx;
+            const float x   = (float) i * dx;
             const float dxi = x - x0;
             const float r2  = dxi * dxi + dy * dy;
             phi_bg[row + i] = -GM / sqrtf(r2 + eps2);
@@ -139,8 +149,10 @@ void gr_sim_set_background_spinning_point_mass(gr_sim_t* sim,
      * for consistency with the rest of the GEM-source convention. */
     const float coeff  = sim->G_eff * Jz
                        / (2.0f * sim->c_eff * sim->c_eff);
+
+    /* X_EDGE sublattice for Agx: nodes at (i + 0.5, j) * dx. */
     for (int j = 0; j < H; j++) {
-        const float y  = ((float) j + 0.5f) * dx;
+        const float y  = (float) j * dx;
         const float dyc = y - y0;
         const int   row = j * W;
         for (int i = 0; i < W; i++) {
@@ -149,6 +161,18 @@ void gr_sim_set_background_spinning_point_mass(gr_sim_t* sim,
             const float s2   = dxc * dxc + dyc * dyc + eps2;
             const float inv_s3 = 1.0f / (s2 * sqrtf(s2));
             Agx[row + i] = -coeff * dyc * inv_s3;
+        }
+    }
+    /* Y_EDGE sublattice for Agy: nodes at (i, j + 0.5) * dx. */
+    for (int j = 0; j < H; j++) {
+        const float y  = ((float) j + 0.5f) * dx;
+        const float dyc = y - y0;
+        const int   row = j * W;
+        for (int i = 0; i < W; i++) {
+            const float xc   = (float) i * dx;
+            const float dxc  = xc - x0;
+            const float s2   = dxc * dxc + dyc * dyc + eps2;
+            const float inv_s3 = 1.0f / (s2 * sqrtf(s2));
             Agy[row + i] = +coeff * dxc * inv_s3;
         }
     }

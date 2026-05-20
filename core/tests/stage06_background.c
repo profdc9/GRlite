@@ -46,7 +46,8 @@ static int test_softened_point_mass_sampling(void) {
     TEST_ASSERT(phi_bg != NULL, "background ptr is NULL after set");
 
     /* (a) Sampled values match the analytic formula to float precision.
-     * Sample at center, 4eps away on +x, and at a few off-axis points. */
+     * phi_bg lives on the CORNER sublattice (v35), so cell (i, j) is at
+     * position (i, j) * dx. */
     const struct { int i, j; } pts[] = {
         {W / 2, H / 2}, {W / 2 + 16, H / 2}, {W / 2 + 32, H / 2},
         {W / 2 + 16, H / 2 + 16}, {W / 2 + 24, H / 2 - 24},
@@ -54,8 +55,8 @@ static int test_softened_point_mass_sampling(void) {
     const int n_pts = sizeof(pts) / sizeof(pts[0]);
     for (int k = 0; k < n_pts; k++) {
         const int i = pts[k].i, j = pts[k].j;
-        const float x = ((float) i + 0.5f) * dx;
-        const float y = ((float) j + 0.5f) * dx;
+        const float x = (float) i * dx;
+        const float y = (float) j * dx;
         const float r2 = (x - x0) * (x - x0) + (y - y0) * (y - y0);
         const float expected = -GM / sqrtf(r2 + eps * eps);
         const float observed = phi_at_cell(phi_bg, W, i, j);
@@ -76,8 +77,9 @@ static int test_softened_point_mass_sampling(void) {
      * within the O((dx)^2) truncation error of the FD stencil. */
     const int   r_cells = 24;  /* r/eps = 6 */
     const int   icx = W / 2 + r_cells, jcy = H / 2;
-    const float xs = ((float) icx + 0.5f) * dx;
-    const float ys = ((float) jcy + 0.5f) * dx;
+    /* Corner sublattice: cell (icx, jcy) is at position (icx, jcy) * dx. */
+    const float xs = (float) icx * dx;
+    const float ys = (float) jcy * dx;
     const float dxr = xs - x0;
     const float dyr = ys - y0;
     const float r_actual2 = dxr * dxr + dyr * dyr;
@@ -94,10 +96,11 @@ static int test_softened_point_mass_sampling(void) {
                 "softened differs from Newton by %.3e at r/eps=%g — smoothing too coarse",
                 newton_rel, sqrtf(r_actual2) / eps);
 
-    /* (c) Symmetry: phi_bg(W/2 + dr, H/2) == phi_bg(W/2 - dr, H/2) to fp prec. */
+    /* (c) Symmetry: phi_bg at cells W/2 +/- dr (corners are symmetric about
+     * the central corner W/2, which sits at position (W/2)*dx == x0). */
     for (int dr = 1; dr <= 30; dr += 5) {
         const float left  = phi_at_cell(phi_bg, W, W / 2 - dr, H / 2);
-        const float right = phi_at_cell(phi_bg, W, W / 2 + dr - 1, H / 2);
+        const float right = phi_at_cell(phi_bg, W, W / 2 + dr, H / 2);
         TEST_ASSERT(fabsf(left - right) < 1.0e-6f,
                     "asymmetric at dr=%d: left=%.6g right=%.6g", dr, left, right);
     }
@@ -207,7 +210,11 @@ static int test_spinning_point_mass(void) {
     TEST_ASSERT(phi_bg && Agx_bg && Agy_bg,
                 "spinning point mass: bg arrays not allocated");
 
-    /* (a) Sampled A_g matches the closed-form dipole at FP precision. */
+    /* (a) Sampled A_g matches the closed-form dipole at FP precision.
+     * Agx lives on X_EDGE (cell (i,j) at (i+0.5, j)*dx), Agy lives on
+     * Y_EDGE (cell (i,j) at (i, j+0.5)*dx) — each component sees its own
+     * sub-cell position, so the analytic values differ slightly between
+     * the two arrays at the same storage index (v35 §sec:yee_pivot). */
     const float G_eff = gr_sim_get_G_eff(sim);
     const float coeff = G_eff * Jz / (2.0f * c_eff * c_eff);
     const struct { int i, j; } pts[] = {
@@ -217,14 +224,22 @@ static int test_spinning_point_mass(void) {
     const int n_pts = sizeof(pts) / sizeof(pts[0]);
     for (int k = 0; k < n_pts; k++) {
         const int   i = pts[k].i, j = pts[k].j;
-        const float xc = ((float) i + 0.5f) * dx;
-        const float yc = ((float) j + 0.5f) * dx;
-        const float dxc = xc - x0;
-        const float dyc = yc - y0;
-        const float s2  = dxc * dxc + dyc * dyc + eps * eps;
-        const float inv_s3 = 1.0f / (s2 * sqrtf(s2));
-        const float Ax_ana = -coeff * dyc * inv_s3;
-        const float Ay_ana =  coeff * dxc * inv_s3;
+        /* X_EDGE position for Agx. */
+        const float xc_x = ((float) i + 0.5f) * dx;
+        const float yc_x = (float) j * dx;
+        const float dxc_x = xc_x - x0;
+        const float dyc_x = yc_x - y0;
+        const float s2_x  = dxc_x * dxc_x + dyc_x * dyc_x + eps * eps;
+        const float inv_s3_x = 1.0f / (s2_x * sqrtf(s2_x));
+        const float Ax_ana = -coeff * dyc_x * inv_s3_x;
+        /* Y_EDGE position for Agy. */
+        const float xc_y = (float) i * dx;
+        const float yc_y = ((float) j + 0.5f) * dx;
+        const float dxc_y = xc_y - x0;
+        const float dyc_y = yc_y - y0;
+        const float s2_y  = dxc_y * dxc_y + dyc_y * dyc_y + eps * eps;
+        const float inv_s3_y = 1.0f / (s2_y * sqrtf(s2_y));
+        const float Ay_ana =  coeff * dxc_y * inv_s3_y;
         const float Ax_obs = Agx_bg[j * W + i];
         const float Ay_obs = Agy_bg[j * W + i];
         const float relx = fabsf(Ax_obs - Ax_ana)
