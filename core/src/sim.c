@@ -45,6 +45,7 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
     sim->esirkepov_violations    = 0;
     sim->rho_smooth_passes       = 0;
     sim->shape_function          = GR_SHAPE_CIC;
+    sim->periodic_bc             = 0;
     /* dt from CFL — gr_sandbox_v32.tex §9.2 eq:cfl. Not enforced to allow
      * the Stage 1 instability test (§12.1) to deliberately exceed the limit. */
     sim->dt = cfl * dx / c_eff;
@@ -268,6 +269,14 @@ void gr_sim_set_shape_function(gr_sim_t* sim, gr_shape_function_t s) {
 }
 gr_shape_function_t gr_sim_get_shape_function(const gr_sim_t* sim) {
     return sim ? sim->shape_function : GR_SHAPE_CIC;
+}
+
+void gr_sim_set_periodic_bc(gr_sim_t* sim, int periodic) {
+    if (!sim) return;
+    sim->periodic_bc = periodic ? 1 : 0;
+}
+int gr_sim_get_periodic_bc(const gr_sim_t* sim) {
+    return sim ? sim->periodic_bc : 0;
 }
 
 /* Background evaluation mode — runtime switch between sampled-grid and

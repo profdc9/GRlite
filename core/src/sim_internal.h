@@ -92,6 +92,14 @@ struct gr_sim {
     int rho_smooth_passes;
     /* Shape function for rho deposit + force interp.  Default CIC. */
     gr_shape_function_t shape_function;
+    /* If nonzero, the field leapfrog uses periodic BC instead of zero-
+     * Dirichlet at the box edges.  Periodic BC restores translation
+     * invariance of the discrete Laplacian — required for HE self-force
+     * cancellation to hold at any particle position, not just the box
+     * symmetry center.  Outgoing waves wrap around (so damping is
+     * essential here; with periodic+damping, wrap energy is absorbed by
+     * the damping ring before it returns).  Default 0 (zero-Dirichlet). */
+    int periodic_bc;
     /* Count of timesteps in which a particle's motion exceeded 1 cell in x
      * or y (the 2-cell assumption is violated under CFL but a stiff force
      * impulse could still violate it).  On violation, Esirkepov falls back

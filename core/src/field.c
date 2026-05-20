@@ -35,6 +35,22 @@
 #include "grlite.h"
 #include "sim_internal.h"
 
+/* Generic per-cell leapfrog body, parameterized on the four neighbor reads.
+ * Used to share the leapfrog logic between zero-Dirichlet (interior loop +
+ * boundary-zeroing) and periodic (full-grid loop with wrap-around indexing)
+ * variants. */
+static inline void leapfrog_cell(float* next, const float* prev, const float* curr,
+                                 const float* src, float sc,
+                                 int k, float xm, float xp, float ym, float yp,
+                                 float damp_k, float c2dt2, float inv_dx2,
+                                 int damped) {
+    const float sum_x = xm + xp;
+    const float sum_y = ym + yp;
+    const float lap   = ((sum_x + sum_y) - 4.0f * curr[k]) * inv_dx2;
+    const float upd   = 2.0f * curr[k] - prev[k] + c2dt2 * (lap + sc * src[k]);
+    next[k] = damped ? upd * (1.0f - damp_k) : upd;
+}
+
 static void leapfrog_field_damped(gr_field_state_t* f, const float* damp,
                                   int W, int H, float c2dt2, float inv_dx2) {
     const float* prev = f->prev;
@@ -45,23 +61,14 @@ static void leapfrog_field_damped(gr_field_state_t* f, const float* damp,
     for (int j = 1; j < H - 1; j++) {
         const int row = j * W;
         for (int i = 1; i < W - 1; i++) {
-            const int   k   = row + i;
-            /* Sum x-pair and y-pair separately, then combine.  This preserves
-             * the lattice's reflection-and-transpose (D4) symmetry under float
-             * arithmetic: cells related by the symmetry produce bit-identical
-             * lap values because the pairwise sums avoid the x-before-y bias
-             * of a left-to-right (((curr[k-1]+curr[k+1])+curr[k-W])+curr[k+W])
-             * evaluation.  Critical for HE self-force stability over many
-             * steps (v35 §sec:yee_pivot, post-S6 stability fix). */
-            const float sum_x = curr[k - 1] + curr[k + 1];
-            const float sum_y = curr[k - W] + curr[k + W];
-            const float lap   = ((sum_x + sum_y) - 4.0f * curr[k]) * inv_dx2;
-            next[k] = (2.0f * curr[k] - prev[k]
-                      + c2dt2 * (lap + sc * src[k])) * (1.0f - damp[k]);
+            const int k = row + i;
+            leapfrog_cell(next, prev, curr, src, sc, k,
+                          curr[k - 1], curr[k + 1], curr[k - W], curr[k + W],
+                          damp[k], c2dt2, inv_dx2, /*damped=*/1);
         }
     }
-    /* Zero-Dirichlet boundary; same justification as Stage 1/2 — the damping
-     * layer absorbs incident energy before it reaches the wall (§9.6). */
+    /* Zero-Dirichlet boundary; the damping layer absorbs incident energy
+     * before it reaches the wall (§9.6). */
     for (int i = 0; i < W; i++) {
         next[i] = 0.0f;
         next[(H - 1) * W + i] = 0.0f;
@@ -82,18 +89,10 @@ static void leapfrog_field_undamped(gr_field_state_t* f,
     for (int j = 1; j < H - 1; j++) {
         const int row = j * W;
         for (int i = 1; i < W - 1; i++) {
-            const int   k   = row + i;
-            /* Sum x-pair and y-pair separately, then combine.  This preserves
-             * the lattice's reflection-and-transpose (D4) symmetry under float
-             * arithmetic: cells related by the symmetry produce bit-identical
-             * lap values because the pairwise sums avoid the x-before-y bias
-             * of a left-to-right (((curr[k-1]+curr[k+1])+curr[k-W])+curr[k+W])
-             * evaluation.  Critical for HE self-force stability over many
-             * steps (v35 §sec:yee_pivot, post-S6 stability fix). */
-            const float sum_x = curr[k - 1] + curr[k + 1];
-            const float sum_y = curr[k - W] + curr[k + W];
-            const float lap   = ((sum_x + sum_y) - 4.0f * curr[k]) * inv_dx2;
-            next[k] = 2.0f * curr[k] - prev[k] + c2dt2 * (lap + sc * src[k]);
+            const int k = row + i;
+            leapfrog_cell(next, prev, curr, src, sc, k,
+                          curr[k - 1], curr[k + 1], curr[k - W], curr[k + W],
+                          0.0f, c2dt2, inv_dx2, /*damped=*/0);
         }
     }
     for (int i = 0; i < W; i++) {
@@ -106,12 +105,48 @@ static void leapfrog_field_undamped(gr_field_state_t* f,
     }
 }
 
+/* Periodic-BC leapfrog: wrap-around indexing at all four edges.  Updates
+ * every cell (no boundary-zeroing), restoring translation invariance of
+ * the discrete Laplacian. */
+static void leapfrog_field_periodic(gr_field_state_t* f, const float* damp,
+                                    int W, int H, float c2dt2, float inv_dx2) {
+    const float* prev = f->prev;
+    const float* curr = f->curr;
+    float*       next = f->next;
+    const float* src  = f->source;
+    const float  sc   = f->source_coeff;
+    const int    damped = (damp != NULL);
+    for (int j = 0; j < H; j++) {
+        const int jm = (j == 0) ? (H - 1) : (j - 1);
+        const int jp = (j == H - 1) ? 0 : (j + 1);
+        const int row  = j  * W;
+        const int rowm = jm * W;
+        const int rowp = jp * W;
+        for (int i = 0; i < W; i++) {
+            const int im = (i == 0) ? (W - 1) : (i - 1);
+            const int ip = (i == W - 1) ? 0 : (i + 1);
+            const int k = row + i;
+            leapfrog_cell(next, prev, curr, src, sc, k,
+                          curr[row + im], curr[row + ip],
+                          curr[rowm + i], curr[rowp + i],
+                          damped ? damp[k] : 0.0f, c2dt2, inv_dx2, damped);
+        }
+    }
+}
+
 void gr_field_leapfrog_step_all(struct gr_sim* sim) {
     const int   W       = sim->width;
     const int   H       = sim->height;
     const float c2dt2   = sim->c_eff * sim->c_eff * sim->dt * sim->dt;
     const float inv_dx2 = 1.0f / (sim->dx * sim->dx);
     const float* damp   = sim->damping_d;  /* may be NULL */
+    if (sim->periodic_bc) {
+        for (int f = 0; f < GR_FIELD_COUNT; f++) {
+            (void) gr_array_lattice((gr_array_id_t) f);
+            leapfrog_field_periodic(&sim->fields[f], damp, W, H, c2dt2, inv_dx2);
+        }
+        return;
+    }
     if (damp) {
         for (int f = 0; f < GR_FIELD_COUNT; f++) {
             /* Sublattice consulted via gr_array_lattice((gr_array_id_t) f) —

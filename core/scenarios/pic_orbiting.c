@@ -42,8 +42,10 @@ static int build_pic_orbiting(gr_sim_t* sim, const float* params, int n_params) 
     const float r      = (n_params >= 2 && params[1] > 0.0f) ? params[1] : 20.0f;
     const float eps    = (n_params >= 3 && params[2] > 0.0f) ? params[2] : 1.0f;
     const float m_test = (n_params >= 4 && params[3] > 0.0f) ? params[3] : 0.001f;
-    const float x0     = (n_params >= 5) ? params[4] : ((float) W * 0.5f) * dx;
-    const float y0     = (n_params >= 6) ? params[5] : ((float) H * 0.5f) * dx;
+    /* True box center (W-1)/2 so the absorbing damping is symmetric
+     * around the orbit. */
+    const float x0     = (n_params >= 5) ? params[4] : ((float) (W - 1) * 0.5f) * dx;
+    const float y0     = (n_params >= 6) ? params[5] : ((float) (H - 1) * 0.5f) * dx;
 
     /* Zero perturbation fields and sources. */
     const size_t n = (size_t) W * (size_t) H;

@@ -342,6 +342,16 @@ typedef enum {
 void                gr_sim_set_shape_function(gr_sim_t* sim, gr_shape_function_t s);
 gr_shape_function_t gr_sim_get_shape_function(const gr_sim_t* sim);
 
+/* Periodic BC for the field leapfrog: 1 = on, 0 = zero-Dirichlet (default).
+ * Periodic BC restores translation invariance of the discrete Laplacian
+ * Green's function, which is the precondition for HE self-force = 0 at
+ * any particle position (not just the box symmetry center).  Note that
+ * outgoing waves wrap around to the opposite edge under periodic BC,
+ * which without damping pollutes the simulation; combine with the
+ * damping ring or PML when running production simulations. */
+void gr_sim_set_periodic_bc(gr_sim_t* sim, int periodic);
+int  gr_sim_get_periodic_bc(const gr_sim_t* sim);
+
 /* ----------------------------------------------------------------------------
  * Sampled background field arrays (Stage 6)
  *

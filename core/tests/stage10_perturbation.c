@@ -268,25 +268,19 @@ static int test_self_force_cancellation(void) {
     const float x0 = p->x;
     const float y0 = p->y;
 
-    /* Run 2,000 steps and check the cumulative drift.
+    /* Run 10,000 steps and check the cumulative drift.
      *
-     * HE self-force cancellation now holds bit-exactly at the integer-corner
-     * particle position (deposit kernel = corner-CIC, force-interp kernel =
-     * corner-CIC, gradient = centered FD on corners — all matched, with
-     * symmetric corner Laplacian Green's function and antisymmetric FD).
-     * Math-level self-force vanishes for any sub-cell position.
+     * After fixing pic_static to default to the TRUE box center
+     * ((W-1)/2, (H-1)/2) instead of W/2 (which is offset by half a cell
+     * on even-W grids), the damping ring is exactly symmetric around the
+     * particle and HE self-force cancellation holds bit-exactly: drift
+     * is EXACTLY 0 over arbitrarily many steps.
      *
-     * Over very many steps the 5-point Laplacian's float-arithmetic order
-     * (curr[k-1] + curr[k+1] + curr[k-W] + curr[k+W]) breaks the 8-fold
-     * lattice symmetry between x- and y-neighbors at the few-ULP level
-     * (different summation order produces different roundoff for cells far
-     * from the source).  Over thousands of steps the asymmetry compounds
-     * into measurable drift, which the v34 cell-centered scheme avoided
-     * via the 4-cell rho deposit's smoother local field profile.  This is
-     * a float-arithmetic stability issue, not an HE-adjoint failure: at
-     * 2000 steps the drift is well under one cell, and the math-level
-     * cancellation holds to single-precision noise. */
-    const int N = 2000;
+     * The earlier 0.82-cell drift over 2000 steps wasn't a float-noise
+     * issue or an HE adjoint failure — it was a setup bug: the particle
+     * sat 47 cells from one damping wall and 48 from the other, breaking
+     * the symmetry the HE argument relies on. */
+    const int N = 10000;
     gr_sim_step_n(sim, N);
     p = gr_sim_get_particle(sim, 0);
     const float drift = sqrtf((p->x - x0) * (p->x - x0)
@@ -294,8 +288,8 @@ static int test_self_force_cancellation(void) {
     const float drift_rel = drift / dx;
     printf("  after %d steps: drift = %.3e cell(s)\n", N, drift_rel);
 
-    TEST_ASSERT(drift_rel < 1.0f,
-                "self-force drift %.3e cells exceeds 1.0", drift_rel);
+    TEST_ASSERT(drift_rel < 1.0e-4f,
+                "self-force drift %.3e cells exceeds 1e-4", drift_rel);
     gr_sim_destroy(sim);
     return 0;
 }

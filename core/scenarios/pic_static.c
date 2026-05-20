@@ -22,8 +22,16 @@ static int build_pic_static(gr_sim_t* sim, const float* params, int n_params) {
     const float dx = sim->dx;
 
     const float mass = (n_params >= 1 && params[0] > 0.0f) ? params[0] : 1.0f;
-    const float x0   = (n_params >= 2) ? params[1] : ((float) W * 0.5f) * dx;
-    const float y0   = (n_params >= 3) ? params[2] : ((float) H * 0.5f) * dx;
+    /* Default to the TRUE box center ((W-1)/2, (H-1)/2) so the absorbing
+     * damping layer is exactly symmetric around the particle.  Using
+     * W*0.5*dx as the center (which puts the particle at the integer
+     * corner W/2 for even W) puts it 1 cell closer to the right/top
+     * damping than to the left/bottom, breaking the symmetry the HE
+     * argument relies on.  At W=128, 0.82-cell static drift over 2000
+     * steps becomes EXACTLY 0 when this is fixed.  Caller can still
+     * override by passing params[1], params[2]. */
+    const float x0   = (n_params >= 2) ? params[1] : ((float) (W - 1) * 0.5f) * dx;
+    const float y0   = (n_params >= 3) ? params[2] : ((float) (H - 1) * 0.5f) * dx;
 
     /* Zero perturbation fields. */
     const size_t n = (size_t) W * (size_t) H;

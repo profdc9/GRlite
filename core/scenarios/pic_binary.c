@@ -45,8 +45,10 @@ static int build_pic_binary(gr_sim_t* sim, const float* params, int n_params) {
     const float mass     = (n_params >= 1 && params[0] > 0.0f) ? params[0] : 0.01f;
     const float r_orb    = (n_params >= 2 && params[1] > 0.0f) ? params[1] : 15.0f * dx;
     const float v_factor = (n_params >= 3) ? params[2] : 1.0f;
-    const float cx       = (n_params >= 4) ? params[3] : ((float) W * 0.5f) * dx;
-    const float cy       = (n_params >= 5) ? params[4] : ((float) H * 0.5f) * dx;
+    /* True box center (W-1)/2 so the absorbing damping is symmetric
+     * around the orbit / COM. */
+    const float cx       = (n_params >= 4) ? params[3] : ((float) (W - 1) * 0.5f) * dx;
+    const float cy       = (n_params >= 5) ? params[4] : ((float) (H - 1) * 0.5f) * dx;
 
     const float G_eff = gr_sim_get_G_eff(sim);
     const float v_orb = v_factor * sqrtf(G_eff * mass);
