@@ -78,6 +78,22 @@ struct gr_sim {
      * manually if needed, e.g., Stage 5's static moving_source). */
     int particle_source_deposition;
 
+    /* Stage 11+ (v35 §sec:yee_pivot, answer B1): when nonzero, current
+     * deposition (J_mx, J_my, J_qx, J_qy) uses Esirkepov decomposition
+     * (Esirkepov 2001) instead of direct CIC, guaranteeing exact discrete
+     * continuity (rho^{n+1} - rho^n) / dt + div(J^{n-1/2}) = 0 cell-by-cell.
+     * Default 1 (on).  Off-flag (set via gr_sim_set_esirkepov_enabled) is for
+     * regression testing only — disabling it brings back PIC grid-heating
+     * artifacts on moving sources. */
+    int esirkepov_enabled;
+    /* Count of timesteps in which a particle's motion exceeded 1 cell in x
+     * or y (the 2-cell assumption is violated under CFL but a stiff force
+     * impulse could still violate it).  On violation, Esirkepov falls back
+     * to direct CIC for that particle that step, and continuity holds only
+     * to truncation order rather than exactly.  Public via
+     * gr_sim_esirkepov_violations(). */
+    int esirkepov_violations;
+
     /* Background generator parameters — kept alongside the sampled phi_g_bg
      * array so the user can switch between SAMPLED and ANALYTIC at runtime.
      * Only the currently installed kind's fields are meaningful. */
@@ -117,6 +133,22 @@ void gr_cic_deposit_xedge (float* arr, int W, int H, float dx,
                            float x_p, float y_p, float value);
 void gr_cic_deposit_yedge (float* arr, int W, int H, float dx,
                            float x_p, float y_p, float value);
+
+/* Defined in deposit.c — Esirkepov 2D current deposition for a particle
+ * moving from (x0, y0) to (x1, y1) over a timestep of length dt with
+ * source coupling `source` (mass for J_m*, charge for J_q*).  Deposits J_x
+ * onto the X_EDGE sublattice and J_y onto Y_EDGE such that, paired with a
+ * corner-CIC rho deposit at the same endpoints, the discrete continuity
+ * (rho^{n+1} - rho^n)/dt + div(J^{n-1/2}) = 0 holds exactly.
+ *
+ * Returns 1 on successful Esirkepov deposit (2-cell motion case);
+ * 0 if either |x1 - x0| > dx or |y1 - y0| > dx (multi-cell crossing) — in
+ * which case the caller falls back to gr_cic_deposit_x/yedge and bumps the
+ * sim->esirkepov_violations counter. */
+int gr_esirkepov_deposit_jxy(float* Jx, float* Jy,
+                             int W, int H, float dx, float dt,
+                             float x0, float y0, float x1, float y1,
+                             float source);
 
 /* Defined in scenarios/registry.c. */
 const gr_scenario_t* gr_scenario_find(const char* name);

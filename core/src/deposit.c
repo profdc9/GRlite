@@ -96,3 +96,90 @@ void gr_cic_deposit_yedge(float* arr, int W, int H, float dx,
     arr[(jc + 1) * W + ic    ] += value * (1.0f - alpha) *         beta  * inv_area;
     arr[(jc + 1) * W + ic + 1] += value *         alpha  *         beta  * inv_area;
 }
+
+/* 1D CIC (W_2) kernel: w(u) = max(1 - |u|, 0). */
+static inline float cic_w1(float u) {
+    const float au = (u < 0.0f) ? -u : u;
+    return (au < 1.0f) ? (1.0f - au) : 0.0f;
+}
+
+/* Esirkepov 2D current deposit (W_2 / CIC shape), 2-cell case.
+ * Esirkepov, J. Comp. Phys. Comm. 135 (2001) 144-153, eq. 30.
+ *
+ * Splits the 2D CIC shape change DS_2D = S^n_x*S^n_y - S^{n-1}_x*S^{n-1}_y
+ * into orthogonal x-flux and y-flux parts:
+ *   DS_x[i,j] = (S^n_x - S^{n-1}_x) * (S^{n-1}_y + 0.5 * (S^n_y - S^{n-1}_y))
+ *   DS_y[i,j] = (S^n_y - S^{n-1}_y) * (S^{n-1}_x + 0.5 * (S^n_x - S^{n-1}_x))
+ * which satisfy DS_x + DS_y = DS_2D exactly.  The currents are then
+ *   J_x(x-edge i, j) = -(source/(dt dx)) * sum_{k <= i} DS_x[k, j]
+ *   J_y(i, y-edge j) = -(source/(dt dx)) * sum_{l <= j} DS_y[i, l]
+ * yielding discrete continuity (rho^n - rho^{n-1})/dt + div(J^{n-1/2}) = 0
+ * at every corner cell. */
+int gr_esirkepov_deposit_jxy(float* Jx, float* Jy,
+                             int W, int H, float dx, float dt,
+                             float x0, float y0, float x1, float y1,
+                             float source) {
+    if (!Jx || !Jy || dx <= 0.0f || dt <= 0.0f) return 0;
+    if (source == 0.0f) return 1;
+    const float xn0 = x0 / dx;
+    const float yn0 = y0 / dx;
+    const float xn1 = x1 / dx;
+    const float yn1 = y1 / dx;
+
+    /* 2-cell case: motion strictly less than 1 cell in each direction. */
+    {
+        const float ax = xn1 - xn0;
+        const float ay = yn1 - yn0;
+        if ((ax >  1.0f) || (ax < -1.0f) ||
+            (ay >  1.0f) || (ay < -1.0f)) return 0;
+    }
+
+    /* Anchor at leftmost/bottommost cell so the 4-corner patch covers both
+     * endpoints' CIC support (each is 2 wide; union <= 3; patch of 4 is safe). */
+    const int im_lo = (int) floorf(fminf(xn0, xn1));
+    const int jm_lo = (int) floorf(fminf(yn0, yn1));
+
+    float S0x[4], S1x[4], S0y[4], S1y[4];
+    for (int k = 0; k < 4; k++) {
+        const float ix = (float) (im_lo + k);
+        const float jy = (float) (jm_lo + k);
+        S0x[k] = cic_w1(xn0 - ix);
+        S1x[k] = cic_w1(xn1 - ix);
+        S0y[k] = cic_w1(yn0 - jy);
+        S1y[k] = cic_w1(yn1 - jy);
+    }
+
+    const float prefactor = -source / (dt * dx);
+
+    /* J_x on X_EDGE: cumulative sum along i for each j-corner row. */
+    for (int kj = 0; kj < 4; kj++) {
+        const int jc = jm_lo + kj;
+        if (jc < 0 || jc >= H) continue;
+        const float Wy = S0y[kj] + 0.5f * (S1y[kj] - S0y[kj]);
+        float cumsum = 0.0f;
+        for (int ki = 0; ki < 4; ki++) {
+            const float DSx = (S1x[ki] - S0x[ki]) * Wy;
+            cumsum += DSx;
+            const int ie = im_lo + ki;
+            if (ie >= 0 && ie < W - 1) {
+                Jx[jc * W + ie] += prefactor * cumsum;
+            }
+        }
+    }
+    /* J_y on Y_EDGE: cumulative sum along j for each i-corner column. */
+    for (int ki = 0; ki < 4; ki++) {
+        const int ic = im_lo + ki;
+        if (ic < 0 || ic >= W) continue;
+        const float Wx = S0x[ki] + 0.5f * (S1x[ki] - S0x[ki]);
+        float cumsum = 0.0f;
+        for (int kj = 0; kj < 4; kj++) {
+            const float DSy = (S1y[kj] - S0y[kj]) * Wx;
+            cumsum += DSy;
+            const int je = jm_lo + kj;
+            if (je >= 0 && je < H - 1) {
+                Jy[je * W + ic] += prefactor * cumsum;
+            }
+        }
+    }
+    return 1;
+}

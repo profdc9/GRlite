@@ -40,6 +40,9 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
     sim->G_eff                   = 1.0f;
     sim->k_e                     = 1.0f;
     sim->field_evolution_enabled = 1;
+    /* Esirkepov current deposition on by default (v35 answer B1). */
+    sim->esirkepov_enabled       = 1;
+    sim->esirkepov_violations    = 0;
     /* dt from CFL — gr_sandbox_v32.tex §9.2 eq:cfl. Not enforced to allow
      * the Stage 1 instability test (§12.1) to deliberately exceed the limit. */
     sim->dt = cfl * dx / c_eff;
@@ -115,14 +118,49 @@ void gr_sim_step(gr_sim_t* sim) {
     if (sim->particle_source_deposition && sim->n_particles > 0) {
         gr_sim_clear_sources(sim);
         const float c2 = sim->c_eff * sim->c_eff;
+        const float dt = sim->dt;
+        const int   W  = sim->width;
+        const int   H  = sim->height;
+        const float dx = sim->dx;
         for (int i = 0; i < sim->n_particles; i++) {
             const gr_particle_t* p = &sim->particles[i];
             const float pmag2 = p->px * p->px + p->py * p->py;
             const float gamma = sqrtf(1.0f + pmag2 / (p->mass * p->mass * c2));
             const float vx    = p->px / (gamma * p->mass);
             const float vy    = p->py / (gamma * p->mass);
-            gr_sim_deposit_point_particle(sim, p->x, p->y,
-                                          p->mass, p->charge, vx, vy);
+
+            /* Deposit rho^n at the current particle position. */
+            if (p->mass   != 0.0f) gr_cic_deposit_corner(sim->rho_matter, W, H, dx, p->x, p->y, p->mass);
+            if (p->charge != 0.0f) gr_cic_deposit_corner(sim->rho_q,      W, H, dx, p->x, p->y, p->charge);
+
+            /* Deposit J^{n-1/2} for the trajectory x^{n-1} -> x^n.
+             * x^{n-1} = x^n - v^{n-1/2} * dt is exact under leapfrog drift. */
+            const float x0 = p->x - vx * dt;
+            const float y0 = p->y - vy * dt;
+            int violated = 0;
+            if (sim->esirkepov_enabled) {
+                if (p->mass != 0.0f) {
+                    if (!gr_esirkepov_deposit_jxy(sim->J_mx, sim->J_my, W, H, dx, dt,
+                                                  x0, y0, p->x, p->y, p->mass)) {
+                        violated = 1;
+                    }
+                }
+                if (p->charge != 0.0f) {
+                    if (!gr_esirkepov_deposit_jxy(sim->J_qx, sim->J_qy, W, H, dx, dt,
+                                                  x0, y0, p->x, p->y, p->charge)) {
+                        violated = 1;
+                    }
+                }
+            }
+            if (!sim->esirkepov_enabled || violated) {
+                /* Direct CIC fallback (also used when Esirkepov is opted out
+                 * for regression testing). */
+                if (p->mass   != 0.0f && vx != 0.0f) gr_cic_deposit_xedge(sim->J_mx, W, H, dx, p->x, p->y, p->mass   * vx);
+                if (p->mass   != 0.0f && vy != 0.0f) gr_cic_deposit_yedge(sim->J_my, W, H, dx, p->x, p->y, p->mass   * vy);
+                if (p->charge != 0.0f && vx != 0.0f) gr_cic_deposit_xedge(sim->J_qx, W, H, dx, p->x, p->y, p->charge * vx);
+                if (p->charge != 0.0f && vy != 0.0f) gr_cic_deposit_yedge(sim->J_qy, W, H, dx, p->x, p->y, p->charge * vy);
+                if (violated) sim->esirkepov_violations++;
+            }
         }
     }
 
@@ -158,6 +196,17 @@ void gr_sim_set_particle_source_deposition(gr_sim_t* sim, int enabled) {
 }
 int gr_sim_get_particle_source_deposition(const gr_sim_t* sim) {
     return sim ? sim->particle_source_deposition : 0;
+}
+
+void gr_sim_set_esirkepov_enabled(gr_sim_t* sim, int enabled) {
+    if (!sim) return;
+    sim->esirkepov_enabled = enabled ? 1 : 0;
+}
+int gr_sim_get_esirkepov_enabled(const gr_sim_t* sim) {
+    return sim ? sim->esirkepov_enabled : 0;
+}
+int gr_sim_esirkepov_violations(const gr_sim_t* sim) {
+    return sim ? sim->esirkepov_violations : 0;
 }
 
 /* Background evaluation mode — runtime switch between sampled-grid and

@@ -307,6 +307,18 @@ int  gr_sim_get_field_evolution(const gr_sim_t* sim);
 void gr_sim_set_particle_source_deposition(gr_sim_t* sim, int enabled);
 int  gr_sim_get_particle_source_deposition(const gr_sim_t* sim);
 
+/* Esirkepov current deposition (v35 §sec:yee_pivot, answer B1).
+ * Default-on; the off-flag is for regression testing only — disabling it
+ * reintroduces PIC grid-heating artifacts on moving sources because direct
+ * CIC violates the discrete continuity equation
+ *   (rho^{n+1} - rho^n)/dt + div(J^{n-1/2}) = 0
+ * by exactly v.grad(rho).  gr_sim_esirkepov_violations() reports the count
+ * of timesteps in which a particle's motion exceeded 1 cell in x or y and
+ * the deposit fell back to direct CIC; a nonzero value warrants caution. */
+void gr_sim_set_esirkepov_enabled(gr_sim_t* sim, int enabled);
+int  gr_sim_get_esirkepov_enabled(const gr_sim_t* sim);
+int  gr_sim_esirkepov_violations(const gr_sim_t* sim);
+
 /* ----------------------------------------------------------------------------
  * Sampled background field arrays (Stage 6)
  *
