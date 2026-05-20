@@ -190,6 +190,60 @@ float* gr_sim_field_ptr(gr_sim_t* sim, gr_field_id_t which) {
     return sim->fields[which].curr;
 }
 
+/* v35 sublattice classification.  In v35 the implementation has not yet
+ * been migrated; storage is still cell-centered.  But the classification
+ * table is the eventual one (per §9), and callers can begin using it now
+ * without behavior change. */
+gr_lattice_t gr_array_lattice(gr_array_id_t which) {
+    switch (which) {
+    case GR_ARR_PHI_GRAV:
+    case GR_ARR_PHI_EM:
+    case GR_ARR_RHO_MATTER:
+    case GR_ARR_RHO_Q:        return GR_LATTICE_CORNER;
+    case GR_ARR_A_GX:
+    case GR_ARR_A_X:
+    case GR_ARR_J_MX:
+    case GR_ARR_J_QX:         return GR_LATTICE_X_EDGE;
+    case GR_ARR_A_GY:
+    case GR_ARR_A_Y:
+    case GR_ARR_J_MY:
+    case GR_ARR_J_QY:         return GR_LATTICE_Y_EDGE;
+    default:                  return GR_LATTICE_CORNER;
+    }
+}
+
+void gr_lattice_offset(gr_lattice_t lat, float* dx_out, float* dy_out) {
+    if (!dx_out || !dy_out) return;
+    switch (lat) {
+    case GR_LATTICE_CORNER: *dx_out = 0.0f; *dy_out = 0.0f; break;
+    case GR_LATTICE_X_EDGE: *dx_out = 0.5f; *dy_out = 0.0f; break;
+    case GR_LATTICE_Y_EDGE: *dx_out = 0.0f; *dy_out = 0.5f; break;
+    default:                *dx_out = 0.0f; *dy_out = 0.0f; break;
+    }
+}
+
+float* gr_sim_array_ptr(gr_sim_t* sim, gr_array_id_t which) {
+    if (!sim) return NULL;
+    switch (which) {
+    /* Potentials: route to gr_field_id_t's current-time-slice buffer.
+     * The cast is safe because GR_ARR_PHI_GRAV..GR_ARR_A_Y == 0..5. */
+    case GR_ARR_PHI_GRAV:
+    case GR_ARR_A_GX:
+    case GR_ARR_A_GY:
+    case GR_ARR_PHI_EM:
+    case GR_ARR_A_X:
+    case GR_ARR_A_Y:          return sim->fields[(int) which].curr;
+    /* Sources: the existing struct fields. */
+    case GR_ARR_RHO_MATTER:   return sim->rho_matter;
+    case GR_ARR_J_MX:         return sim->J_mx;
+    case GR_ARR_J_MY:         return sim->J_my;
+    case GR_ARR_RHO_Q:        return sim->rho_q;
+    case GR_ARR_J_QX:         return sim->J_qx;
+    case GR_ARR_J_QY:         return sim->J_qy;
+    default:                  return NULL;
+    }
+}
+
 void  gr_sim_set_G_eff(gr_sim_t* sim, float G_eff) {
     if (!sim) return;
     sim->G_eff = G_eff;

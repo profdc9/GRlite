@@ -20,7 +20,8 @@ typedef struct gr_sim gr_sim_t;
 
 /* Field identifiers — six potentials per v33 §12.4 / v32 §9.1. The Stage 4
  * refactor expanded this from {Phi_g} to all six. Numeric values are stable;
- * code may rely on PHI_GRAV == 0. */
+ * code may rely on PHI_GRAV == 0.  These six numeric values also coincide
+ * with the first six values of gr_array_id_t below, so a cast is safe. */
 typedef enum {
     GR_FIELD_PHI_GRAV = 0,  /* gravitational scalar  Phi_g     */
     GR_FIELD_A_GX     = 1,  /* gravitomagnetic vec.  A_{g,x}   */
@@ -30,6 +31,76 @@ typedef enum {
     GR_FIELD_A_Y      = 5,  /* magnetic vector       A_y       */
     GR_FIELD_COUNT    = 6
 } gr_field_id_t;
+
+/* ----------------------------------------------------------------------------
+ * Yee staggered grid layout (v35; specified in §9 of gr_sandbox_vNN.tex but
+ * not implemented until v35).
+ *
+ * Each of the 12 stored grid arrays — 6 potentials and 6 sources — lives at
+ * one of three sub-cell positions within each cell-(i,j) box:
+ *
+ *   GR_LATTICE_CORNER  : sample at (i, j) * dx
+ *     Used by scalars: Phi_g, phi_em, rho_matter, rho_q.
+ *
+ *   GR_LATTICE_X_EDGE  : sample at (i+0.5, j) * dx
+ *     Used by x-components: A_{g,x}, A_x, J_{m,x}, J_{q,x}, and the derived
+ *     gradient dPhi/dx.
+ *
+ *   GR_LATTICE_Y_EDGE  : sample at (i, j+0.5) * dx
+ *     Used by y-components: A_{g,y}, A_y, J_{m,y}, J_{q,y}, and the derived
+ *     gradient dPhi/dy.
+ *
+ * The cell-center sublattice (i+0.5, j+0.5) * dx is the natural home for
+ * derived curl quantities (B_{g,z}, B_z) but they are not stored — computed
+ * on demand at particle positions or full-grid on request for visualization.
+ *
+ * All 12 arrays are allocated identically as N_x * N_y * sizeof(float).  For
+ * X_EDGE fields the column i = N_x-1 is a "ghost" column kept at zero (and
+ * never written by the leapfrog); for Y_EDGE fields the row j = N_y-1 is the
+ * ghost.  CORNER fields use all cells.  This uniform allocation (rather than
+ * shape-per-sublattice) preserves cache locality and is GPU/shader friendly.
+ *
+ * In v35, the implementation is being migrated from a single cell-centered
+ * layout to this Yee specification.  Helpers gr_array_lattice() and
+ * gr_sim_array_ptr() let callers discover and access arrays generically.
+ * --------------------------------------------------------------------------*/
+
+typedef enum {
+    GR_LATTICE_CORNER = 0,  /* sample at (i,     j  ) * dx  — scalars     */
+    GR_LATTICE_X_EDGE = 1,  /* sample at (i+0.5, j  ) * dx  — x-vectors    */
+    GR_LATTICE_Y_EDGE = 2   /* sample at (i,     j+0.5) * dx — y-vectors  */
+} gr_lattice_t;
+
+/* Unified identifier for all 12 stored grid arrays — six potentials + six
+ * sources.  The first six values match gr_field_id_t numerically (so e.g.
+ * GR_ARR_PHI_GRAV == GR_FIELD_PHI_GRAV == 0), allowing safe casting when
+ * code that knew only about potentials needs to operate on the broader
+ * array list. */
+typedef enum {
+    /* Potentials (same numeric order as gr_field_id_t) */
+    GR_ARR_PHI_GRAV   = 0,   /* corner   */
+    GR_ARR_A_GX       = 1,   /* x-edge   */
+    GR_ARR_A_GY       = 2,   /* y-edge   */
+    GR_ARR_PHI_EM     = 3,   /* corner   */
+    GR_ARR_A_X        = 4,   /* x-edge   */
+    GR_ARR_A_Y        = 5,   /* y-edge   */
+    /* Sources */
+    GR_ARR_RHO_MATTER = 6,   /* corner   */
+    GR_ARR_J_MX       = 7,   /* x-edge   */
+    GR_ARR_J_MY       = 8,   /* y-edge   */
+    GR_ARR_RHO_Q      = 9,   /* corner   */
+    GR_ARR_J_QX       = 10,  /* x-edge   */
+    GR_ARR_J_QY       = 11,  /* y-edge   */
+    GR_ARR_COUNT      = 12
+} gr_array_id_t;
+
+/* Lattice classification for a given array id.  Constant table lookup. */
+gr_lattice_t gr_array_lattice(gr_array_id_t which);
+
+/* Sub-cell offset (in units of dx) of a sublattice's nodes relative to the
+ * cell's lower-left corner.  For example, X_EDGE has offset (0.5, 0.0).
+ * Useful for translating between array index and physical position. */
+void gr_lattice_offset(gr_lattice_t lat, float* dx_out, float* dy_out);
 
 /* ----------------------------------------------------------------------------
  * Simulation lifecycle
@@ -83,6 +154,13 @@ int   gr_sim_height(const gr_sim_t* sim);
  * The pointer remains valid until gr_sim_destroy or the next gr_sim_step (the
  * leapfrog rotates three internal buffers — see src/sim_internal.h). */
 float* gr_sim_field_ptr(gr_sim_t* sim, gr_field_id_t which);
+
+/* Unified pointer accessor (v35) — returns the storage array for any of the
+ * 12 stored grids (6 potentials + 6 sources).  Use gr_array_lattice(which)
+ * to determine the sublattice the returned array's indices map to.  This is
+ * the recommended generic access path; the dedicated gr_sim_rho_matter_ptr,
+ * gr_sim_J_mx_ptr, ... functions kept for backward compatibility wrap this. */
+float* gr_sim_array_ptr(gr_sim_t* sim, gr_array_id_t which);
 
 /* ----------------------------------------------------------------------------
  * Static source deposition (Stage 3)
