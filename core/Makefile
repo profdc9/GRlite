@@ -49,7 +49,7 @@ CORE_SRCS = src/sim.c src/field.c src/background.c src/deposit.c src/gauge.c \
             scenarios/moving_source.c scenarios/kepler_orbit.c \
             scenarios/eccentric_orbit.c scenarios/spinning_orbit.c \
             scenarios/pic_static.c scenarios/pic_constant_v.c \
-            scenarios/pic_orbiting.c
+            scenarios/pic_orbiting.c scenarios/pic_binary.c
 
 TEST_SRCS = $(wildcard tests/*.c)
 

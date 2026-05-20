@@ -38,6 +38,7 @@ extern void gr_scenario_register_spinning_orbit(void);
 extern void gr_scenario_register_pic_static(void);
 extern void gr_scenario_register_pic_constant_v(void);
 extern void gr_scenario_register_pic_orbiting(void);
+extern void gr_scenario_register_pic_binary(void);
 
 void gr_scenarios_init(void) {
     if (g_initialized) return;
@@ -51,4 +52,5 @@ void gr_scenarios_init(void) {
     gr_scenario_register_pic_static();
     gr_scenario_register_pic_constant_v();
     gr_scenario_register_pic_orbiting();
+    gr_scenario_register_pic_binary();
 }
