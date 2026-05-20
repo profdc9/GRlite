@@ -51,11 +51,14 @@ CORE_SRCS = src/sim.c src/field.c src/background.c src/deposit.c src/gauge.c \
             scenarios/pic_static.c scenarios/pic_constant_v.c \
             scenarios/pic_orbiting.c
 
-# Tests temporarily skipped during the Yee migration (v35 §sec:yee_migration_plan).
-# Stage 10 depends on a matched deposit/interpolation kernel for Hockney-Eastwood
-# self-force cancellation; between S3 (deposit moves to Yee sublattices) and S5
-# (particle interp + force eval move to Yee), the adjoint is broken and stage 10
-# fails as expected.  Restore at S5 by clearing SKIP_TESTS.
+# Tests skipped during the Yee migration (v35 §sec:yee_migration_plan).
+# Stage 10 moving-particle phases (B-D) suffer from grid heating because
+# the discrete continuity equation J = -dt rho is not satisfied exactly
+# for CIC deposition of a moving point source.  S6 turns Esirkepov current
+# deposition on by default, restoring exact discrete continuity and
+# eliminating the heating.  After S5 the stationary Phase A passes
+# (Hockney-Eastwood holds at static under corner-deposit + Yee-gradient +
+# edge-interp), but Phases B-D need Esirkepov.  Restore at S6.
 SKIP_TESTS = tests/stage10_perturbation.c
 TEST_SRCS = $(filter-out $(SKIP_TESTS),$(wildcard tests/*.c))
 

@@ -8,26 +8,62 @@
 #include <math.h>
 #include <stdlib.h>
 
-/* CIC interpolation of a cell-centered scalar field at (x, y).
- * Same sub-cell math as gr_cic_deposit_scalar (eq:cic_deposit) — bilinear
- * weights satisfy the §9.5 adjoint condition automatically. */
-static float cic_interpolate(const float* f, int W, int H, float dx, float x, float y) {
+/* Sublattice-aware CIC interpolators (v35 §sec:yee_pivot, answer C1):
+ * three inline variants matching the deposit kernels gr_cic_deposit_*.
+ * Pairing deposit+interp on the same sublattice with the same bilinear
+ * weights satisfies the §9.5 adjoint condition for Hockney-Eastwood
+ * self-force cancellation.  Each variant computes its sub-cell offset
+ * against its sublattice's own node positions:
+ *   CORNER:  (i,    j   ) * dx  - no offset
+ *   X_EDGE:  (i+0.5, j  ) * dx  - x offset 0.5
+ *   Y_EDGE:  (i,    j+0.5) * dx - y offset 0.5
+ */
+static inline float cic_interp_corner(const float* f, int W, int H, float dx,
+                                      float x, float y) {
     if (!f) return 0.0f;
-    const float xn = x / dx - 0.5f;
-    const float yn = y / dx - 0.5f;
+    const float xn = x / dx;
+    const float yn = y / dx;
     const int   ic = (int) floorf(xn);
     const int   jc = (int) floorf(yn);
     if (ic < 0 || ic >= W - 1 || jc < 0 || jc >= H - 1) return 0.0f;
     const float alpha = xn - (float) ic;
     const float beta  = yn - (float) jc;
-    const float w00 = (1.0f - alpha) * (1.0f - beta);
-    const float w10 =         alpha  * (1.0f - beta);
-    const float w01 = (1.0f - alpha) *         beta;
-    const float w11 =         alpha  *         beta;
-    return w00 * f[jc * W + ic]
-         + w10 * f[jc * W + ic + 1]
-         + w01 * f[(jc + 1) * W + ic]
-         + w11 * f[(jc + 1) * W + ic + 1];
+    return (1.0f - alpha) * (1.0f - beta) * f[jc       * W + ic]
+         +         alpha  * (1.0f - beta) * f[jc       * W + ic + 1]
+         + (1.0f - alpha) *         beta  * f[(jc + 1) * W + ic]
+         +         alpha  *         beta  * f[(jc + 1) * W + ic + 1];
+}
+
+static inline float cic_interp_xedge(const float* f, int W, int H, float dx,
+                                     float x, float y) {
+    if (!f) return 0.0f;
+    const float xn = x / dx - 0.5f;
+    const float yn = y / dx;
+    const int   ic = (int) floorf(xn);
+    const int   jc = (int) floorf(yn);
+    if (ic < 0 || ic >= W - 2 || jc < 0 || jc >= H - 1) return 0.0f;
+    const float alpha = xn - (float) ic;
+    const float beta  = yn - (float) jc;
+    return (1.0f - alpha) * (1.0f - beta) * f[jc       * W + ic]
+         +         alpha  * (1.0f - beta) * f[jc       * W + ic + 1]
+         + (1.0f - alpha) *         beta  * f[(jc + 1) * W + ic]
+         +         alpha  *         beta  * f[(jc + 1) * W + ic + 1];
+}
+
+static inline float cic_interp_yedge(const float* f, int W, int H, float dx,
+                                     float x, float y) {
+    if (!f) return 0.0f;
+    const float xn = x / dx;
+    const float yn = y / dx - 0.5f;
+    const int   ic = (int) floorf(xn);
+    const int   jc = (int) floorf(yn);
+    if (ic < 0 || ic >= W - 1 || jc < 0 || jc >= H - 2) return 0.0f;
+    const float alpha = xn - (float) ic;
+    const float beta  = yn - (float) jc;
+    return (1.0f - alpha) * (1.0f - beta) * f[jc       * W + ic]
+         +         alpha  * (1.0f - beta) * f[jc       * W + ic + 1]
+         + (1.0f - alpha) *         beta  * f[(jc + 1) * W + ic]
+         +         alpha  *         beta  * f[(jc + 1) * W + ic + 1];
 }
 
 float gr_phi_g_total_at(const struct gr_sim* sim, float x, float y) {
@@ -35,7 +71,8 @@ float gr_phi_g_total_at(const struct gr_sim* sim, float x, float y) {
     const int   W  = sim->width;
     const int   H  = sim->height;
     const float dx = sim->dx;
-    const float pert = cic_interpolate(sim->fields[GR_FIELD_PHI_GRAV].curr, W, H, dx, x, y);
+    /* Phi_g lives on the CORNER sublattice (v35 §9). */
+    const float pert = cic_interp_corner(sim->fields[GR_FIELD_PHI_GRAV].curr, W, H, dx, x, y);
     float bg = 0.0f;
     if (sim->bg_mode == GR_BG_MODE_ANALYTIC && sim->bg_kind != GR_BG_KIND_NONE) {
         float phi_a, gx_a, gy_a;
@@ -43,16 +80,32 @@ float gr_phi_g_total_at(const struct gr_sim* sim, float x, float y) {
             bg = phi_a;
         }
     } else {
-        bg = cic_interpolate(sim->phi_g_bg, W, H, dx, x, y);
+        bg = cic_interp_corner(sim->phi_g_bg, W, H, dx, x, y);
     }
     return pert + bg;
 }
 
-/* CIC-interpolated centered-FD gradient of Phi_g_total at (x, y). The CIC
- * weights match those used for deposit (W_2 / bilinear), satisfying the
- * §9.5 adjoint pairing so that a stationary self-deposit produces no
- * self-force on the particle (relevant once Stage 10 adds source coupling;
- * for Stage 7 in a fixed background it's just the natural force law). */
+/* Yee gradient of Phi_g_total at (x, y) (v35 §sec:yee_pivot, answer C2).
+ *
+ * Phi_g lives on the CORNER sublattice; its gradient components naturally
+ * live on the edge sublattices:
+ *
+ *   (d Phi / d x)[i+0.5, j] = (Phi[i+1, j] - Phi[i, j]) / dx     - X_EDGE
+ *   (d Phi / d y)[i, j+0.5] = (Phi[i, j+1] - Phi[i, j]) / dx     - Y_EDGE
+ *
+ * After computing the gradient samples on their natural sublattices, we
+ * CIC-interpolate to the particle position using x-edge / y-edge bilinear
+ * weights — which exactly match the deposit kernels gr_cic_deposit_xedge /
+ * yedge.  This pairing closes the Hockney-Eastwood adjoint chain end-to-end:
+ *
+ *   particle -> rho deposit (corner-CIC) -> Phi (5-point on corners)
+ *           -> gradient (corner -> edge, forward FD)
+ *           -> force interp (edge-CIC back to particle).
+ *
+ * The 5-point Laplacian on corners is symmetric, so the discrete Green's
+ * function is symmetric and its x-direction first difference is antisymmetric
+ * in (k_left, k_right) — yielding zero self-force on a stationary particle
+ * with matched deposit/interp weights. */
 static void grav_grad_at(const struct gr_sim* sim, float x, float y,
                          float* gx_out, float* gy_out) {
     *gx_out = 0.0f;
@@ -61,59 +114,88 @@ static void grav_grad_at(const struct gr_sim* sim, float x, float y,
     const int   W  = sim->width;
     const int   H  = sim->height;
     const float dx = sim->dx;
-    const float xn = x / dx - 0.5f;
-    const float yn = y / dx - 0.5f;
-    const int   ic = (int) floorf(xn);
-    const int   jc = (int) floorf(yn);
+    const float inv_dx = 1.0f / dx;
 
-    /* Background contribution: either the analytic generator (exact, no
-     * grid involvement, no tangential discretization error) or the sampled
-     * array (CIC-of-FD). */
+    /* Background contribution. */
     float gx_bg = 0.0f, gy_bg = 0.0f;
+    const float* bg_corner = NULL;
     if (sim->bg_mode == GR_BG_MODE_ANALYTIC && sim->bg_kind != GR_BG_KIND_NONE) {
         float phi_a;
         gr_bg_eval_analytic(sim, x, y, &phi_a, &gx_bg, &gy_bg);
+    } else if (sim->bg_mode == GR_BG_MODE_SAMPLED) {
+        bg_corner = sim->phi_g_bg;  /* may be NULL — handled inside the kernel */
     }
 
-    /* Perturbation contribution via the sampled-grid CIC+FD path.  Always
-     * goes through the grid since this field is dynamic.  Requires
-     * 2-cell-wide interior margin for the centered FD. */
-    if (ic >= 1 && ic < W - 2 && jc >= 1 && jc < H - 2) {
-        const float alpha = xn - (float) ic;
-        const float beta  = yn - (float) jc;
-        const float inv_2dx = 1.0f / (2.0f * dx);
+    /* Perturbation Phi_g is always on the corner sublattice. */
+    const float* pert = sim->fields[GR_FIELD_PHI_GRAV].curr;
 
-        const float* pert = sim->fields[GR_FIELD_PHI_GRAV].curr;
-        const float* bg_sampled =
-            (sim->bg_mode == GR_BG_MODE_SAMPLED) ? sim->phi_g_bg : NULL;
-
-        float gx[4], gy[4];
-        const int idx[4] = {jc * W + ic,
-                            jc * W + ic + 1,
-                            (jc + 1) * W + ic,
-                            (jc + 1) * W + ic + 1};
-        for (int q = 0; q < 4; q++) {
-            const int k = idx[q];
-            float dphi_dx = (pert[k + 1] - pert[k - 1]) * inv_2dx;
-            float dphi_dy = (pert[k + W] - pert[k - W]) * inv_2dx;
-            if (bg_sampled) {
-                dphi_dx += (bg_sampled[k + 1] - bg_sampled[k - 1]) * inv_2dx;
-                dphi_dy += (bg_sampled[k + W] - bg_sampled[k - W]) * inv_2dx;
+    /* === d Phi / d x on X_EDGE sublattice ============================= */
+    {
+        const float xn = x / dx - 0.5f;
+        const float yn = y / dx;
+        const int   ic = (int) floorf(xn);
+        const int   jc = (int) floorf(yn);
+        /* Need 4 x-edge cells (ic..ic+1) x (jc..jc+1); each x-edge value
+         * is (Phi[corner i+1, j] - Phi[corner i, j]) / dx, so we need
+         * corners (ic..ic+2) x (jc..jc+1).  Interior margin: ic in [0, W-3],
+         * jc in [0, H-2]. */
+        if (ic >= 0 && ic < W - 2 && jc >= 0 && jc < H - 1) {
+            const float alpha = xn - (float) ic;
+            const float beta  = yn - (float) jc;
+            float gx[4];
+            for (int dq = 0; dq < 2; dq++) {
+                const int jj = jc + dq;
+                const int row = jj * W;
+                for (int dp = 0; dp < 2; dp++) {
+                    const int ii = ic + dp;
+                    float v = (pert[row + ii + 1] - pert[row + ii]) * inv_dx;
+                    if (bg_corner) {
+                        v += (bg_corner[row + ii + 1] - bg_corner[row + ii]) * inv_dx;
+                    }
+                    gx[dq * 2 + dp] = v;
+                }
             }
-            gx[q] = dphi_dx;
-            gy[q] = dphi_dy;
+            const float w00 = (1.0f - alpha) * (1.0f - beta);
+            const float w10 =         alpha  * (1.0f - beta);
+            const float w01 = (1.0f - alpha) *         beta;
+            const float w11 =         alpha  *         beta;
+            *gx_out = w00 * gx[0] + w10 * gx[1] + w01 * gx[2] + w11 * gx[3] + gx_bg;
+        } else {
+            *gx_out = gx_bg;
         }
-        const float w00 = (1.0f - alpha) * (1.0f - beta);
-        const float w10 =         alpha  * (1.0f - beta);
-        const float w01 = (1.0f - alpha) *         beta;
-        const float w11 =         alpha  *         beta;
-        *gx_out = w00 * gx[0] + w10 * gx[1] + w01 * gx[2] + w11 * gx[3] + gx_bg;
-        *gy_out = w00 * gy[0] + w10 * gy[1] + w01 * gy[2] + w11 * gy[3] + gy_bg;
-    } else {
-        /* Particle is in the outer ring where the perturbation FD can't
-         * be evaluated; analytic background still contributes. */
-        *gx_out = gx_bg;
-        *gy_out = gy_bg;
+    }
+
+    /* === d Phi / d y on Y_EDGE sublattice ============================= */
+    {
+        const float xn = x / dx;
+        const float yn = y / dx - 0.5f;
+        const int   ic = (int) floorf(xn);
+        const int   jc = (int) floorf(yn);
+        if (ic >= 0 && ic < W - 1 && jc >= 0 && jc < H - 2) {
+            const float alpha = xn - (float) ic;
+            const float beta  = yn - (float) jc;
+            float gy[4];
+            for (int dq = 0; dq < 2; dq++) {
+                const int jj = jc + dq;
+                const int row = jj * W;
+                const int row_next = (jj + 1) * W;
+                for (int dp = 0; dp < 2; dp++) {
+                    const int ii = ic + dp;
+                    float v = (pert[row_next + ii] - pert[row + ii]) * inv_dx;
+                    if (bg_corner) {
+                        v += (bg_corner[row_next + ii] - bg_corner[row + ii]) * inv_dx;
+                    }
+                    gy[dq * 2 + dp] = v;
+                }
+            }
+            const float w00 = (1.0f - alpha) * (1.0f - beta);
+            const float w10 =         alpha  * (1.0f - beta);
+            const float w01 = (1.0f - alpha) *         beta;
+            const float w11 =         alpha  *         beta;
+            *gy_out = w00 * gy[0] + w10 * gy[1] + w01 * gy[2] + w11 * gy[3] + gy_bg;
+        } else {
+            *gy_out = gy_bg;
+        }
     }
 }
 
