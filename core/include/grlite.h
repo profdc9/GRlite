@@ -319,6 +319,16 @@ void gr_sim_set_esirkepov_enabled(gr_sim_t* sim, int enabled);
 int  gr_sim_get_esirkepov_enabled(const gr_sim_t* sim);
 int  gr_sim_esirkepov_violations(const gr_sim_t* sim);
 
+/* Binomial-smoothing passes applied to rho_matter and rho_q after deposit
+ * and before the field leapfrog reads them.  Each pass is the canonical
+ * 3x3 [[1,2,1],[2,4,2],[1,2,1]]/16 PIC noise-reduction filter.  Reduces
+ * high-frequency aliasing in the moving-particle deposit that the
+ * wave-equation leapfrog would otherwise convert into a self-force wake
+ * (the dominant PIC heating mode for Tier-0 gravitational orbits).
+ * Default 0 (off).  Typical values 1-4. */
+void gr_sim_set_rho_smooth_passes(gr_sim_t* sim, int passes);
+int  gr_sim_get_rho_smooth_passes(const gr_sim_t* sim);
+
 /* ----------------------------------------------------------------------------
  * Sampled background field arrays (Stage 6)
  *

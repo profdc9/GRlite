@@ -86,6 +86,10 @@ struct gr_sim {
      * regression testing only — disabling it brings back PIC grid-heating
      * artifacts on moving sources. */
     int esirkepov_enabled;
+    /* Number of binomial-smoothing passes to apply to rho_matter and rho_q
+     * after deposit, before the field leapfrog reads them.  Each pass is
+     * the [[1,2,1],[2,4,2],[1,2,1]]/16 3x3 stencil.  Default 0 (no smoothing). */
+    int rho_smooth_passes;
     /* Count of timesteps in which a particle's motion exceeded 1 cell in x
      * or y (the 2-cell assumption is violated under CFL but a stiff force
      * impulse could still violate it).  On violation, Esirkepov falls back

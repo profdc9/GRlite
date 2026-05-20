@@ -43,6 +43,7 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
     /* Esirkepov current deposition on by default (v35 answer B1). */
     sim->esirkepov_enabled       = 1;
     sim->esirkepov_violations    = 0;
+    sim->rho_smooth_passes       = 0;
     /* dt from CFL — gr_sandbox_v32.tex §9.2 eq:cfl. Not enforced to allow
      * the Stage 1 instability test (§12.1) to deliberately exceed the limit. */
     sim->dt = cfl * dx / c_eff;
@@ -162,6 +163,43 @@ void gr_sim_step(gr_sim_t* sim) {
                 if (violated) sim->esirkepov_violations++;
             }
         }
+        /* Binomial smoothing on rho_matter (and rho_q) if enabled.
+         * Applied N_smooth times, where each pass is the 3x3 [[1,2,1],
+         * [2,4,2],[1,2,1]]/16 stencil.  Reduces high-spatial-frequency
+         * aliasing in the deposited rho that the wave-equation leapfrog
+         * would otherwise turn into a moving-particle self-force wake.
+         * This is the canonical PIC noise-reduction technique. */
+        if (sim->rho_smooth_passes > 0) {
+            const size_t n = (size_t) W * (size_t) H;
+            float* scratch = (float*) malloc(n * sizeof(float));
+            if (scratch) {
+                for (int pass = 0; pass < sim->rho_smooth_passes; pass++) {
+                    /* rho_matter */
+                    memcpy(scratch, sim->rho_matter, n * sizeof(float));
+                    for (int j = 1; j < H - 1; j++) {
+                        for (int i = 1; i < W - 1; i++) {
+                            const int k = j * W + i;
+                            sim->rho_matter[k] = (1.0f / 16.0f) * (
+                                  1.0f * scratch[k - W - 1] + 2.0f * scratch[k - W] + 1.0f * scratch[k - W + 1]
+                                + 2.0f * scratch[k - 1]     + 4.0f * scratch[k]     + 2.0f * scratch[k + 1]
+                                + 1.0f * scratch[k + W - 1] + 2.0f * scratch[k + W] + 1.0f * scratch[k + W + 1]);
+                        }
+                    }
+                    /* rho_q */
+                    memcpy(scratch, sim->rho_q, n * sizeof(float));
+                    for (int j = 1; j < H - 1; j++) {
+                        for (int i = 1; i < W - 1; i++) {
+                            const int k = j * W + i;
+                            sim->rho_q[k] = (1.0f / 16.0f) * (
+                                  1.0f * scratch[k - W - 1] + 2.0f * scratch[k - W] + 1.0f * scratch[k - W + 1]
+                                + 2.0f * scratch[k - 1]     + 4.0f * scratch[k]     + 2.0f * scratch[k + 1]
+                                + 1.0f * scratch[k + W - 1] + 2.0f * scratch[k + W] + 1.0f * scratch[k + W + 1]);
+                        }
+                    }
+                }
+                free(scratch);
+            }
+        }
     }
 
     if (sim->field_evolution_enabled) {
@@ -207,6 +245,14 @@ int gr_sim_get_esirkepov_enabled(const gr_sim_t* sim) {
 }
 int gr_sim_esirkepov_violations(const gr_sim_t* sim) {
     return sim ? sim->esirkepov_violations : 0;
+}
+
+void gr_sim_set_rho_smooth_passes(gr_sim_t* sim, int passes) {
+    if (!sim) return;
+    sim->rho_smooth_passes = (passes < 0) ? 0 : passes;
+}
+int gr_sim_get_rho_smooth_passes(const gr_sim_t* sim) {
+    return sim ? sim->rho_smooth_passes : 0;
 }
 
 /* Background evaluation mode — runtime switch between sampled-grid and
