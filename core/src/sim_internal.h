@@ -77,6 +77,12 @@ struct gr_sim {
     /* Stage 8 — selects Newtonian vs Tier-2 relativistic gravity force. */
     gr_force_tier_t force_tier;
 
+    /* Tier-1 gravitomagnetic Lorentz force gate (Stage 20+).
+     * Default 1 (enabled); 0 disables the +4 m v x B_g piece, useful for
+     * isolating the proper-time clock effect from the orbit-shape Lense-
+     * Thirring response. */
+    int gravitomagnetic_force_enabled;
+
     /* If 0, the per-step wave-equation leapfrog on the six perturbation
      * fields is skipped (along with the buffer rotation).  Used by Stage 7/8
      * static-background-only tests to avoid the cost of evolving zero fields
@@ -134,6 +140,12 @@ struct gr_sim {
     /* Spin angular momentum of the spinning point-mass generator (z-component
      * only in 2D — the spin axis is perpendicular to the simulation plane). */
     float        bg_Jz;
+    /* Uniform gravitomagnetic field B_g_z, used by
+     * GR_BG_KIND_UNIFORM_GRAVITOMAGNETIC.  Symmetric-gauge potentials:
+     *   A_{g,x} = -0.5 B0 (y - bg_y0),  A_{g,y} = +0.5 B0 (x - bg_x0).
+     * Stage 20 unit-isolation test for the v x B_g gravitomagnetic Lorentz
+     * force (gr_sandbox_v35.tex eq:geodesic_expansion). */
+    float        bg_B0;
     /* Reserved slot for the charged variants (Stage 11+). */
     float        bg_charge;
 };
@@ -208,9 +220,18 @@ int gr_bg_eval_analytic(const struct gr_sim* sim, float x, float y,
 
 /* Defined in background.c — analytic-mode evaluation of the gravitomagnetic
  * vector potential A_g(x, y) for the installed background generator.  Returns
- * 1 if the installed kind supplies a nonzero A_g (i.e., SPINNING_POINT_MASS),
- * 0 otherwise.  When 0 is returned the caller should treat A_g as zero. */
+ * 1 if the installed kind supplies a nonzero A_g (SPINNING_POINT_MASS or
+ * UNIFORM_GRAVITOMAGNETIC), 0 otherwise.  When 0 is returned the caller
+ * should treat A_g as zero. */
 int gr_bg_eval_A_g(const struct gr_sim* sim, float x, float y,
                    float* Ax_out, float* Ay_out);
+
+/* Defined in background.c — analytic-mode evaluation of the z-component
+ * of the gravitomagnetic field B_g = curl(A_g) at (x, y) for the installed
+ * background generator.  Returns 1 if a nonzero B_g_z is available, 0
+ * otherwise.  Output:
+ *   *Bgz_out : B_g_z(x, y) = d/dx A_{g,y} - d/dy A_{g,x}. */
+int gr_bg_eval_B_g(const struct gr_sim* sim, float x, float y,
+                   float* Bgz_out);
 
 #endif /* GRLITE_SIM_INTERNAL_H */

@@ -154,6 +154,13 @@ static int test_spinning_clock_effect(float GM, float r, float eps,
         const float params[5] = {GM, r, eps, Jz, sign};
         TEST_ASSERT(gr_sim_load_scenario(sim, "spinning_orbit", params, 5) == 0,
                     "spinning_orbit load failed");
+        /* Disable the Tier-1 gravitomagnetic Lorentz force (+4 m v x B_g)
+         * for this CLOCK-only isolation test.  When enabled, the v x B_g
+         * piece perturbs prograde and retrograde orbits oppositely (Lense-
+         * Thirring frame-dragging on the orbit shape), which adds an O(J_z)
+         * contribution to Delta_tau on top of the clock-effect formula
+         * being verified here.  Stage 20+ tests the v x B_g force directly. */
+        gr_sim_set_gravitomagnetic_force_enabled(sim, 0);
 
         /* Orbital period (non-spinning approximation; the spinning shift is
          * a 1PN correction to the orbit). */

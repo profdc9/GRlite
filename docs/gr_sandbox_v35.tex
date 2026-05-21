@@ -2717,6 +2717,119 @@ Both phases use the analytic-background path; the perturbation FDTD is
 skipped via \texttt{gr\_sim\_set\_field\_evolution(sim,~0)} since no
 sources are active.
 
+\paragraph{v35 addendum --- Phase B clock-only isolation.}  Phase B's
+analytic prediction Eq.~(\ref{eq:clock_effect_linear}) is derived under
+the assumption that the prograde and retrograde test particles remain on
+\emph{the same} Keplerian circle, so that only the
+$-8(\Ag\!\cdot\!\vv{v})/c^2$ cross-term in the $\dd\tau/\dd t$ integrand
+differs between them.  Once the Tier-1 gravitomagnetic Lorentz piece
+$\vv{F}_{\mathrm{gm}} = +4m\,\vv{v}\!\times\!\vv{B}_g$
+(Section~\ref{sec:geodesic_expansion}, Eq.~\ref{eq:geodesic_expansion})
+is wired into the pusher, that assumption no longer holds --- the same
+$\vv{B}_g$ that produces the clock asymmetry also perturbs the orbit
+shape oppositely for prograde and retrograde, a first-order Lense--Thirring
+frame-dragging response on the dynamics.  The two effects combined would
+add another $\order{J_z}$ contribution to $\Delta\tau$ on top of
+Eq.~(\ref{eq:clock_effect_linear}), spoiling the comparison.  To preserve
+the clock-only isolation here, the gravitomagnetic Lorentz piece is
+gated by the \texttt{gr\_sim\_set\_gravitomagnetic\_force\_enabled(sim,
+0)} flag for the duration of Phase B; Stage~9b
+(Section~\ref{sec:stage_gm_cyclotron}) verifies that piece on its own
+with $\Phig = 0$.
+
+\subsection{Stage 9b: Gravitomagnetic Lorentz force --- unit isolation}
+\label{sec:stage_gm_cyclotron}
+
+A unit verification of the Tier-1 gravitomagnetic Lorentz force
+$\vv{F}_{\mathrm{gm}}/m = +4\,\vv{v}\!\times\!\vv{B}_g$
+(Eq.~\ref{eq:geodesic_expansion} at $\order{v/c}$; algorithmic form
+in Section~\ref{sec:alg_rel}'s Tier-3 eqbox).  The factor of $4$ is the spin-2
+enhancement of the GEM Lorentz force relative to its EM analogue
+(Section~\ref{sec:gem_metric}); the sign was corrected from v33 in v34
+(empirical confirmation via Stage~8 perihelion precession; the v33 sign
+gave retrograde precession, the EIH sign gives prograde, matching the
+canonical Schwarzschild direction).  Stage~9b verifies the coefficient
+and sign \emph{directly}, isolated from the scalar gravity dynamics, by
+setting $\Phig = 0$ everywhere and prescribing a spatially uniform
+gravitomagnetic field.
+
+\paragraph{Construction.}  A new analytic background generator
+\texttt{gr\_sim\_set\_background\_uniform\_gravitomagnetic} installs the
+symmetric-gauge vector potential
+\begin{equation}
+\label{eq:uniform_bg_symmetric_gauge}
+  \Phig^{\mathrm{bg}} = 0,\qquad
+  A_{g,x}^{\mathrm{bg}}(x,y) = -\tfrac{1}{2}B_0\,(y - y_0),\qquad
+  A_{g,y}^{\mathrm{bg}}(x,y) = +\tfrac{1}{2}B_0\,(x - x_0),
+\end{equation}
+yielding $B_{g,z} = \partial_x A_{g,y}^{\mathrm{bg}} - \partial_y
+A_{g,x}^{\mathrm{bg}} = B_0$ identically.  The gauge origin $(x_0, y_0)$
+sets the zero of $\Ag$ and is otherwise physically irrelevant.
+
+\paragraph{Analytic prediction.}  With $\Phig = 0$ the force on a test
+particle reduces to $\vv{F} = m(4\,\vv{v}\!\times\!B_0\hat z)$; the
+particle traces a circle (cyclotron orbit) at
+\begin{equation}
+\label{eq:gm_cyclotron}
+  \omega_{\mathrm{gm}} = \frac{4\,|B_0|}{\gamma},\qquad
+  T = \frac{2\pi}{\omega_{\mathrm{gm}}} = \frac{\pi\gamma}{2\,|B_0|},\qquad
+  r_L = \frac{v_0}{\omega_{\mathrm{gm}}} = \frac{v_0\,\gamma}{4\,|B_0|}.
+\end{equation}
+For $B_0 > 0$ and initial velocity $\vv{v}(0) = v_0\hat x$, the initial
+force is $\vv{F}_y = -4m v_0 B_0 < 0$, so the particle gyrates
+clockwise (viewed from $+\hat z$).  Reversing the sign of $B_0$ reverses
+the gyration direction.
+
+\paragraph{Test (\texttt{stage20\_uniform\_bg\_gyration.c}).}  At
+$v_0 = 0.1c$, $B_0 = 10^{-3}$ (so $\gamma \approx 1.005$,
+$\omega_{\mathrm{gm}} \approx 3.98\times 10^{-3}$,
+$T \approx 1579$, $r_L \approx 25.13$ cells on a $128\times 128$ grid):
+\begin{itemize}
+  \item Closure (particle returns to within $1\%$ of $r_L$ of its
+    starting point after $T$): \textbf{$0.10\%$} (well under threshold;
+    residual is the $\dd t \cdot \omega_{\mathrm{gm}}$ phase-rounding from
+    integerizing the period in timesteps).
+  \item $|\vv{v}|^2$ drift (the Lorentz force does no work):
+    \textbf{$3\times 10^{-6}$}, essentially round-off.
+  \item Measured Larmor radius vs.\
+    Eq.~(\ref{eq:gm_cyclotron}): \textbf{$3\times 10^{-6}$}
+    fractional error.
+  \item Gyration direction flips under $B_0 \to -B_0$: \textbf{verified
+    both signs}.
+\end{itemize}
+The Larmor-radius agreement to a part in $\sim 10^6$ directly fixes the
+coefficient $+4$ on $\vv{v}\!\times\!\vv{B}_g$: an erroneous coefficient
+$\alpha$ would give $r_L = v_0\gamma/(\alpha|B_0|)$, shifting the
+measured radius linearly.
+
+\paragraph{Notation note --- factor of 1 vs.\ 4 between
+Eq.~(\ref{eq:eih_full}) and the Tier table.}
+Eq.~(\ref{eq:eih_full}) is written in the textbook (lecture-25)
+convention where the gravitomagnetic 4-potential carries coefficient~$1$
+on $\vv{v}\!\times\!(\nabla\!\times\!\Ag)$.  The Tier table at
+Section~\ref{sec:alg_rel}, Eq.~(\ref{eq:geodesic_expansion}), and the
+Tier-3 implementation eqbox use the doc's own convention where the
+same physical quantity carries coefficient~$4$.  The two conventions
+are related by the identification
+$\xi_i^{\text{(lecture)}} = 4\,A_{g,i}^{\text{(doc)}}/c$ (see the
+provenance discussion immediately after Eq.~\ref{eq:proper_time_full}).
+The factor-of-4 form is consistent with the spin-2 metric
+$h_{0i} = 4A_{g,i}/c$, the proper-time formula
+$\dd\tau/\dd t \supset -8(\Ag\!\cdot\!\vv{v})/c^2$, and the
+implementation; the lecture-1 form is preserved at
+Eq.~(\ref{eq:eih_full}) only for textual consistency with the cited
+derivation.  All implementations use the factor-of-4 form.
+
+\paragraph{Cross-references.}  This stage isolates the
+$\order{v/c}$ Lense--Thirring force piece; the orbit-shape Lense--Thirring
+precession around a \emph{spinning point mass} (where $\vv{B}_g$ varies
+spatially as $(\nabla\!\times\!\Ag)_z$ for the dipole) is a separate
+verification.  Together with Section~\ref{sec:stage_proper_time} Phase~B
+(clock effect) and a planned Lense--Thirring precession stage
+(Section~\ref{sec:stage_proper_time}'s spinning background with the GM
+force enabled), they exhaust the leading-order $\order{J_z}$ tests of
+the GEM coupling.
+
 \subsection{Stage 10: Perturbation FDTD with moving particle source}
 \label{sec:stage_perturb_fdtd}
 

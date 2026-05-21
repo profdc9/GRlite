@@ -42,6 +42,8 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
     sim->field_evolution_enabled = 1;
     /* Esirkepov current deposition on by default (v35 answer B1). */
     sim->esirkepov_enabled       = 1;
+    /* Tier-1 gravitomagnetic Lorentz force on by default (Stage 20+). */
+    sim->gravitomagnetic_force_enabled = 1;
     sim->esirkepov_violations    = 0;
     sim->rho_smooth_passes       = 0;
     sim->shape_function          = GR_SHAPE_CIC;
@@ -393,6 +395,14 @@ void gr_sim_set_force_tier(gr_sim_t* sim, gr_force_tier_t tier) {
 }
 gr_force_tier_t gr_sim_get_force_tier(const gr_sim_t* sim) {
     return sim ? sim->force_tier : GR_FORCE_NEWTONIAN;
+}
+
+void gr_sim_set_gravitomagnetic_force_enabled(gr_sim_t* sim, int enabled) {
+    if (!sim) return;
+    sim->gravitomagnetic_force_enabled = enabled ? 1 : 0;
+}
+int gr_sim_get_gravitomagnetic_force_enabled(const gr_sim_t* sim) {
+    return sim ? sim->gravitomagnetic_force_enabled : 0;
 }
 
 const float* gr_sim_rho_matter_ptr(const gr_sim_t* sim) {

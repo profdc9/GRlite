@@ -56,6 +56,7 @@ void gr_sim_clear_background(gr_sim_t* sim) {
     sim->bg_eps    = 0.0f;
     sim->bg_charge = 0.0f;
     sim->bg_Jz     = 0.0f;
+    sim->bg_B0     = 0.0f;
 }
 
 /* Lazily allocate and zero a background array if not already present. */
@@ -178,6 +179,64 @@ void gr_sim_set_background_spinning_point_mass(gr_sim_t* sim,
     }
 }
 
+/* Uniform gravitomagnetic background.  Symmetric-gauge potentials produce
+ * a spatially constant B_g_z = B_0:
+ *   A_{g,x}(x,y) = -0.5 B_0 (y - y_0)   ;  on X_EDGE sublattice
+ *   A_{g,y}(x,y) = +0.5 B_0 (x - x_0)   ;  on Y_EDGE sublattice
+ *   B_g_z        = d/dx A_{g,y} - d/dy A_{g,x} = B_0    (uniform, by construction)
+ *   Phi_g        = 0                                    (no scalar gravity)
+ *
+ * Stage 20 unit-isolation test for the gravitomagnetic Lorentz force; see
+ * gr_sandbox_v35.tex §sec:geodesic_expansion eq:geodesic_expansion (line 938)
+ * for the +4 v x B_g coefficient in the doc's GEM-with-spin-2-factor
+ * convention. */
+void gr_sim_set_background_uniform_gravitomagnetic(gr_sim_t* sim,
+                                                   float x0, float y0,
+                                                   float B0) {
+    if (!sim) return;
+    /* Clear any prior background fields, then re-allocate A_g arrays.
+     * Phi_g_bg is intentionally left NULL — the SAMPLED-mode path treats
+     * NULL as zero, which is exactly what we want here. */
+    gr_sim_clear_background(sim);
+    float* Agx = ensure_bg_alloc(sim, GR_FIELD_A_GX);
+    float* Agy = ensure_bg_alloc(sim, GR_FIELD_A_GY);
+    if (!Agx || !Agy) return;
+
+    const int   W  = sim->width;
+    const int   H  = sim->height;
+    const float dx = sim->dx;
+
+    /* X_EDGE sublattice for Agx: nodes at (i + 0.5, j) * dx.
+     *   A_{g,x}(x, y) = -0.5 B_0 (y - y_0). */
+    for (int j = 0; j < H; j++) {
+        const float y  = (float) j * dx;
+        const float dy = y - y0;
+        const int   row = j * W;
+        const float val = -0.5f * B0 * dy;
+        for (int i = 0; i < W; i++) {
+            Agx[row + i] = val;     /* independent of x for this gauge */
+        }
+    }
+    /* Y_EDGE sublattice for Agy: nodes at (i, j + 0.5) * dx.
+     *   A_{g,y}(x, y) = +0.5 B_0 (x - x_0). */
+    for (int j = 0; j < H; j++) {
+        const int row = j * W;
+        for (int i = 0; i < W; i++) {
+            const float x   = (float) i * dx;
+            const float dxc = x - x0;
+            Agy[row + i] = 0.5f * B0 * dxc;     /* independent of y */
+        }
+    }
+
+    sim->bg_kind = GR_BG_KIND_UNIFORM_GRAVITOMAGNETIC;
+    sim->bg_x0   = x0;
+    sim->bg_y0   = y0;
+    sim->bg_GM   = 0.0f;
+    sim->bg_eps  = 0.0f;
+    sim->bg_Jz   = 0.0f;
+    sim->bg_B0   = B0;
+}
+
 /* Analytic-mode evaluation of the installed background generator at the
  * particle's exact (x, y).  See gr_sandbox §12.6 / §12.8 for the rationale:
  * the sampled CIC+FD path introduces an O((dx/r)^2) tangential force error
@@ -203,6 +262,15 @@ int gr_bg_eval_analytic(const struct gr_sim* sim, float x, float y,
         *phi_out = -sim->bg_GM * inv_s;
         *gx_out  =  sim->bg_GM * dxi * inv_s3;
         *gy_out  =  sim->bg_GM * dyi * inv_s3;
+        (void) x; (void) y;
+        return 1;
+    }
+    case GR_BG_KIND_UNIFORM_GRAVITOMAGNETIC: {
+        /* No scalar gravity in this background. */
+        *phi_out = 0.0f;
+        *gx_out  = 0.0f;
+        *gy_out  = 0.0f;
+        (void) x; (void) y;
         return 1;
     }
     default:
@@ -212,20 +280,81 @@ int gr_bg_eval_analytic(const struct gr_sim* sim, float x, float y,
 
 int gr_bg_eval_A_g(const struct gr_sim* sim, float x, float y,
                    float* Ax_out, float* Ay_out) {
-    if (!sim) return 0;
-    if (sim->bg_kind != GR_BG_KIND_SPINNING_POINT_MASS) {
+    if (!sim) {
         *Ax_out = 0.0f;
         *Ay_out = 0.0f;
         return 0;
     }
-    /* Same dipole formula used in the sampler. */
-    const float dxi = x - sim->bg_x0;
-    const float dyi = y - sim->bg_y0;
-    const float s2  = dxi * dxi + dyi * dyi + sim->bg_eps * sim->bg_eps;
-    const float inv_s3 = 1.0f / (s2 * sqrtf(s2));
-    const float coeff  = sim->G_eff * sim->bg_Jz
-                       / (2.0f * sim->c_eff * sim->c_eff);
-    *Ax_out = -coeff * dyi * inv_s3;
-    *Ay_out =  coeff * dxi * inv_s3;
-    return 1;
+    switch (sim->bg_kind) {
+    case GR_BG_KIND_SPINNING_POINT_MASS: {
+        /* Same dipole formula used in the sampler. */
+        const float dxi = x - sim->bg_x0;
+        const float dyi = y - sim->bg_y0;
+        const float s2  = dxi * dxi + dyi * dyi + sim->bg_eps * sim->bg_eps;
+        const float inv_s3 = 1.0f / (s2 * sqrtf(s2));
+        const float coeff  = sim->G_eff * sim->bg_Jz
+                           / (2.0f * sim->c_eff * sim->c_eff);
+        *Ax_out = -coeff * dyi * inv_s3;
+        *Ay_out =  coeff * dxi * inv_s3;
+        return 1;
+    }
+    case GR_BG_KIND_UNIFORM_GRAVITOMAGNETIC: {
+        /* Symmetric-gauge form:
+         *   A_{g,x} = -0.5 B_0 (y - y_0),  A_{g,y} = +0.5 B_0 (x - x_0). */
+        const float dxi = x - sim->bg_x0;
+        const float dyi = y - sim->bg_y0;
+        *Ax_out = -0.5f * sim->bg_B0 * dyi;
+        *Ay_out =  0.5f * sim->bg_B0 * dxi;
+        return 1;
+    }
+    default:
+        *Ax_out = 0.0f;
+        *Ay_out = 0.0f;
+        return 0;
+    }
+}
+
+/* Analytic-mode B_g_z(x, y) = (curl A_g)_z = d/dx A_{g,y} - d/dy A_{g,x}. */
+int gr_bg_eval_B_g(const struct gr_sim* sim, float x, float y,
+                   float* Bgz_out) {
+    if (!sim) {
+        *Bgz_out = 0.0f;
+        return 0;
+    }
+    switch (sim->bg_kind) {
+    case GR_BG_KIND_UNIFORM_GRAVITOMAGNETIC: {
+        /* Constant by construction. */
+        (void) x; (void) y;
+        *Bgz_out = sim->bg_B0;
+        return 1;
+    }
+    case GR_BG_KIND_SPINNING_POINT_MASS: {
+        /* Differentiating A_g = coeff * (J × r) / s^{3/2} gives
+         *   B_g_z = coeff * (2 r^2 + 3 eps^2 - r^2) / s^{5/2}  ... let me just
+         * recompute from scratch using the explicit form below.
+         *
+         *   A_{g,x} = -k dy / s^{3/2},     A_{g,y} =  k dx / s^{3/2}
+         *   s       = dx^2 + dy^2 + eps^2,   k = G J_z / (2 c^2)
+         *   d/dx A_{g,y} = k [ 1/s^{3/2} - 3 dx^2 / s^{5/2} ]
+         *   d/dy A_{g,x} = k [ -1/s^{3/2} + 3 dy^2 / s^{5/2} ]
+         *   B_g_z = d/dx A_{g,y} - d/dy A_{g,x}
+         *         = k [ 2/s^{3/2} - 3 (dx^2 + dy^2) / s^{5/2} ]
+         *         = k (2 s - 3 (dx^2 + dy^2)) / s^{5/2}
+         *         = k (2 eps^2 - (dx^2 + dy^2)) / s^{5/2}    after grouping
+         *  (using 2 s = 2(dx^2 + dy^2) + 2 eps^2). */
+        const float dxi = x - sim->bg_x0;
+        const float dyi = y - sim->bg_y0;
+        const float r2  = dxi * dxi + dyi * dyi;
+        const float eps2 = sim->bg_eps * sim->bg_eps;
+        const float s2  = r2 + eps2;
+        const float inv_s52 = 1.0f / (s2 * s2 * sqrtf(s2));
+        const float coeff  = sim->G_eff * sim->bg_Jz
+                           / (2.0f * sim->c_eff * sim->c_eff);
+        *Bgz_out = coeff * (2.0f * eps2 - r2) * inv_s52;
+        return 1;
+    }
+    default:
+        *Bgz_out = 0.0f;
+        return 0;
+    }
 }

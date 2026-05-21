@@ -269,6 +269,22 @@ typedef enum {
 void            gr_sim_set_force_tier(gr_sim_t* sim, gr_force_tier_t tier);
 gr_force_tier_t gr_sim_get_force_tier(const gr_sim_t* sim);
 
+/* Gravitomagnetic Lorentz force gate.  When enabled (default), the particle
+ * pusher includes the Tier-1 gravitomagnetic Lorentz piece
+ *     F_gm = +4 m (v x B_g)
+ * per gr_sandbox_v35.tex eq:geodesic_expansion (line 938).  When disabled,
+ * the force reduces to the scalar Tier-0 / Tier-2 EIH form only — useful
+ * for isolation tests of the proper-time clock effect (stage09), which is
+ * derived under the assumption that prograde and retrograde orbits remain
+ * on the same Keplerian circle.  With the gravitomagnetic force enabled,
+ * the two orbits dynamically differ (Lense-Thirring frame-dragging on the
+ * orbit), so the clock-effect formula picks up an additional orbit-shape
+ * contribution.  Tests that want the orbit-shape effect (stage20+) leave
+ * the flag at its default (enabled); tests that want clock-only isolate
+ * by disabling it. */
+void gr_sim_set_gravitomagnetic_force_enabled(gr_sim_t* sim, int enabled);
+int  gr_sim_get_gravitomagnetic_force_enabled(const gr_sim_t* sim);
+
 int  gr_sim_add_particle(gr_sim_t* sim, float x, float y,
                          float mass, float charge,
                          float vx, float vy);
@@ -442,6 +458,24 @@ void gr_sim_set_background_spinning_point_mass(gr_sim_t* sim,
                                                float GM, float epsilon,
                                                float Jz);
 
+/* Uniform gravitomagnetic field — fills A_{g,x}^{bg}, A_{g,y}^{bg} with the
+ * symmetric-gauge potentials that produce a spatially constant B_g_z = B_0:
+ *
+ *   Phi_g^{bg} = 0                  (no scalar gravity)
+ *   A_{g,x}    = -0.5 * B_0 * (y - y_0)
+ *   A_{g,y}    = +0.5 * B_0 * (x - x_0)
+ *   B_g_z      = d/dx A_{g,y} - d/dy A_{g,x} = B_0   (uniform)
+ *
+ * The (x_0, y_0) origin only sets the gauge zero of A_g and is otherwise
+ * physically irrelevant.  Intended for the Stage 20 unit-isolation test of
+ * the gravitomagnetic Lorentz force (cf. gr_sandbox_v35.tex
+ * §sec:geodesic_expansion eq:geodesic_expansion): with Phi_g = 0 the force
+ * on a particle reduces to F = m * 4 * v x B_g, so the particle traces a
+ * circle at the gyrofrequency omega_gm = 4 |B_g| / gamma. */
+void gr_sim_set_background_uniform_gravitomagnetic(gr_sim_t* sim,
+                                                   float x0, float y0,
+                                                   float B0);
+
 /* ----------------------------------------------------------------------------
  * Background evaluation mode
  *
@@ -466,9 +500,10 @@ void gr_sim_set_background_spinning_point_mass(gr_sim_t* sim,
  * --------------------------------------------------------------------------*/
 
 typedef enum {
-    GR_BG_KIND_NONE                = 0,
-    GR_BG_KIND_POINT_MASS          = 1,
-    GR_BG_KIND_SPINNING_POINT_MASS = 2
+    GR_BG_KIND_NONE                  = 0,
+    GR_BG_KIND_POINT_MASS            = 1,
+    GR_BG_KIND_SPINNING_POINT_MASS   = 2,
+    GR_BG_KIND_UNIFORM_GRAVITOMAGNETIC = 3
     /* Future: CHARGED_POINT_MASS, KERR_NEWMAN, ... */
 } gr_bg_kind_t;
 

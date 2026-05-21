@@ -359,37 +359,48 @@ static void grav_grad_at(const struct gr_sim* sim, float x, float y,
 }
 
 /* Gravitational force F at a particle with mass m, velocity (vx, vy), in the
- * total Phi_g (perturbation + background, value phi at the particle) and its
- * gradient (grad_x, grad_y) = grad(Phi_g_total).  The local gravity vector is
- * g = -grad(Phi_g).
+ * total Phi_g (perturbation + background, value phi at the particle), its
+ * gradient (grad_x, grad_y) = grad(Phi_g_total), and the local gravitomagnetic
+ * field B_g_z = (curl A_g)_z (added Stage 20 — Tier-1 gravitomagnetic Lorentz).
+ * The local gravity vector is g = -grad(Phi_g).
  *
- * Tiers (gr_sandbox_v33.tex §"Practical implementation tiers"):
- *   NEWTONIAN:    F = m * g
- *   RELATIVISTIC: F = m * [g (1 + v^2/c^2 + 4 phi/c^2) - 4 (v . g) v / c^2]
+ * Tiers (gr_sandbox_v35.tex §"Practical implementation tiers" line 985):
+ *   NEWTONIAN:    F = m * g                              + 4 m v x B_g
+ *   RELATIVISTIC: F = m * [(1 + v^2/c^2 + 4 phi/c^2) g
+ *                          - 4 (v . g) v / c^2 ]         + 4 m v x B_g
  *
- * The relativistic expression is the Einstein-Infeld-Hoffmann 1PN equation
- * of motion for a test particle in a static field, harmonic gauge, with the
- * v33 doc's isotropic-form metric (g_{ij} = (1-2 phi/c^2) delta_ij).  See
- * Ali-Haïmoud, GR Fall 2019 lecture 25, eq. 37, with psi = xi = 0 and dt phi = 0:
+ * Both tiers include the Tier-1 gravitomagnetic Lorentz piece
+ *   F_gm = +4 m (v x B_g),   (v x B_g_z z)_x = v_y B_g_z, (...)_y = -v_x B_g_z
+ * per gr_sandbox_v35.tex eq:geodesic_expansion (line 938) and the Tier-3
+ * algorithmic eqbox (line 1040, in potential form
+ *   4 grad(v . A_g) - 4 (v . grad) A_g  =  4 v x (curl A_g)
+ * via the vector identity).  The factor of 4 is the spin-2 enhancement
+ * relative to the EM Lorentz force (line 458, 989, 2125 in v35); v34
+ * corrected v33's sign on the velocity-coupling term (line 948).  When
+ * A_g = 0 (no spinning / uniform-B_g background and no perturbation A_g)
+ * this term vanishes identically, recovering the older Tier-0/Tier-2 code
+ * paths bit-exactly.
+ *
+ * The relativistic scalar expression is the Einstein-Infeld-Hoffmann 1PN
+ * equation of motion for a test particle in a static field, harmonic gauge,
+ * with the v33 doc's isotropic-form metric (g_{ij} = (1-2 phi/c^2) delta_ij).
+ * See Ali-Haïmoud, GR Fall 2019 lecture 25, eq. 37, with psi = xi = 0 and
+ * dt phi = 0:
  *
  *   dv/dt = -(1 + v^2/c^2 + 4 phi/c^2) grad(phi) + 4 (v . grad(phi)) v / c^2
  *
  * Substituting g = -grad(phi) and (v . g) = -(v . grad(phi)) gives the form
- * above.  This differs from v33 eq:geodesic_expansion (line 668) in two ways:
+ * above.  Differs from v33 eq:geodesic_expansion (line 668) in two ways:
  *   (a) the 4*phi*g/c^2 ("Shapiro") term is added — comes from the g_{00}
  *       expansion at O(v^4) in Gamma^i_{00} (lecture eq. 30).
  *   (b) the sign on the velocity-coupling term is NEGATIVE, not positive as
  *       v33 has.  Empirical confirmation: with the v33 sign the test orbit
- *       precesses retrograde; with the EIH sign it precesses prograde.
- *
- * To be folded into the doc as v34.
- *
- * Tier 1 (GEM with A_g) and Tier 3 (full) arrive at Stage 10+ when the
- * perturbation A_g potentials are active and contribute via psi and xi. */
+ *       precesses retrograde; with the EIH sign it precesses prograde. */
 static inline void grav_force_at(const struct gr_sim* sim,
                                  float mass, float vx, float vy,
                                  float phi,
                                  float grad_x, float grad_y,
+                                 float Bg_z,
                                  float* Fx, float* Fy) {
     if (sim->force_tier == GR_FORCE_RELATIVISTIC) {
         /* EIH 1PN coordinate acceleration (Ali-Haïmoud, GR Fall 2019 lecture
@@ -414,6 +425,15 @@ static inline void grav_force_at(const struct gr_sim* sim,
         *Fx = -mass * grad_x;
         *Fy = -mass * grad_y;
     }
+    /* Tier-1 gravitomagnetic Lorentz force, additive in all scalar tiers
+     * (gr_sandbox_v35.tex eq:geodesic_expansion line 938; spin-2 factor of 4
+     * at line 458/989/2125).  In 2D with B_g_z along +z:
+     *   (v x B_g_z z)_x = +v_y B_g_z
+     *   (v x B_g_z z)_y = -v_x B_g_z
+     * Contributes only when an A_g background or perturbation is active;
+     * when Bg_z = 0 the scalar tiers above are recovered bit-exactly. */
+    *Fx += 4.0f * mass * vy * Bg_z;
+    *Fy -= 4.0f * mass * vx * Bg_z;
 }
 
 /* Boris-leapfrog kick-drift for one timestep.
@@ -438,6 +458,19 @@ void gr_particle_push_all(struct gr_sim* sim) {
         grav_grad_at(sim, p->x, p->y, &grad_x, &grad_y);
         const float phi = gr_phi_g_total_at(sim, p->x, p->y);
 
+        /* Gravitomagnetic field at the particle (Tier-1 source for the
+         * v x B_g term in grav_force_at).  Background contribution only for
+         * now — perturbation A_g contributes when a sampled-mode evaluator
+         * for curl(A_g_pert) is added.  Returns 0 when no A_g background is
+         * installed (bg_kind = NONE/POINT_MASS), recovering Tier-0/2 paths.
+         * Gated by the gravitomagnetic_force_enabled runtime flag so that
+         * stage09 (clock-only isolation) can disable the v x B_g piece. */
+        float Bg_z = 0.0f;
+        if (sim->gravitomagnetic_force_enabled
+            && sim->bg_mode == GR_BG_MODE_ANALYTIC) {
+            gr_bg_eval_B_g(sim, p->x, p->y, &Bg_z);
+        }
+
         /* v from lagged p^{n-1/2} — used to evaluate the velocity-dependent
          * Tier-2 force terms.  Negligible cost for Newtonian since grav_force_at
          * ignores v in that mode. */
@@ -447,11 +480,13 @@ void gr_particle_push_all(struct gr_sim* sim) {
         const float vy_pre = p->py / (gamma * p->mass);
 
         float Fx, Fy;
-        grav_force_at(sim, p->mass, vx_pre, vy_pre, phi, grad_x, grad_y, &Fx, &Fy);
+        grav_force_at(sim, p->mass, vx_pre, vy_pre, phi, grad_x, grad_y, Bg_z, &Fx, &Fy);
 
-        /* Corrector iteration for velocity-dependent Tier-2 force: midpoint
-         * velocity gives 2nd-order time accuracy. */
-        if (sim->force_tier == GR_FORCE_RELATIVISTIC) {
+        /* Corrector iteration for velocity-dependent terms (Tier-2 scalar
+         * coupling + Tier-1 gravitomagnetic v x B_g): midpoint velocity gives
+         * 2nd-order time accuracy.  Engage it whenever the force depends on
+         * v — RELATIVISTIC tier always, plus any tier when Bg_z != 0. */
+        if (sim->force_tier == GR_FORCE_RELATIVISTIC || Bg_z != 0.0f) {
             const float px_pred = p->px + Fx * dt;
             const float py_pred = p->py + Fy * dt;
             const float pmag2_pred = px_pred * px_pred + py_pred * py_pred;
@@ -460,7 +495,7 @@ void gr_particle_push_all(struct gr_sim* sim) {
             const float vy_post = py_pred / (gamma_pred * p->mass);
             const float vx_mid = 0.5f * (vx_pre + vx_post);
             const float vy_mid = 0.5f * (vy_pre + vy_post);
-            grav_force_at(sim, p->mass, vx_mid, vy_mid, phi, grad_x, grad_y, &Fx, &Fy);
+            grav_force_at(sim, p->mass, vx_mid, vy_mid, phi, grad_x, grad_y, Bg_z, &Fx, &Fy);
         }
 
         p->px += Fx * dt;
@@ -522,8 +557,17 @@ int gr_sim_add_particle(gr_sim_t* sim, float x, float y,
     float grad_x, grad_y;
     grav_grad_at(sim, x, y, &grad_x, &grad_y);
     const float phi_init = gr_phi_g_total_at(sim, x, y);
+    /* Tier-1 gravitomagnetic B_g_z at the initial position (analytic mode
+     * only; sampled-mode evaluation matches gr_particle_push_all).  Gated
+     * by gravitomagnetic_force_enabled so the half-step-back kick stays
+     * consistent with what the pusher will apply on step 0. */
+    float Bg_z_init = 0.0f;
+    if (sim->gravitomagnetic_force_enabled
+        && sim->bg_mode == GR_BG_MODE_ANALYTIC) {
+        gr_bg_eval_B_g(sim, x, y, &Bg_z_init);
+    }
     float Fx, Fy;
-    grav_force_at(sim, mass, vx, vy, phi_init, grad_x, grad_y, &Fx, &Fy);
+    grav_force_at(sim, mass, vx, vy, phi_init, grad_x, grad_y, Bg_z_init, &Fx, &Fy);
     /* p^0 = gamma_0 m v (relativistic). */
     const float gamma0 = 1.0f / sqrtf(fmaxf(1.0f - (vx * vx + vy * vy) / c2, 1e-12f));
     const float px0    = gamma0 * mass * vx;
