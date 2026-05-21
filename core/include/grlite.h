@@ -342,6 +342,40 @@ typedef enum {
 void                gr_sim_set_shape_function(gr_sim_t* sim, gr_shape_function_t s);
 gr_shape_function_t gr_sim_get_shape_function(const gr_sim_t* sim);
 
+/* Force-interpolation scheme — selects how the gradient of Phi at the
+ * particle is computed from the grid Phi.  Both schemes satisfy the
+ * Hockney-Eastwood adjoint condition (F_self = 0 at any stationary
+ * sub-cell position).  They differ in their behavior on MOVING particles:
+ *
+ *   GR_FORCE_INTERP_LEGACY (default):
+ *     Compute the FD gradient at each grid corner in the deposit kernel's
+ *     footprint, then interpolate that grid gradient to the particle
+ *     using the same kernel (W_2 for CIC, W_3 for TSC).
+ *     This is "FD-then-interp".  Stage 10 Phase C validates F_self = 0
+ *     under this scheme at any sub-cell position (memory:
+ *     [[grlite-he-adjoint-translation-invariance]]).
+ *
+ *   GR_FORCE_INTERP_LEWIS_BIRDSALL:
+ *     Compute the gradient at the particle directly as
+ *         dPhi/dx_p = sum_g (dW/dx)(x_p - x_g) * Phi_g
+ *     using the analytic gradient of the deposit kernel.  This is the
+ *     variationally-consistent force from the discrete Lagrangian
+ *     (Lewis 1970; Birdsall-Langdon Ch. 14; Brackbill-Forslund).
+ *     The discrete work-energy theorem holds exactly, so total energy
+ *     (kinetic + interaction + field) is conserved up to round-off,
+ *     dramatically reducing moving-particle "PIC self-heating".  Targets
+ *     the dominant Phase E heating mechanism that the absorbing boundary
+ *     does NOT touch (see [[grlite-damping-sweep-result]]).
+ *
+ * Default GR_FORCE_INTERP_LEGACY.  All existing scenarios behave
+ * identically under the default. */
+typedef enum {
+    GR_FORCE_INTERP_LEGACY         = 0,
+    GR_FORCE_INTERP_LEWIS_BIRDSALL = 1
+} gr_force_interp_t;
+void              gr_sim_set_force_interp(gr_sim_t* sim, gr_force_interp_t scheme);
+gr_force_interp_t gr_sim_get_force_interp(const gr_sim_t* sim);
+
 /* Periodic BC for the field leapfrog: 1 = on, 0 = zero-Dirichlet (default).
  * Periodic BC restores translation invariance of the discrete Laplacian
  * Green's function, which is the precondition for HE self-force = 0 at

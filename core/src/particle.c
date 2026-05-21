@@ -91,6 +91,128 @@ float gr_phi_g_total_at(const struct gr_sim* sim, float x, float y) {
     return pert + bg;
 }
 
+/* Lewis-Birdsall variant: gradient of Phi at the particle computed as
+ *     dPhi/dx_p = sum_g (dW/dx)(x_p - x_g) * Phi_g
+ * using the analytic gradient of the deposit kernel itself.  This is the
+ * variationally-consistent force from the discrete Lagrangian — the
+ * discrete work-energy theorem holds exactly for the particle moving
+ * under this force in a self-consistently deposited field.
+ *
+ * For CIC (W_2):
+ *   particle at (x_p, y_p), sub-cell offset (fx, fy) in [0, 1).
+ *   4 corners involved (ic, jc), (ic+1, jc), (ic, jc+1), (ic+1, jc+1).
+ *   x-weights:  -(1-fy)/dx, +(1-fy)/dx, -fy/dx, +fy/dx
+ *   y-weights:  -(1-fx)/dx, -fx/dx, +(1-fx)/dx, +fx/dx
+ *
+ * For TSC (W_3, quadratic B-spline) anchored at the NEAREST corner ic =
+ *   floor(xn + 0.5), with u = xn - ic in [-1/2, 1/2]:
+ *   d/ds W_3 at the three x-cells (di = -1, 0, +1):
+ *       di = -1:   (u - 1/2)/dx
+ *       di =  0:  -2u/dx
+ *       di = +1:   (u + 1/2)/dx
+ *   In 2D the x-weight at cell (ic+di, jc+dj) is
+ *       w_x(di, dj) = (dW_3/ds at di) * W_3(v at dj) / dx
+ *   where W_3(v at dj) = {0.5*(0.5-v)^2, 0.75-v^2, 0.5*(0.5+v)^2}.  Symmetric
+ *   for w_y.
+ *
+ * Both LB-CIC and LB-TSC satisfy the HE adjoint condition (F_self = 0 at
+ * any sub-cell position for stationary sources) AND the discrete energy
+ * conservation theorem (no per-step work imbalance under motion). */
+static void grav_grad_at_lb(const struct gr_sim* sim, float x, float y,
+                            float* gx_out, float* gy_out) {
+    *gx_out = 0.0f;
+    *gy_out = 0.0f;
+    if (!sim) return;
+    const int   W   = sim->width;
+    const int   H   = sim->height;
+    const float dx  = sim->dx;
+
+    /* Background contribution. */
+    float gx_bg_ana = 0.0f, gy_bg_ana = 0.0f;
+    const float* bg = NULL;
+    if (sim->bg_mode == GR_BG_MODE_ANALYTIC && sim->bg_kind != GR_BG_KIND_NONE) {
+        float phi_a;
+        gr_bg_eval_analytic(sim, x, y, &phi_a, &gx_bg_ana, &gy_bg_ana);
+    } else if (sim->bg_mode == GR_BG_MODE_SAMPLED) {
+        bg = sim->phi_g_bg;  /* may be NULL */
+    }
+    /* Read the field at time n (matched to the deposit at the start of
+     * the current step), not Phi^{n+1}.  After the field leapfrog +
+     * rotation in gr_sim_step, Phi^n now lives in prev; curr holds
+     * Phi^{n+1}.  For LB's energy-conservation guarantee the force must
+     * be evaluated from the SAME field-time as the deposit.  When the
+     * field evolution is disabled (Stage 7/8 fixed-background tests),
+     * prev is untouched (zero-initialized), so fall back to curr. */
+    const float* pert = sim->field_evolution_enabled
+                            ? sim->fields[GR_FIELD_PHI_GRAV].prev
+                            : sim->fields[GR_FIELD_PHI_GRAV].curr;
+
+    if (sim->shape_function == GR_SHAPE_TSC) {
+        /* TSC anchor: nearest corner.  u, v in [-1/2, 1/2]. */
+        const float xn = x / dx;
+        const float yn = y / dx;
+        const int   ic = (int) floorf(xn + 0.5f);
+        const int   jc = (int) floorf(yn + 0.5f);
+        if (ic < 1 || ic > W - 2 || jc < 1 || jc > H - 2) {
+            *gx_out = gx_bg_ana;
+            *gy_out = gy_bg_ana;
+            return;
+        }
+        const float u  = xn - (float) ic;
+        const float v  = yn - (float) jc;
+        const float a  = 0.5f - v, b = 0.5f + v;
+        const float c  = 0.5f - u, d  = 0.5f + u;
+        /* Value weights (TSC W_3) along x and y. */
+        const float wx[3] = { 0.5f * c * c,  0.75f - u * u, 0.5f * d * d };
+        const float wy[3] = { 0.5f * a * a,  0.75f - v * v, 0.5f * b * b };
+        /* Derivative weights dW_3/ds along x and y. */
+        const float dwx[3] = { u - 0.5f, -2.0f * u, u + 0.5f };
+        const float dwy[3] = { v - 0.5f, -2.0f * v, v + 0.5f };
+        const float inv_dx = 1.0f / dx;
+        float gx_sum = 0.0f, gy_sum = 0.0f;
+        for (int dj = -1; dj <= 1; dj++) {
+            const int row = (jc + dj) * W;
+            for (int di = -1; di <= 1; di++) {
+                const int k = row + ic + di;
+                float phi = pert[k];
+                if (bg) phi += bg[k];
+                gx_sum += (dwx[di + 1] * wy[dj + 1]) * phi;
+                gy_sum += (wx[di + 1]  * dwy[dj + 1]) * phi;
+            }
+        }
+        *gx_out = inv_dx * gx_sum + gx_bg_ana;
+        *gy_out = inv_dx * gy_sum + gy_bg_ana;
+        return;
+    }
+
+    /* CIC: anchor at lower-left corner, fx, fy in [0, 1). */
+    const float xn = x / dx;
+    const float yn = y / dx;
+    const int   ic = (int) floorf(xn);
+    const int   jc = (int) floorf(yn);
+    if (ic < 0 || ic >= W - 1 || jc < 0 || jc >= H - 1) {
+        *gx_out = gx_bg_ana;
+        *gy_out = gy_bg_ana;
+        return;
+    }
+    const float fx = xn - (float) ic;
+    const float fy = yn - (float) jc;
+    const float inv_dx = 1.0f / dx;
+    const int k00 =  jc      * W + ic;
+    const int k10 =  jc      * W + ic + 1;
+    const int k01 = (jc + 1) * W + ic;
+    const int k11 = (jc + 1) * W + ic + 1;
+    float p00 = pert[k00], p10 = pert[k10], p01 = pert[k01], p11 = pert[k11];
+    if (bg) { p00 += bg[k00]; p10 += bg[k10]; p01 += bg[k01]; p11 += bg[k11]; }
+    /* F_x = -m dPhi/dx_p; here we return dPhi/dx, dPhi/dy. */
+    const float gx_lb = inv_dx * (-(1.0f - fy) * p00 + (1.0f - fy) * p10
+                                  -        fy  * p01 +        fy  * p11);
+    const float gy_lb = inv_dx * (-(1.0f - fx) * p00 -        fx  * p10
+                                  +(1.0f - fx) * p01 +        fx  * p11);
+    *gx_out = gx_lb + gx_bg_ana;
+    *gy_out = gy_lb + gy_bg_ana;
+}
+
 /* Gradient of Phi_g_total at (x, y) on the CORNER sublattice.
  *
  * Centered finite difference on corners + corner-CIC interpolation to the
@@ -119,6 +241,14 @@ static void grav_grad_at(const struct gr_sim* sim, float x, float y,
     *gx_out = 0.0f;
     *gy_out = 0.0f;
     if (!sim) return;
+    /* Energy-conserving force pairing — dispatched here so the rest of
+     * the pusher (Tier-2 corrections, proper-time, leapfrog init) is
+     * unchanged.  Both schemes return dPhi/dx, dPhi/dy at the particle;
+     * only the kernel differs. */
+    if (sim->force_interp == GR_FORCE_INTERP_LEWIS_BIRDSALL) {
+        grav_grad_at_lb(sim, x, y, gx_out, gy_out);
+        return;
+    }
     const int   W  = sim->width;
     const int   H  = sim->height;
     const float dx = sim->dx;

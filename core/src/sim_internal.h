@@ -103,6 +103,10 @@ struct gr_sim {
     int rho_smooth_passes;
     /* Shape function for rho deposit + force interp.  Default CIC. */
     gr_shape_function_t shape_function;
+    /* Force-interpolation scheme.  LEGACY = FD-then-interp; LEWIS_BIRDSALL
+     * = analytic-grad-of-shape interpolation (energy-conserving force
+     * pairing per the discrete Lagrangian).  Default LEGACY. */
+    gr_force_interp_t   force_interp;
     /* If nonzero, the field leapfrog uses periodic BC instead of zero-
      * Dirichlet at the box edges.  Periodic BC restores translation
      * invariance of the discrete Laplacian — required for HE self-force

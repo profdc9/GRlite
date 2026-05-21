@@ -271,6 +271,14 @@ gr_shape_function_t gr_sim_get_shape_function(const gr_sim_t* sim) {
     return sim ? sim->shape_function : GR_SHAPE_CIC;
 }
 
+void gr_sim_set_force_interp(gr_sim_t* sim, gr_force_interp_t scheme) {
+    if (!sim) return;
+    sim->force_interp = scheme;
+}
+gr_force_interp_t gr_sim_get_force_interp(const gr_sim_t* sim) {
+    return sim ? sim->force_interp : GR_FORCE_INTERP_LEGACY;
+}
+
 void gr_sim_set_periodic_bc(gr_sim_t* sim, int periodic) {
     if (!sim) return;
     sim->periodic_bc = periodic ? 1 : 0;
