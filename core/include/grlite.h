@@ -456,9 +456,43 @@ gr_bg_kind_t gr_sim_get_bg_kind(const gr_sim_t* sim);
  *   sigma_max = 21 * c_eff / (2 * L)  =>  round-trip reflection R ~ 1e-3.
  * Pass n_damping = 0 to disable (no per-cell multiply will occur).
  * Default after gr_sim_create: no damping (Stage 1 behavior).
- * --------------------------------------------------------------------------*/
+ *
+ * NOTE: the damping ring is mutually exclusive with the PML layer below.
+ * Enabling PML clears any previously installed damping ring (and vice versa). */
 void gr_sim_set_damping(gr_sim_t* sim, int n_damping);
 int  gr_sim_damping_layers(const gr_sim_t* sim);
+
+/* ----------------------------------------------------------------------------
+ * Perfectly-Matched-Layer (PML) absorbing boundary
+ *
+ * Install (or remove) a Berenger/Hu-style split-field PML of n_pml cells
+ * thickness on each grid edge.  Unlike the simple (1 - sigma) damping ring
+ * (which is a lossy material — non-zero reflection at any interface and
+ * position-dependent self-force on a particle), the PML splits each scalar
+ * potential Phi into Phi_x + Phi_y, with each component damped only in its
+ * own propagation direction:
+ *
+ *   (1 + sigma_x dt/2) Phi_x^{n+1} = 2 Phi_x^n - (1 - sigma_x dt/2) Phi_x^{n-1}
+ *                                  + c^2 dt^2 (d_x^2 Phi^n + S/2)
+ *
+ * (symmetric for Phi_y).  In the interior (sigma_x = sigma_y = 0) the sum
+ * Phi = Phi_x + Phi_y satisfies the standard 2D wave equation bit-exactly —
+ * so the PML layer is impedance-matched and translation invariance of the
+ * discrete Laplacian's Green's function holds at every interior position.
+ * This restores the Hockney-Eastwood self-force = 0 result at off-center
+ * particle positions, which the lossy damping ring breaks.
+ *
+ * Profile: cubic polynomial PML, sigma(depth) = sigma_max * (depth/N_pml)^3,
+ * with sigma_max chosen for target round-trip reflection R = 1e-6 per
+ *   sigma_max = (m+1) * c_eff * ln(1/R) / (2 * N_pml * dx),  m=3.
+ *
+ * Pass n_pml = 0 to disable.  Default after gr_sim_create: no PML.  Mutually
+ * exclusive with gr_sim_set_damping (enabling one disables the other).
+ * Storage cost: roughly doubles the field memory (6 extra W*H float arrays
+ * per potential for the split-field state).
+ * --------------------------------------------------------------------------*/
+void gr_sim_set_pml(gr_sim_t* sim, int n_pml);
+int  gr_sim_pml_layers(const gr_sim_t* sim);
 
 /* ----------------------------------------------------------------------------
  * Scenario registry

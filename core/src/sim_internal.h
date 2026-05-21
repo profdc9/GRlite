@@ -20,6 +20,21 @@ typedef struct {
     float* next;
     const float* source;     /* aliased to a source array owned by gr_sim_t */
     float        source_coeff;
+
+    /* PML split-field storage (NULL unless sim->n_pml > 0).  When PML is
+     * active, Phi = phi_x.curr + phi_y.curr, and `curr` above is the
+     * assembled sum (refreshed each step so existing readers — particle
+     * force, gauge residual, web renderer — see Phi unchanged).
+     *
+     * Each split component runs its own Hu-style leapfrog with its own
+     * three time levels.  prev/next pointers rotate independently of the
+     * sum slot. */
+    float* phi_x_prev;
+    float* phi_x_curr;
+    float* phi_x_next;
+    float* phi_y_prev;
+    float* phi_y_curr;
+    float* phi_y_next;
 } gr_field_state_t;
 
 struct gr_sim {
@@ -48,6 +63,18 @@ struct gr_sim {
      * they all satisfy the same wave equation with the same c. */
     int    n_damping;
     float* damping_d;
+
+    /* PML absorbing boundary (S8 / post-v35).  When n_pml > 0, all six
+     * potentials switch to a Hu-style split-field leapfrog (see gr_field_t
+     * comment above and field.c).  The 1D sigma profiles are
+     * sigma_x[i] = sigma_max * f(i)^3 where f ramps cubically from 1 at the
+     * outer boundary to 0 at depth N_pml from the edge; sigma_y[j] symmetric.
+     * sigma_dt_*[i] = sigma_x[i] * dt / 2 — precomputed for the kernel.
+     * Mutually exclusive with the damping ring: enabling one clears the
+     * other. */
+    int    n_pml;
+    float* pml_sigma_dt_x;   /* length sim->width  */
+    float* pml_sigma_dt_y;   /* length sim->height */
 
     /* Background field arrays (Stage 6). Lazily allocated by
      * gr_sim_set_background_*. */
@@ -125,6 +152,12 @@ struct gr_sim {
 
 /* Defined in field.c — steps all six fields in parallel. */
 void gr_field_leapfrog_step_all(struct gr_sim* sim);
+
+/* Defined in field.c — rotates PML split-field time levels per field
+ * (phi_x: prev<-curr, curr<-next; same for phi_y) and refreshes the
+ * assembled curr = phi_x.curr + phi_y.curr.  Only used when sim->n_pml > 0;
+ * the standard 3-pointer rotation in gr_sim_step handles the non-PML path. */
+void gr_field_pml_rotate_and_assemble(struct gr_sim* sim);
 
 /* Defined in particle.c — pushes all particles one timestep (kick-drift).
  * Reads (background + perturbation) Phi_g at each particle position to

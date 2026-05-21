@@ -134,12 +134,115 @@ static void leapfrog_field_periodic(gr_field_state_t* f, const float* damp,
     }
 }
 
+/* ----------------------------------------------------------------------------
+ * PML (Hu split-field) leapfrog
+ *
+ * Each scalar potential Phi is split into Phi_x + Phi_y, evolved separately:
+ *
+ *   (1 + sigma_x dt/2) Phi_x^{n+1} = 2 Phi_x^n - (1 - sigma_x dt/2) Phi_x^{n-1}
+ *                                  + c^2 dt^2 (d_x^2 Phi^n + S^n / 2)
+ *   (1 + sigma_y dt/2) Phi_y^{n+1} = 2 Phi_y^n - (1 - sigma_y dt/2) Phi_y^{n-1}
+ *                                  + c^2 dt^2 (d_y^2 Phi^n + S^n / 2)
+ *
+ * with Phi = Phi_x + Phi_y, sigma_x = sigma_x(i), sigma_y = sigma_y(j) ramped
+ * cubically to zero at the PML/interior interface.  In the interior (both
+ * sigma=0) summing the two recovers the standard wave-equation leapfrog
+ * bit-for-bit (subject to floating-point associativity).
+ *
+ * Interior reads d_x^2 / d_y^2 from the assembled sum field f->curr, which
+ * gr_field_pml_rotate_and_assemble keeps in sync after each step. */
+static void leapfrog_field_pml(gr_field_state_t* f,
+                               const float* sigma_dt_x, const float* sigma_dt_y,
+                               int W, int H, float c2dt2, float inv_dx2) {
+    const float* curr_sum = f->curr;      /* Phi^n = phi_x^n + phi_y^n */
+    const float* px_prev  = f->phi_x_prev;
+    const float* px_curr  = f->phi_x_curr;
+    float*       px_next  = f->phi_x_next;
+    const float* py_prev  = f->phi_y_prev;
+    const float* py_curr  = f->phi_y_curr;
+    float*       py_next  = f->phi_y_next;
+    const float* src      = f->source;
+    const float  sc       = f->source_coeff;
+
+    for (int j = 1; j < H - 1; j++) {
+        const int   row  = j * W;
+        const float sy   = sigma_dt_y[j];
+        const float ay   = 1.0f / (1.0f + sy);
+        const float by   = (1.0f - sy);
+        for (int i = 1; i < W - 1; i++) {
+            const int   k     = row + i;
+            const float sx    = sigma_dt_x[i];
+            const float ax    = 1.0f / (1.0f + sx);
+            const float bx    = (1.0f - sx);
+            /* Direction-resolved second differences of the assembled field. */
+            const float lap_x = (curr_sum[k - 1] + curr_sum[k + 1] - 2.0f * curr_sum[k]) * inv_dx2;
+            const float lap_y = (curr_sum[k - W] + curr_sum[k + W] - 2.0f * curr_sum[k]) * inv_dx2;
+            const float half_src = 0.5f * sc * src[k];
+            px_next[k] = ax * (2.0f * px_curr[k] - bx * px_prev[k]
+                               + c2dt2 * (lap_x + half_src));
+            py_next[k] = ay * (2.0f * py_curr[k] - by * py_prev[k]
+                               + c2dt2 * (lap_y + half_src));
+        }
+    }
+    /* Zero-Dirichlet at the literal outer wall.  In a properly tuned PML the
+     * field at the wall is already attenuated to ~R; the wall BC is a
+     * formality, not a physical absorber. */
+    for (int i = 0; i < W; i++) {
+        px_next[i]               = 0.0f;
+        py_next[i]               = 0.0f;
+        px_next[(H - 1) * W + i] = 0.0f;
+        py_next[(H - 1) * W + i] = 0.0f;
+    }
+    for (int j = 0; j < H; j++) {
+        px_next[j * W]             = 0.0f;
+        py_next[j * W]             = 0.0f;
+        px_next[j * W + (W - 1)]   = 0.0f;
+        py_next[j * W + (W - 1)]   = 0.0f;
+    }
+}
+
+void gr_field_pml_rotate_and_assemble(struct gr_sim* sim) {
+    const size_t n = (size_t) sim->width * (size_t) sim->height;
+    for (int f = 0; f < GR_FIELD_COUNT; f++) {
+        gr_field_state_t* fs = &sim->fields[f];
+        /* Rotate split-field time levels. */
+        float* tx        = fs->phi_x_prev;
+        fs->phi_x_prev   = fs->phi_x_curr;
+        fs->phi_x_curr   = fs->phi_x_next;
+        fs->phi_x_next   = tx;
+        float* ty        = fs->phi_y_prev;
+        fs->phi_y_prev   = fs->phi_y_curr;
+        fs->phi_y_curr   = fs->phi_y_next;
+        fs->phi_y_next   = ty;
+        /* Refresh assembled Phi^n = phi_x^n + phi_y^n into the existing
+         * curr slot so all downstream readers (force, gauge, web renderer)
+         * keep working unchanged.  Also rotate prev -> next for callers
+         * that still expect a time-derivative via (curr - prev) / dt
+         * (notably the gauge residual diagnostic). */
+        float* tmp_sum   = fs->prev;
+        fs->prev         = fs->curr;
+        fs->curr         = tmp_sum;
+        for (size_t k = 0; k < n; k++) {
+            fs->curr[k] = fs->phi_x_curr[k] + fs->phi_y_curr[k];
+        }
+    }
+}
+
 void gr_field_leapfrog_step_all(struct gr_sim* sim) {
     const int   W       = sim->width;
     const int   H       = sim->height;
     const float c2dt2   = sim->c_eff * sim->c_eff * sim->dt * sim->dt;
     const float inv_dx2 = 1.0f / (sim->dx * sim->dx);
     const float* damp   = sim->damping_d;  /* may be NULL */
+    if (sim->n_pml > 0) {
+        for (int f = 0; f < GR_FIELD_COUNT; f++) {
+            (void) gr_array_lattice((gr_array_id_t) f);
+            leapfrog_field_pml(&sim->fields[f],
+                               sim->pml_sigma_dt_x, sim->pml_sigma_dt_y,
+                               W, H, c2dt2, inv_dx2);
+        }
+        return;
+    }
     if (sim->periodic_bc) {
         for (int f = 0; f < GR_FIELD_COUNT; f++) {
             (void) gr_array_lattice((gr_array_id_t) f);

@@ -94,6 +94,12 @@ void gr_sim_destroy(gr_sim_t* sim) {
         free(sim->fields[f].prev);
         free(sim->fields[f].curr);
         free(sim->fields[f].next);
+        free(sim->fields[f].phi_x_prev);
+        free(sim->fields[f].phi_x_curr);
+        free(sim->fields[f].phi_x_next);
+        free(sim->fields[f].phi_y_prev);
+        free(sim->fields[f].phi_y_curr);
+        free(sim->fields[f].phi_y_next);
     }
     free(sim->rho_matter);
     free(sim->J_mx);
@@ -102,6 +108,8 @@ void gr_sim_destroy(gr_sim_t* sim) {
     free(sim->J_qx);
     free(sim->J_qy);
     free(sim->damping_d);
+    free(sim->pml_sigma_dt_x);
+    free(sim->pml_sigma_dt_y);
     free(sim->phi_g_bg);
     free(sim->Agx_bg);
     free(sim->Agy_bg);
@@ -212,12 +220,18 @@ void gr_sim_step(gr_sim_t* sim) {
 
     if (sim->field_evolution_enabled) {
         gr_field_leapfrog_step_all(sim);
-        /* Three-pointer rotation per field. */
-        for (int f = 0; f < GR_FIELD_COUNT; f++) {
-            float* tmp           = sim->fields[f].prev;
-            sim->fields[f].prev  = sim->fields[f].curr;
-            sim->fields[f].curr  = sim->fields[f].next;
-            sim->fields[f].next  = tmp;
+        if (sim->n_pml > 0) {
+            /* PML: rotate split-field triplets, then reassemble Phi into the
+             * existing curr slot.  Defined in field.c next to the kernel. */
+            gr_field_pml_rotate_and_assemble(sim);
+        } else {
+            /* Three-pointer rotation per field. */
+            for (int f = 0; f < GR_FIELD_COUNT; f++) {
+                float* tmp           = sim->fields[f].prev;
+                sim->fields[f].prev  = sim->fields[f].curr;
+                sim->fields[f].curr  = sim->fields[f].next;
+                sim->fields[f].next  = tmp;
+            }
         }
     }
     /* Stage 7+: push particles each step (Boris-leapfrog kick-drift). */
@@ -451,11 +465,19 @@ int gr_sim_load_scenario(gr_sim_t* sim, const char* name, const float* params, i
 }
 
 int gr_sim_damping_layers(const gr_sim_t* sim) { return sim ? sim->n_damping : 0; }
+int gr_sim_pml_layers(const gr_sim_t* sim)     { return sim ? sim->n_pml     : 0; }
+
+/* Forward decl — defined further down. */
+static void gr_sim_disable_pml_internal(gr_sim_t* sim);
 
 /* Eq. (eq:damp_profile) — §9.6 — same precomputation as before, unchanged by
- * the Stage 4 field-state refactor (damping is per-cell, not per-field). */
+ * the Stage 4 field-state refactor (damping is per-cell, not per-field).
+ * Enabling the damping ring disables any active PML (mutually exclusive). */
 void gr_sim_set_damping(gr_sim_t* sim, int n_damping) {
     if (!sim) return;
+    if (n_damping > 0 && sim->n_pml > 0) {
+        gr_sim_disable_pml_internal(sim);
+    }
     free(sim->damping_d);
     sim->damping_d = NULL;
     sim->n_damping = 0;
@@ -503,4 +525,104 @@ void gr_sim_set_damping(gr_sim_t* sim, int n_damping) {
             sim->damping_d[row + i] = sigma_max_dt * f2_max;
         }
     }
+}
+
+/* ----------------------------------------------------------------------------
+ * PML (split-field, Hu) absorbing boundary
+ * --------------------------------------------------------------------------*/
+
+static void gr_sim_disable_pml_internal(gr_sim_t* sim) {
+    for (int f = 0; f < GR_FIELD_COUNT; f++) {
+        free(sim->fields[f].phi_x_prev); sim->fields[f].phi_x_prev = NULL;
+        free(sim->fields[f].phi_x_curr); sim->fields[f].phi_x_curr = NULL;
+        free(sim->fields[f].phi_x_next); sim->fields[f].phi_x_next = NULL;
+        free(sim->fields[f].phi_y_prev); sim->fields[f].phi_y_prev = NULL;
+        free(sim->fields[f].phi_y_curr); sim->fields[f].phi_y_curr = NULL;
+        free(sim->fields[f].phi_y_next); sim->fields[f].phi_y_next = NULL;
+    }
+    free(sim->pml_sigma_dt_x); sim->pml_sigma_dt_x = NULL;
+    free(sim->pml_sigma_dt_y); sim->pml_sigma_dt_y = NULL;
+    sim->n_pml = 0;
+}
+
+/* Polynomial PML, cubic ramp.  sigma_max chosen for target round-trip
+ * reflection R = 1e-6:
+ *   sigma_max = (m+1) * c_eff * ln(1/R) / (2 * N_pml * dx),  m = 3.
+ * Reference: Berenger (1994); Roden & Gedney (2000).  At m=3, ln(1/R)=13.8,
+ * sigma_max ~ 4 * 13.8 c / (2 N dx) = 27.6 c / (N dx). */
+void gr_sim_set_pml(gr_sim_t* sim, int n_pml) {
+    if (!sim) return;
+    /* Always clear any prior PML state first. */
+    gr_sim_disable_pml_internal(sim);
+    if (n_pml <= 0) return;
+    if (2 * n_pml >= sim->width || 2 * n_pml >= sim->height) return;
+    /* PML and the simple damping ring are mutually exclusive. */
+    if (sim->n_damping > 0) {
+        free(sim->damping_d);
+        sim->damping_d = NULL;
+        sim->n_damping = 0;
+    }
+
+    const int   W   = sim->width;
+    const int   H   = sim->height;
+    const float dt  = sim->dt;
+    const float dx  = sim->dx;
+    const float c   = sim->c_eff;
+
+    /* sigma_max per polynomial-PML formula, m=3, R=1e-6. */
+    const float ln_invR  = 13.8155f;            /* ln(1e6) */
+    const float m_plus_1 = 4.0f;                /* m=3 → m+1=4 */
+    const float sigma_max = m_plus_1 * c * ln_invR / (2.0f * (float) n_pml * dx);
+
+    sim->pml_sigma_dt_x = (float*) calloc((size_t) W, sizeof(float));
+    sim->pml_sigma_dt_y = (float*) calloc((size_t) H, sizeof(float));
+    if (!sim->pml_sigma_dt_x || !sim->pml_sigma_dt_y) {
+        gr_sim_disable_pml_internal(sim);
+        return;
+    }
+    const float inv_N = 1.0f / (float) n_pml;
+    /* Profile: depth 0 (just inside the PML region) → sigma=0; depth N_pml
+     * (outer boundary) → sigma=sigma_max.  Cubic. */
+    for (int i = 0; i < W; i++) {
+        int depth = 0;
+        if (i < n_pml)            depth = n_pml - i;
+        else if (i >= W - n_pml)  depth = i - (W - n_pml) + 1;
+        const float f = (float) depth * inv_N;
+        sim->pml_sigma_dt_x[i] = sigma_max * f * f * f * dt * 0.5f;  /* sigma*dt/2 */
+    }
+    for (int j = 0; j < H; j++) {
+        int depth = 0;
+        if (j < n_pml)            depth = n_pml - j;
+        else if (j >= H - n_pml)  depth = j - (H - n_pml) + 1;
+        const float f = (float) depth * inv_N;
+        sim->pml_sigma_dt_y[j] = sigma_max * f * f * f * dt * 0.5f;
+    }
+
+    /* Allocate split-field storage per potential (6 arrays × 6 fields). */
+    const size_t n = (size_t) W * (size_t) H;
+    for (int f = 0; f < GR_FIELD_COUNT; f++) {
+        sim->fields[f].phi_x_prev = (float*) calloc(n, sizeof(float));
+        sim->fields[f].phi_x_curr = (float*) calloc(n, sizeof(float));
+        sim->fields[f].phi_x_next = (float*) calloc(n, sizeof(float));
+        sim->fields[f].phi_y_prev = (float*) calloc(n, sizeof(float));
+        sim->fields[f].phi_y_curr = (float*) calloc(n, sizeof(float));
+        sim->fields[f].phi_y_next = (float*) calloc(n, sizeof(float));
+        if (!sim->fields[f].phi_x_prev || !sim->fields[f].phi_x_curr || !sim->fields[f].phi_x_next
+            || !sim->fields[f].phi_y_prev || !sim->fields[f].phi_y_curr || !sim->fields[f].phi_y_next) {
+            gr_sim_disable_pml_internal(sim);
+            return;
+        }
+        /* Seed split state from the existing assembled field so PML can be
+         * enabled mid-run without discarding the wave already in flight.
+         * Split equally between phi_x and phi_y. */
+        const float* curr_sum = sim->fields[f].curr;
+        const float* prev_sum = sim->fields[f].prev;
+        for (size_t k = 0; k < n; k++) {
+            sim->fields[f].phi_x_curr[k] = 0.5f * curr_sum[k];
+            sim->fields[f].phi_y_curr[k] = 0.5f * curr_sum[k];
+            sim->fields[f].phi_x_prev[k] = 0.5f * prev_sum[k];
+            sim->fields[f].phi_y_prev[k] = 0.5f * prev_sum[k];
+        }
+    }
+    sim->n_pml = n_pml;
 }
