@@ -475,6 +475,31 @@ typedef enum {
     GR_DAMP_EXPONENTIAL = 1   /* sigma(d/L) = sigma_max * (e^(beta*d/L)-1)/(e^beta-1) */
 } gr_damp_profile_kind_t;
 
+/* Time-discretization form for the damping kernel.  Treating the
+ * leapfrog as a 2nd-order recurrence with characteristic polynomial
+ * w^2 + a w + b = 0, each form chooses (a, b) differently:
+ *
+ *   MULTIPLICATIVE (default): Phi^{n+1} = (1 - sigma dt) * [2 Phi^n -
+ *     Phi^{n-1} + (c dt)^2 (Lap Phi + S)].  Roots are complex
+ *     conjugates with |w| = sqrt(1 - sigma dt).  Per-step decay is
+ *     sqrt(1 - sigma dt) — about half what the prefactor suggests.
+ *     Stability bound sigma dt < 1.
+ *
+ *   CRITICAL: Phi^{n+1} = 2 gamma Phi^n - gamma^2 Phi^{n-1} +
+ *     (c dt)^2 (Lap Phi + S), with gamma = 1 - sigma dt.  Both roots
+ *     of the characteristic polynomial sit at gamma (double real
+ *     root — critically damped).  Per-step decay is exactly gamma.
+ *     About 2x the damping rate of MULTIPLICATIVE for the same nominal
+ *     sigma.  Continuum PDE is the damped Klein-Gordon equation with
+ *     a (sigma)^2 mass term — fine inside an absorbing ring (which
+ *     wants exponential screening), wrong for the interior (would
+ *     screen the long-range gravity profile).  Use only when the
+ *     damping array is nonzero only at the boundary. */
+typedef enum {
+    GR_DAMP_TIME_MULTIPLICATIVE = 0,
+    GR_DAMP_TIME_CRITICAL       = 1
+} gr_damp_time_form_t;
+
 typedef struct {
     int                    n_damping;          /* layer thickness (cells); 0 = off */
     gr_damp_profile_kind_t kind;               /* default GR_DAMP_POLYNOMIAL */
@@ -482,6 +507,7 @@ typedef struct {
     float                  exp_beta;           /* beta; default 4.0 */
     float                  target_reflection;  /* R for sigma_max derivation; default 1e-3 */
     float                  sigma_max_override; /* > 0 to bypass formula; 0 = use formula */
+    gr_damp_time_form_t    time_form;          /* default GR_DAMP_TIME_MULTIPLICATIVE */
 } gr_damp_config_t;
 
 /* Legacy entry point — equivalent to set_damping_config with kind=POLYNOMIAL,
@@ -491,9 +517,27 @@ void gr_sim_set_damping(gr_sim_t* sim, int n_damping);
 int  gr_sim_damping_layers(const gr_sim_t* sim);
 
 /* Parametrized damping setup.  See gr_damp_config_t comments above for
- * the supported profile family.  Pass cfg->n_damping = 0 to disable. */
+ * the supported profile family.  Pass cfg->n_damping = 0 to disable.
+ *
+ * SAFETY: when cfg->time_form is GR_DAMP_TIME_CRITICAL, the kernel has a
+ * tighter CFL bound than the undamped leapfrog (the Nyquist mode goes
+ * unstable for any gamma < 1 at CFL = 1/sqrt(2) in 2D).  The
+ * implementation enforces the stability bound by clamping sigma_max so
+ * that gamma_min = 1 - sigma_max*dt >= 2*CFL^2.  If the requested
+ * sigma_max would exceed that, it is clamped silently; readback via
+ * gr_sim_get_damping_config returns the clamped value.  Use
+ * gr_sim_damping_max_stable_sigma_dt() to query the ceiling before
+ * calling. */
 void             gr_sim_set_damping_config(gr_sim_t* sim, const gr_damp_config_t* cfg);
 gr_damp_config_t gr_sim_get_damping_config(const gr_sim_t* sim);
+
+/* Returns the largest sigma*dt that critical damping can use without
+ * destabilizing the Nyquist mode at the current sim's CFL.  Formula:
+ *   sigma*dt_max = 1 - 2*CFL^2     (2D, 5-point Laplacian)
+ * For the multiplicative form this returns 1.0 (the (1-sigma*dt) > 0
+ * bound), since multiplicative is more stable than the undamped leapfrog
+ * at the Nyquist mode. */
+float gr_sim_damping_max_stable_sigma_dt(const gr_sim_t* sim, gr_damp_time_form_t form);
 
 /* ----------------------------------------------------------------------------
  * Scenario registry

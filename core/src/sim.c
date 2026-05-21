@@ -535,6 +535,25 @@ void gr_sim_set_damping_config(gr_sim_t* sim, const gr_damp_config_t* cfg) {
     const float inv_Nd = 1.0f / (float) n_damping;
     const float dt     = sim->dt;
 
+    /* CFL stability enforcement.  See gr_sim_damping_max_stable_sigma_dt
+     * comment in grlite.h.  For CRITICAL, the Nyquist mode requires
+     *   4 * gamma >= 8 * CFL^2  =>  sigma*dt <= 1 - 2*CFL^2 .
+     * Clamp sigma_max if needed.  For MULTIPLICATIVE the formal bound is
+     * sigma*dt < 1 (so the (1-sigma*dt) prefactor remains positive). */
+    {
+        const float cfl_now = sim->cfl;
+        float       max_sigma_dt;
+        if (cfg->time_form == GR_DAMP_TIME_CRITICAL) {
+            max_sigma_dt = 1.0f - 2.0f * cfl_now * cfl_now;
+            if (max_sigma_dt < 0.0f) max_sigma_dt = 0.0f;
+        } else {
+            max_sigma_dt = 0.999f;
+        }
+        if (sigma_max * dt > max_sigma_dt) {
+            sigma_max = (max_sigma_dt > 0.0f) ? (max_sigma_dt / dt) : 0.0f;
+        }
+    }
+
     float fx[16384], fy[16384];
     for (int i = 0; i < W; i++) {
         int depth = 0;
@@ -566,10 +585,21 @@ void gr_sim_set_damping_config(gr_sim_t* sim, const gr_damp_config_t* cfg) {
     sim->damp_exp_beta          = exp_beta;
     sim->damp_target_reflection = target_R;
     sim->damp_sigma_max_used    = sigma_max;
+    sim->damp_time_form         = cfg->time_form;
+}
+
+float gr_sim_damping_max_stable_sigma_dt(const gr_sim_t* sim, gr_damp_time_form_t form) {
+    if (!sim) return 0.0f;
+    const float cfl = sim->cfl;
+    if (form == GR_DAMP_TIME_CRITICAL) {
+        const float v = 1.0f - 2.0f * cfl * cfl;
+        return v > 0.0f ? v : 0.0f;
+    }
+    return 0.999f;
 }
 
 gr_damp_config_t gr_sim_get_damping_config(const gr_sim_t* sim) {
-    gr_damp_config_t out = { 0, GR_DAMP_POLYNOMIAL, 2.0f, 4.0f, 1.0e-3f, 0.0f };
+    gr_damp_config_t out = { 0, GR_DAMP_POLYNOMIAL, 2.0f, 4.0f, 1.0e-3f, 0.0f, GR_DAMP_TIME_MULTIPLICATIVE };
     if (!sim || sim->n_damping <= 0) return out;
     out.n_damping          = sim->n_damping;
     out.kind               = sim->damp_kind;
@@ -577,6 +607,7 @@ gr_damp_config_t gr_sim_get_damping_config(const gr_sim_t* sim) {
     out.exp_beta           = sim->damp_exp_beta;
     out.target_reflection  = sim->damp_target_reflection;
     out.sigma_max_override = sim->damp_sigma_max_used;
+    out.time_form          = sim->damp_time_form;
     return out;
 }
 
@@ -587,7 +618,8 @@ gr_damp_config_t gr_sim_get_damping_config(const gr_sim_t* sim) {
  * stage02_damping baseline. */
 void gr_sim_set_damping(gr_sim_t* sim, int n_damping) {
     if (!sim || n_damping <= 0) {
-        const gr_damp_config_t off = {0, GR_DAMP_POLYNOMIAL, 2.0f, 0.0f, 1.0e-3f, 0.0f};
+        const gr_damp_config_t off = {0, GR_DAMP_POLYNOMIAL, 2.0f, 0.0f, 1.0e-3f, 0.0f,
+                                      GR_DAMP_TIME_MULTIPLICATIVE};
         gr_sim_set_damping_config(sim, &off);
         return;
     }
@@ -599,6 +631,7 @@ void gr_sim_set_damping(gr_sim_t* sim, int n_damping) {
         .exp_beta           = 0.0f,
         .target_reflection  = 1.0e-3f,
         .sigma_max_override = 21.0f * sim->c_eff / (2.0f * L),
+        .time_form          = GR_DAMP_TIME_MULTIPLICATIVE,
     };
     gr_sim_set_damping_config(sim, &cfg);
 }

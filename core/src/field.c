@@ -51,6 +51,46 @@ static inline void leapfrog_cell(float* next, const float* prev, const float* cu
     next[k] = damped ? upd * (1.0f - damp_k) : upd;
 }
 
+/* Critical-damping kernel: per-cell gamma = 1 - sigma dt, recurrence
+ *    Phi^{n+1} = 2 gamma Phi^n - gamma^2 Phi^{n-1} + (c dt)^2 (Lap Phi + S)
+ * gives both characteristic-equation roots at gamma (double real root),
+ * per-step decay = gamma exactly.  In the interior (sigma = 0 -> gamma
+ * = 1) this reduces bit-exactly to the undamped leapfrog, so no
+ * interface matching is needed — the ring's cubic sigma ramp smoothly
+ * transitions from gamma=1 (interior) to gamma<1 (wall).
+ *
+ * Continuum interpretation: damped Klein-Gordon with a (sigma)^2 mass
+ * term.  Inside an absorbing ring the mass term implements the
+ * exponential screening we want; in the interior gamma=1 means the
+ * mass term vanishes and we recover the wave equation. */
+static void leapfrog_field_critical(gr_field_state_t* f, const float* damp,
+                                    int W, int H, float c2dt2, float inv_dx2) {
+    const float* prev = f->prev;
+    const float* curr = f->curr;
+    float*       next = f->next;
+    const float* src  = f->source;
+    const float  sc   = f->source_coeff;
+    for (int j = 1; j < H - 1; j++) {
+        const int row = j * W;
+        for (int i = 1; i < W - 1; i++) {
+            const int   k     = row + i;
+            const float gamma = 1.0f - damp[k];
+            const float lap   = ((curr[k-1] + curr[k+1] + curr[k-W] + curr[k+W])
+                                 - 4.0f * curr[k]) * inv_dx2;
+            next[k] = 2.0f * gamma * curr[k] - gamma * gamma * prev[k]
+                      + c2dt2 * (lap + sc * src[k]);
+        }
+    }
+    for (int i = 0; i < W; i++) {
+        next[i] = 0.0f;
+        next[(H - 1) * W + i] = 0.0f;
+    }
+    for (int j = 0; j < H; j++) {
+        next[j * W] = 0.0f;
+        next[j * W + (W - 1)] = 0.0f;
+    }
+}
+
 static void leapfrog_field_damped(gr_field_state_t* f, const float* damp,
                                   int W, int H, float c2dt2, float inv_dx2) {
     const float* prev = f->prev;
@@ -148,6 +188,13 @@ void gr_field_leapfrog_step_all(struct gr_sim* sim) {
         return;
     }
     if (damp) {
+        if (sim->damp_time_form == GR_DAMP_TIME_CRITICAL) {
+            for (int f = 0; f < GR_FIELD_COUNT; f++) {
+                (void) gr_array_lattice((gr_array_id_t) f);
+                leapfrog_field_critical(&sim->fields[f], damp, W, H, c2dt2, inv_dx2);
+            }
+            return;
+        }
         for (int f = 0; f < GR_FIELD_COUNT; f++) {
             /* Sublattice consulted via gr_array_lattice((gr_array_id_t) f) —
              * not used by the kernel currently (loop bounds and stencil are

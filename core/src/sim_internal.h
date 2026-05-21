@@ -58,6 +58,7 @@ struct gr_sim {
     float                  damp_sigma_max_used;   /* the sigma_max actually
                                                    * baked into damping_d, in
                                                    * physical units (NOT *dt) */
+    gr_damp_time_form_t    damp_time_form;        /* multiplicative vs critical */
 
     /* Background field arrays (Stage 6). Lazily allocated by
      * gr_sim_set_background_*. */
