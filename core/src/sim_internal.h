@@ -48,6 +48,16 @@ struct gr_sim {
      * they all satisfy the same wave equation with the same c. */
     int    n_damping;
     float* damping_d;
+    /* Profile parameters used for the current damping_d (so callers can
+     * inspect / round-trip via gr_sim_get_damping_config).  When n_damping
+     * is 0, these are zero-initialized and ignored. */
+    gr_damp_profile_kind_t damp_kind;
+    float                  damp_poly_order;
+    float                  damp_exp_beta;
+    float                  damp_target_reflection;
+    float                  damp_sigma_max_used;   /* the sigma_max actually
+                                                   * baked into damping_d, in
+                                                   * physical units (NOT *dt) */
 
     /* Background field arrays (Stage 6). Lazily allocated by
      * gr_sim_set_background_*. */

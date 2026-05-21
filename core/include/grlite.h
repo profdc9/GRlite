@@ -450,15 +450,50 @@ gr_bg_kind_t gr_sim_get_bg_kind(const gr_sim_t* sim);
 /* ----------------------------------------------------------------------------
  * Absorbing damping layer (Stage 2)
  *
- * Install (or remove) a quadratic-profile absorbing layer of n_damping cells
- * on each grid edge. Per gr_sandbox_v32.tex §9.6 sec:abc eq:damp_profile:
- *   sigma(x) = sigma_max * (x/L)^2,  L = n_damping * dx,
- *   sigma_max = 21 * c_eff / (2 * L)  =>  round-trip reflection R ~ 1e-3.
- * Pass n_damping = 0 to disable (no per-cell multiply will occur).
- * Default after gr_sim_create: no damping (Stage 1 behavior).
- * --------------------------------------------------------------------------*/
+ * Multiplicative (lossy-material) absorber of n_damping cells on each edge.
+ * The original spec — gr_sandbox_v32.tex §9.6 sec:abc eq:damp_profile —
+ * prescribes a quadratic profile sigma(d) = sigma_max * (d/L)^2 with
+ * sigma_max = 21 c / (2 L), targeting round-trip reflection R ~ 1e-3.
+ * That is the literature-default polynomial PML profile evaluated at
+ * m=2, R=1e-3, and remains the default of gr_sim_set_damping().
+ *
+ * The gr_sim_set_damping_config() entry point exposes the literature's
+ * parametrized profile family — polynomial m=1..4+, exponential beta=...
+ * — for systematic experimentation.  See Berenger (1994/1996),
+ * Roden & Gedney (2000) for the canonical derivations; the textbook
+ * formulas are
+ *   POLYNOMIAL:  sigma(d/L) = sigma_max * (d/L)^m,
+ *                sigma_max  = -(m+1) c ln(R) / (2 L)
+ *   EXPONENTIAL: sigma(d/L) = sigma_max * (e^(beta d/L) - 1) / (e^beta - 1),
+ *                sigma_max  = -c ln(R) / (2 L * J(beta))
+ *                where J(beta) = 1/beta - 1/(e^beta - 1).
+ *
+ * Pass n_damping = 0 to disable.  Mutually exclusive with PML (when added). */
+
+typedef enum {
+    GR_DAMP_POLYNOMIAL  = 0,  /* sigma(d/L) = sigma_max * (d/L)^poly_order */
+    GR_DAMP_EXPONENTIAL = 1   /* sigma(d/L) = sigma_max * (e^(beta*d/L)-1)/(e^beta-1) */
+} gr_damp_profile_kind_t;
+
+typedef struct {
+    int                    n_damping;          /* layer thickness (cells); 0 = off */
+    gr_damp_profile_kind_t kind;               /* default GR_DAMP_POLYNOMIAL */
+    float                  poly_order;         /* m; default 2.0 (current/spec) */
+    float                  exp_beta;           /* beta; default 4.0 */
+    float                  target_reflection;  /* R for sigma_max derivation; default 1e-3 */
+    float                  sigma_max_override; /* > 0 to bypass formula; 0 = use formula */
+} gr_damp_config_t;
+
+/* Legacy entry point — equivalent to set_damping_config with kind=POLYNOMIAL,
+ * poly_order=2, target_reflection=1e-3.  Bit-exact backward compat with the
+ * §9.6 spec default. */
 void gr_sim_set_damping(gr_sim_t* sim, int n_damping);
 int  gr_sim_damping_layers(const gr_sim_t* sim);
+
+/* Parametrized damping setup.  See gr_damp_config_t comments above for
+ * the supported profile family.  Pass cfg->n_damping = 0 to disable. */
+void             gr_sim_set_damping_config(gr_sim_t* sim, const gr_damp_config_t* cfg);
+gr_damp_config_t gr_sim_get_damping_config(const gr_sim_t* sim);
 
 /* ----------------------------------------------------------------------------
  * Scenario registry

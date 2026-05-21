@@ -452,55 +452,153 @@ int gr_sim_load_scenario(gr_sim_t* sim, const char* name, const float* params, i
 
 int gr_sim_damping_layers(const gr_sim_t* sim) { return sim ? sim->n_damping : 0; }
 
-/* Eq. (eq:damp_profile) — §9.6 — same precomputation as before, unchanged by
- * the Stage 4 field-state refactor (damping is per-cell, not per-field). */
-void gr_sim_set_damping(gr_sim_t* sim, int n_damping) {
-    if (!sim) return;
+/* Profile envelope at normalized depth u = d / L (u in [0, 1]).
+ * Both kinds return 0 at u=0 (interior side of the layer) and 1 at u=1
+ * (outer wall). */
+static float damp_profile_envelope(gr_damp_profile_kind_t kind,
+                                   float poly_order, float exp_beta,
+                                   float u) {
+    if (u <= 0.0f) return 0.0f;
+    if (u >= 1.0f) return 1.0f;
+    switch (kind) {
+    case GR_DAMP_POLYNOMIAL:
+        return powf(u, poly_order);
+    case GR_DAMP_EXPONENTIAL: {
+        /* (e^(beta u) - 1) / (e^beta - 1).  Stable for moderate beta. */
+        const float num = expf(exp_beta * u) - 1.0f;
+        const float den = expf(exp_beta)     - 1.0f;
+        return num / den;
+    }
+    default: return powf(u, poly_order);
+    }
+}
+
+/* Derived sigma_max from a target round-trip reflection R via the
+ * integral identity 2 (sigma_max / c) integral_0^L f(d/L) dd = -ln(R).
+ *
+ *   integral_0^1 (u^m)            du = 1 / (m+1)
+ *   integral_0^1 (e^(beta u) - 1)/(e^beta - 1) du = 1/beta - 1/(e^beta - 1)
+ *
+ * Result: sigma_max = -c ln(R) / (2 L I), where I is the integral above. */
+static float damp_sigma_max_from_R(gr_damp_profile_kind_t kind,
+                                   float poly_order, float exp_beta,
+                                   float c, float L, float R) {
+    if (!(R > 0.0f) || !(R < 1.0f) || !(L > 0.0f)) return 0.0f;
+    float I = 1.0f;
+    switch (kind) {
+    case GR_DAMP_POLYNOMIAL:
+        I = 1.0f / (poly_order + 1.0f);
+        break;
+    case GR_DAMP_EXPONENTIAL: {
+        const float eb = expf(exp_beta);
+        I = (1.0f / exp_beta) - (1.0f / (eb - 1.0f));
+        if (I <= 0.0f) I = 1.0f / (poly_order + 1.0f);  /* defensive */
+        break;
+    }
+    }
+    return -c * logf(R) / (2.0f * L * I);
+}
+
+void gr_sim_set_damping_config(gr_sim_t* sim, const gr_damp_config_t* cfg) {
+    if (!sim || !cfg) return;
     free(sim->damping_d);
     sim->damping_d = NULL;
     sim->n_damping = 0;
+    sim->damp_kind = GR_DAMP_POLYNOMIAL;
+    sim->damp_poly_order = 0.0f;
+    sim->damp_exp_beta = 0.0f;
+    sim->damp_target_reflection = 0.0f;
+    sim->damp_sigma_max_used = 0.0f;
+
+    const int n_damping = cfg->n_damping;
     if (n_damping <= 0) return;
     if (2 * n_damping >= sim->width || 2 * n_damping >= sim->height) return;
 
     const int W = sim->width;
     const int H = sim->height;
+    if (W > 16384 || H > 16384) return;
     sim->damping_d = (float*) calloc((size_t) W * (size_t) H, sizeof(float));
     if (!sim->damping_d) return;
 
-    sim->n_damping = n_damping;
-    const float L         = (float) n_damping * sim->dx;
-    const float sigma_max = 21.0f * sim->c_eff / (2.0f * L);
-    const float inv_Nd    = 1.0f / (float) n_damping;
-    const float dt        = sim->dt;
+    /* Resolve config defaults — zero fields mean "use canonical defaults". */
+    gr_damp_profile_kind_t kind = cfg->kind;
+    float poly_order = cfg->poly_order > 0.0f ? cfg->poly_order : 2.0f;
+    float exp_beta   = cfg->exp_beta   > 0.0f ? cfg->exp_beta   : 4.0f;
+    float target_R   = cfg->target_reflection > 0.0f ? cfg->target_reflection : 1.0e-3f;
 
-    float fx2[16384], fy2[16384];
-    if (W > 16384 || H > 16384) {
-        free(sim->damping_d);
-        sim->damping_d = NULL;
-        sim->n_damping = 0;
-        return;
-    }
+    const float L = (float) n_damping * sim->dx;
+    float sigma_max = (cfg->sigma_max_override > 0.0f)
+                          ? cfg->sigma_max_override
+                          : damp_sigma_max_from_R(kind, poly_order, exp_beta,
+                                                  sim->c_eff, L, target_R);
+
+    const float inv_Nd = 1.0f / (float) n_damping;
+    const float dt     = sim->dt;
+
+    float fx[16384], fy[16384];
     for (int i = 0; i < W; i++) {
         int depth = 0;
         if (i < n_damping)            depth = n_damping - i;
         else if (i >= W - n_damping)  depth = i - (W - n_damping) + 1;
-        const float f = (float) depth * inv_Nd;
-        fx2[i] = f * f;
+        const float u = (float) depth * inv_Nd;
+        fx[i] = damp_profile_envelope(kind, poly_order, exp_beta, u);
     }
     for (int j = 0; j < H; j++) {
         int depth = 0;
         if (j < n_damping)            depth = n_damping - j;
         else if (j >= H - n_damping)  depth = j - (H - n_damping) + 1;
-        const float f = (float) depth * inv_Nd;
-        fy2[j] = f * f;
+        const float u = (float) depth * inv_Nd;
+        fy[j] = damp_profile_envelope(kind, poly_order, exp_beta, u);
     }
     const float sigma_max_dt = sigma_max * dt;
     for (int j = 0; j < H; j++) {
         const int   row = j * W;
-        const float fy2_j = fy2[j];
+        const float fy_j = fy[j];
         for (int i = 0; i < W; i++) {
-            const float f2_max = (fx2[i] > fy2_j) ? fx2[i] : fy2_j;
-            sim->damping_d[row + i] = sigma_max_dt * f2_max;
+            const float f_max = (fx[i] > fy_j) ? fx[i] : fy_j;
+            sim->damping_d[row + i] = sigma_max_dt * f_max;
         }
     }
+
+    sim->n_damping              = n_damping;
+    sim->damp_kind              = kind;
+    sim->damp_poly_order        = poly_order;
+    sim->damp_exp_beta          = exp_beta;
+    sim->damp_target_reflection = target_R;
+    sim->damp_sigma_max_used    = sigma_max;
+}
+
+gr_damp_config_t gr_sim_get_damping_config(const gr_sim_t* sim) {
+    gr_damp_config_t out = { 0, GR_DAMP_POLYNOMIAL, 2.0f, 4.0f, 1.0e-3f, 0.0f };
+    if (!sim || sim->n_damping <= 0) return out;
+    out.n_damping          = sim->n_damping;
+    out.kind               = sim->damp_kind;
+    out.poly_order         = sim->damp_poly_order;
+    out.exp_beta           = sim->damp_exp_beta;
+    out.target_reflection  = sim->damp_target_reflection;
+    out.sigma_max_override = sim->damp_sigma_max_used;
+    return out;
+}
+
+/* Legacy wrapper — uses the §9.6 spec default (polynomial m=2) with the
+ * historical sigma_max = 21 c / (2 L) override.  The textbook formula
+ * with target_reflection=1e-3 gives sigma_max = 20.72 c / (2 L) (about
+ * 1.3% lower), so we override to keep bit-exact backward compat with the
+ * stage02_damping baseline. */
+void gr_sim_set_damping(gr_sim_t* sim, int n_damping) {
+    if (!sim || n_damping <= 0) {
+        const gr_damp_config_t off = {0, GR_DAMP_POLYNOMIAL, 2.0f, 0.0f, 1.0e-3f, 0.0f};
+        gr_sim_set_damping_config(sim, &off);
+        return;
+    }
+    const float L = (float) n_damping * sim->dx;
+    const gr_damp_config_t cfg = {
+        .n_damping          = n_damping,
+        .kind               = GR_DAMP_POLYNOMIAL,
+        .poly_order         = 2.0f,
+        .exp_beta           = 0.0f,
+        .target_reflection  = 1.0e-3f,
+        .sigma_max_override = 21.0f * sim->c_eff / (2.0f * L),
+    };
+    gr_sim_set_damping_config(sim, &cfg);
 }
