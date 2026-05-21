@@ -68,6 +68,12 @@ static int build_pic_binary(gr_sim_t* sim, const float* params, int n_params) {
     gr_sim_set_bg_mode(sim, GR_BG_MODE_SAMPLED);
     gr_sim_set_field_evolution(sim, 1);
     gr_sim_set_particle_source_deposition(sim, 1);
+    /* Production defaults: TSC + Lewis-Birdsall.  See pic_orbiting and
+     * memory [[grlite-lewis-birdsall-result]] for the rationale.  For two
+     * mutually-bound particles in vacuum this is the test bed where the
+     * difference matters most. */
+    gr_sim_set_shape_function(sim, GR_SHAPE_TSC);
+    gr_sim_set_force_interp(sim, GR_FORCE_INTERP_LEWIS_BIRDSALL);
 
     /* Two particles counter-orbiting around (cx, cy).
      *   p0 at (cx - r, cy), velocity (0, +v)

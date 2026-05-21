@@ -50,6 +50,12 @@ static int build_pic_static(gr_sim_t* sim, const float* params, int n_params) {
     gr_sim_set_bg_mode(sim, GR_BG_MODE_SAMPLED);
     gr_sim_set_field_evolution(sim, 1);
     gr_sim_set_particle_source_deposition(sim, 1);
+    /* Production defaults: TSC shape + Lewis-Birdsall force interp.  Both
+     * branches of the LB kernel verified to preserve HE self-force = 0 at
+     * any sub-cell position (stage 18, drift = 0 exactly over 10000 steps).
+     * See memory [[grlite-lewis-birdsall-result]]. */
+    gr_sim_set_shape_function(sim, GR_SHAPE_TSC);
+    gr_sim_set_force_interp(sim, GR_FORCE_INTERP_LEWIS_BIRDSALL);
 
     /* Stationary particle. */
     gr_sim_add_particle(sim, x0, y0,

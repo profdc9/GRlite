@@ -65,11 +65,20 @@ static int build_pic_orbiting(gr_sim_t* sim, const float* params, int n_params) 
     gr_sim_set_bg_mode(sim, GR_BG_MODE_ANALYTIC);
     gr_sim_set_field_evolution(sim, 1);
     gr_sim_set_particle_source_deposition(sim, 1);
-    /* Apply binomial smoothing on rho to suppress moving-particle deposit
-     * aliasing — the dominant Tier-0 PIC heating mode.  Empirically this
-     * lifts the bound-orbit coupling threshold from m_test ~ 1e-6 (Yee+
-     * Esirkepov alone) to m_test ~ 1e-4 holding 4+ orbits cleanly at 4
-     * passes.  Cost: 4 light low-pass-filter sweeps per step, negligible. */
+    /* Production defaults for self-consistent PIC orbits (stage 18 finding):
+     *   - TSC shape function (W_3 quadratic B-spline): smoother than CIC,
+     *     well-defined second derivative for downstream spin work.
+     *   - Lewis-Birdsall force interpolation: analytic-grad-of-shape force,
+     *     variationally consistent with the deposit so the discrete
+     *     work-energy theorem holds.
+     *   - 4 binomial smoothing passes on rho: empirically reduces residual
+     *     deposit aliasing further (the deposit/force consistency loss from
+     *     the smoothing is smaller than the high-k noise it removes).
+     * Combined, the orbit is bound at m_test = 1e-3 over many periods
+     * (legacy CIC + FD-then-interp unbinds within 3 orbits at the same
+     * coupling — see memory [[grlite-lewis-birdsall-result]]). */
+    gr_sim_set_shape_function(sim, GR_SHAPE_TSC);
+    gr_sim_set_force_interp(sim, GR_FORCE_INTERP_LEWIS_BIRDSALL);
     gr_sim_set_rho_smooth_passes(sim, 4);
 
     /* Relativistic circular velocity for the softened force law (identical

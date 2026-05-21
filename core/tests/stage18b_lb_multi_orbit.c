@@ -32,9 +32,10 @@ static void run_orbit(const char* label,
 
     gr_sim_t* sim = gr_sim_create(W, H, dx, c_eff, cfl);
     gr_sim_set_damping(sim, 16);
+    gr_sim_load_scenario(sim, "pic_orbiting", par, 4);
+    /* Override the scenario's production defaults to compare variants. */
     gr_sim_set_shape_function(sim, shape);
     gr_sim_set_force_interp(sim, force);
-    gr_sim_load_scenario(sim, "pic_orbiting", par, 4);
     const int steps_per_orbit = (int) (T_ana / gr_sim_dt(sim));
 
     printf("  %s:\n", label);

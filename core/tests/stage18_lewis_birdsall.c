@@ -51,11 +51,12 @@ static int test_lb_self_force(gr_shape_function_t shape, const char* label) {
     gr_sim_t* sim = gr_sim_create(W, H, dx, c_eff, cfl);
     TEST_ASSERT(sim != NULL, "create failed");
     gr_sim_set_damping(sim, 16);
-    gr_sim_set_shape_function(sim, shape);
-    gr_sim_set_force_interp(sim, GR_FORCE_INTERP_LEWIS_BIRDSALL);
     const float params[1] = {mass};
     TEST_ASSERT(gr_sim_load_scenario(sim, "pic_static", params, 1) == 0,
                 "pic_static load failed");
+    /* Override the scenario's defaults to exercise the variant under test. */
+    gr_sim_set_shape_function(sim, shape);
+    gr_sim_set_force_interp(sim, GR_FORCE_INTERP_LEWIS_BIRDSALL);
 
     const gr_particle_t* p = gr_sim_get_particle(sim, 0);
     const float x0 = p->x;
@@ -97,13 +98,16 @@ static float orbit_drift_pct(const variant_t* v, int* nan_out) {
     gr_sim_t* sim = gr_sim_create(W, H, dx, c_eff, cfl);
     if (!sim) { *nan_out = 1; return 0.0f; }
     gr_sim_set_damping(sim, 16);
-    gr_sim_set_shape_function(sim, v->shape);
-    gr_sim_set_force_interp(sim, v->force);
     if (gr_sim_load_scenario(sim, "pic_orbiting", par, 4) != 0) {
         gr_sim_destroy(sim);
         *nan_out = 1;
         return 0.0f;
     }
+    /* Override the scenario's defaults AFTER loading so the variant
+     * under test is what actually runs.  The scenario sets TSC + LB by
+     * default (production); this test wants to compare against legacy. */
+    gr_sim_set_shape_function(sim, v->shape);
+    gr_sim_set_force_interp(sim, v->force);
     const int N_steps = (int) (T_ana / gr_sim_dt(sim));
     gr_sim_step_n(sim, N_steps);
     const gr_particle_t* p = gr_sim_get_particle(sim, 0);

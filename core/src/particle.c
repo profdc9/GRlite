@@ -264,8 +264,19 @@ static void grav_grad_at(const struct gr_sim* sim, float x, float y,
         bg_corner = sim->phi_g_bg;  /* may be NULL — handled inside the kernel */
     }
 
-    /* Perturbation Phi_g is always on the corner sublattice. */
-    const float* pert = sim->fields[GR_FIELD_PHI_GRAV].curr;
+    /* Read Phi^n (the field at the time matched to the deposit done at
+     * the start of this gr_sim_step), NOT Phi^{n+1}.  After the field
+     * leapfrog + rotation in gr_sim_step, Phi^n now lives in prev; curr
+     * holds Phi^{n+1}.  The legacy FD-then-interp path previously read
+     * curr, giving a half-step time mismatch that masked the LB benefit
+     * and contributed to moving-particle heating.  Phi_g is always on
+     * the corner sublattice (v35 §9).
+     * When field_evolution_enabled is 0 (Stage 7/8 fixed-background runs)
+     * the field is static and prev is zero-initialized, so fall back to
+     * curr to preserve those tests' behavior. */
+    const float* pert = sim->field_evolution_enabled
+                            ? sim->fields[GR_FIELD_PHI_GRAV].prev
+                            : sim->fields[GR_FIELD_PHI_GRAV].curr;
 
     if (sim->shape_function == GR_SHAPE_TSC) {
         /* TSC corner interp: 3x3 stencil anchored at nearest corner. */
