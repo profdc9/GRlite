@@ -43,6 +43,20 @@ struct gr_sim {
     float* rho_q;       /* sources phi (EM)    */
     float* J_qx;        /* sources A_x         */
     float* J_qy;        /* sources A_y         */
+    /* Previous step's raw J^{n-3/2} (saved at the end of each deposit).
+     * Used by the j_time_correction option to extrapolate to J^n via
+     *   J^n ≈ 1.5 * J^{n-1/2} - 0.5 * J^{n-3/2}
+     * so the wave-equation update sees a source at integer time matching
+     * its operator's time-center.  Allocated lazily when needed. */
+    float* J_mx_prev;
+    float* J_my_prev;
+    float* J_qx_prev;
+    float* J_qy_prev;
+    /* Default 0 (raw Esirkepov J^{n-1/2} goes directly into wave equation,
+     * with the well-known half-step time mismatch from the operator's
+     * integer-step time-center).  1: apply linear-extrapolation correction
+     * to land the source at integer step n. */
+    int j_time_correction_enabled;
 
     /* Damping layer (Stage 2). Applied identically to all six fields, since
      * they all satisfy the same wave equation with the same c. */

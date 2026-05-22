@@ -53,6 +53,8 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
     sim->em_inductive_disc             = GR_INDUCTIVE_CENTERED;
     sim->em_inductive_sign             = +1.0f;
     sim->grav_inductive_sign           = +1.0f;
+    /* J time-correction off by default (raw Esirkepov J^{n-1/2}). */
+    sim->j_time_correction_enabled     = 0;
     sim->esirkepov_violations    = 0;
     sim->rho_smooth_passes       = 0;
     sim->shape_function          = GR_SHAPE_CIC;
@@ -112,6 +114,10 @@ void gr_sim_destroy(gr_sim_t* sim) {
     free(sim->rho_q);
     free(sim->J_qx);
     free(sim->J_qy);
+    free(sim->J_mx_prev);
+    free(sim->J_my_prev);
+    free(sim->J_qx_prev);
+    free(sim->J_qy_prev);
     free(sim->damping_d);
     free(sim->phi_g_bg);
     free(sim->Agx_bg);
@@ -217,6 +223,40 @@ void gr_sim_step(gr_sim_t* sim) {
                     }
                 }
                 free(scratch);
+            }
+        }
+    }
+
+    /* J time-correction: replace the half-step-staggered J^{n-1/2} that
+     * Esirkepov just produced with a linear-extrapolation estimate of
+     * J at integer time n, matching the wave equation operator's
+     * time-center.  J^n ≈ 1.5 J^{n-1/2} - 0.5 J^{n-3/2}, where the
+     * "n-3/2" half-step is the previous step's deposit saved in J_*_prev.
+     * On the first step, J_*_prev is zero (calloc), giving J^n ≈ 1.5 J^{n-1/2}. */
+    if (sim->j_time_correction_enabled
+        && sim->particle_source_deposition && sim->n_particles > 0) {
+        const size_t n = (size_t) sim->width * (size_t) sim->height;
+        float** jpairs[4][2] = {
+            { &sim->J_mx, &sim->J_mx_prev },
+            { &sim->J_my, &sim->J_my_prev },
+            { &sim->J_qx, &sim->J_qx_prev },
+            { &sim->J_qy, &sim->J_qy_prev },
+        };
+        for (int p = 0; p < 4; p++) {
+            float** Jcur  = jpairs[p][0];
+            float** Jprev = jpairs[p][1];
+            if (!*Jprev) {
+                *Jprev = (float*) calloc(n, sizeof(float));
+                if (!*Jprev) continue;
+            }
+            /* J_used = 1.5 * J_cur - 0.5 * J_prev (linear extrapolation
+             * to integer step).  Save raw J_cur to J_prev for next step
+             * BEFORE overwriting.  Use a 2-pass loop with a temp swap. */
+            for (size_t k = 0; k < n; k++) {
+                const float raw  = (*Jcur)[k];
+                const float prev = (*Jprev)[k];
+                (*Jcur)[k]  = 1.5f * raw - 0.5f * prev;
+                (*Jprev)[k] = raw;
             }
         }
     }
@@ -461,6 +501,14 @@ void gr_sim_set_gravitomagnetic_inductive_sign(gr_sim_t* sim, float sign) {
 }
 float gr_sim_get_gravitomagnetic_inductive_sign(const gr_sim_t* sim) {
     return sim ? sim->grav_inductive_sign : 1.0f;
+}
+
+void gr_sim_set_j_time_correction_enabled(gr_sim_t* sim, int enabled) {
+    if (!sim) return;
+    sim->j_time_correction_enabled = enabled ? 1 : 0;
+}
+int gr_sim_get_j_time_correction_enabled(const gr_sim_t* sim) {
+    return sim ? sim->j_time_correction_enabled : 0;
 }
 
 const float* gr_sim_rho_matter_ptr(const gr_sim_t* sim) {

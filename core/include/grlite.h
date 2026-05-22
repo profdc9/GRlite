@@ -359,6 +359,25 @@ float gr_sim_get_em_inductive_sign(const gr_sim_t* sim);
 void  gr_sim_set_gravitomagnetic_inductive_sign(gr_sim_t* sim, float sign);
 float gr_sim_get_gravitomagnetic_inductive_sign(const gr_sim_t* sim);
 
+/* J time-centering correction (Stage 27/28 diagnostic).
+ *
+ * Esirkepov produces J^{n-1/2} satisfying discrete continuity with rho at
+ * integer steps.  But the wave equation update
+ *   A^{n+1} = 2 A^n - A^{n-1} + (c dt)^2 (Lap A^n + sc * src)
+ * has its operator centered at integer step n, so the natural source is
+ * J^n -- not the half-step-offset J^{n-1/2} we actually feed it.  This
+ * is a half-step time-staggering inconsistency baked into the
+ * potential-based scheme (standard Yee+Boris avoids it by storing E and
+ * B independently with half-step interleaving).
+ *
+ * When this flag is on, the wave equation source is replaced by a
+ * linear-extrapolation estimate of J at integer time:
+ *   J^n_approx = 1.5 J^{n-1/2} - 0.5 J^{n-3/2}
+ * which is 2nd-order accurate in dt.  Default OFF -- existing tests are
+ * calibrated to the raw half-step-staggered behavior. */
+void gr_sim_set_j_time_correction_enabled(gr_sim_t* sim, int enabled);
+int  gr_sim_get_j_time_correction_enabled(const gr_sim_t* sim);
+
 int  gr_sim_add_particle(gr_sim_t* sim, float x, float y,
                          float mass, float charge,
                          float vx, float vy);

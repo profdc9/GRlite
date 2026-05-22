@@ -45,7 +45,7 @@ typedef struct {
 
 static void run(float GM, float m_test, float r_orb, int n_orbits,
                 int field_evolution, int grav_inductive_enabled,
-                float inductive_sign,
+                float inductive_sign, int j_time_correction,
                 result_t* out) {
     const int   W      = 256, H = 256;
     const float dx     = 1.0f;
@@ -78,6 +78,7 @@ static void run(float GM, float m_test, float r_orb, int n_orbits,
     /* The diagnostic switches. */
     gr_sim_set_gravitomagnetic_inductive_enabled(sim, grav_inductive_enabled);
     gr_sim_set_gravitomagnetic_inductive_sign(sim, inductive_sign);
+    gr_sim_set_j_time_correction_enabled(sim, j_time_correction);
 
     gr_sim_add_particle(sim, cx + r_orb, cy, m_test, /*charge=*/0.0f,
                         /*vx=*/0.0f, /*vy=*/v_circ);
@@ -128,40 +129,45 @@ int main(void) {
 
     /* Reference: field_evolution OFF (analytic bg only). */
     result_t base;
-    run(GM, m_test, r_orb, N, /*field_ev=*/0, /*grav_ind=*/0, /*sign=*/+1.0f, &base);
+    run(GM, m_test, r_orb, N, /*field_ev=*/0, /*grav_ind=*/0, /*sign=*/+1.0f, /*jtc=*/0, &base);
     TEST_ASSERT(!base.nan, "baseline NaN");
 
     /* Stage 18b current default: PIC with NO inductive. */
     result_t pic_noind;
-    run(GM, m_test, r_orb, N, /*field_ev=*/1, /*grav_ind=*/0, /*sign=*/+1.0f, &pic_noind);
+    run(GM, m_test, r_orb, N, /*field_ev=*/1, /*grav_ind=*/0, /*sign=*/+1.0f, /*jtc=*/0, &pic_noind);
 
     /* PIC with inductive -m d_t A_g enabled, NORMAL (+1) sign. */
     result_t pic_ind;
-    run(GM, m_test, r_orb, N, /*field_ev=*/1, /*grav_ind=*/1, /*sign=*/+1.0f, &pic_ind);
+    run(GM, m_test, r_orb, N, /*field_ev=*/1, /*grav_ind=*/1, /*sign=*/+1.0f, /*jtc=*/0, &pic_ind);
 
-    /* PIC with inductive ENABLED, sign FLIPPED (-1).  Diagnostic:
-     * if the heating is purely a sign-convention error, flipping should
-     * turn outward heating into inward inspiral. */
+    /* PIC with inductive ENABLED, sign FLIPPED (-1). */
     result_t pic_ind_flip;
-    run(GM, m_test, r_orb, N, /*field_ev=*/1, /*grav_ind=*/1, /*sign=*/-1.0f, &pic_ind_flip);
+    run(GM, m_test, r_orb, N, /*field_ev=*/1, /*grav_ind=*/1, /*sign=*/-1.0f, /*jtc=*/0, &pic_ind_flip);
+
+    /* PIC with inductive ENABLED + J time-correction.  Tests whether the
+     * source-time-staggering is the main culprit. */
+    result_t pic_ind_jtc;
+    run(GM, m_test, r_orb, N, /*field_ev=*/1, /*grav_ind=*/1, /*sign=*/+1.0f, /*jtc=*/1, &pic_ind_jtc);
 
     printf("Parameters: GM=%g, m_test=%g, r=%g (matches Stage 18b regime).\n\n",
            (double) GM, (double) m_test, (double) r_orb);
 
     printf("Radius drift at each pi-wrap:\n");
-    printf("  %-8s %-13s %-18s %-18s %-18s\n",
-           "orbit", "baseline", "no inductive (18b)", "induct +1 (normal)", "induct -1 (flipped)");
+    printf("  %-8s %-13s %-13s %-13s %-13s %-15s\n",
+           "orbit", "baseline", "no induct", "ind +1", "ind -1", "ind +1 + J-tc");
     for (int k = 1; k <= N; k++) {
         const float bd = (base.r_at_orbit[k] - r_orb) / r_orb;
-        char ncell[32], icell[32], fcell[32];
+        char ncell[32], icell[32], fcell[32], jcell[32];
         if (k > pic_noind.n_completed)    snprintf(ncell, sizeof(ncell), "<unbound>");
         else snprintf(ncell, sizeof(ncell), "%+7.3f%%", 100.0 * (double) ((pic_noind.r_at_orbit[k] - r_orb) / r_orb));
         if (k > pic_ind.n_completed)      snprintf(icell, sizeof(icell), "<unbound>");
         else snprintf(icell, sizeof(icell), "%+7.3f%%", 100.0 * (double) ((pic_ind.r_at_orbit[k] - r_orb) / r_orb));
         if (k > pic_ind_flip.n_completed) snprintf(fcell, sizeof(fcell), "<unbound>");
         else snprintf(fcell, sizeof(fcell), "%+7.3f%%", 100.0 * (double) ((pic_ind_flip.r_at_orbit[k] - r_orb) / r_orb));
-        printf("  %-8d  %+7.3f%%      %-18s %-18s %-18s\n",
-               k, 100.0 * (double) bd, ncell, icell, fcell);
+        if (k > pic_ind_jtc.n_completed)  snprintf(jcell, sizeof(jcell), "<unbound>");
+        else snprintf(jcell, sizeof(jcell), "%+7.3f%%", 100.0 * (double) ((pic_ind_jtc.r_at_orbit[k] - r_orb) / r_orb));
+        printf("  %-8d  %+7.3f%%      %-13s %-13s %-13s %-15s\n",
+               k, 100.0 * (double) bd, ncell, icell, fcell, jcell);
     }
     printf("\n");
 
@@ -176,6 +182,9 @@ int main(void) {
     else                       printf("  Gravity PIC, inductive +1: UNBOUND\n");
     if (isfinite(drift_flip))  printf("  Gravity PIC, inductive -1 (sign flipped):       drift = %+.3f%%\n", 100.0 * (double) drift_flip);
     else                       printf("  Gravity PIC, inductive -1: UNBOUND\n");
+    const float drift_jtc = (pic_ind_jtc.n_completed == N) ? (pic_ind_jtc.r_at_orbit[N] - r_orb) / r_orb : NAN;
+    if (isfinite(drift_jtc))  printf("  Gravity PIC, inductive +1 + J time-correction:  drift = %+.3f%%\n", 100.0 * (double) drift_jtc);
+    else                      printf("  Gravity PIC, inductive +1 + J-tc: UNBOUND\n");
     printf("\n");
     printf("Comparison with EM Stage 27 (q=m=1e-3, same coupling):\n");
     printf("  EM PIC, no inductive:            drift = -7.0%%   (inspiral)\n");

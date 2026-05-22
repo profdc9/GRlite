@@ -68,6 +68,7 @@ typedef struct {
 static void run(float Q, float q_test, float m_test, float r_orb,
                 int n_orbits, int field_evolution, int inductive_enabled,
                 gr_inductive_disc_t disc, float inductive_sign,
+                int j_time_correction,
                 result_t* out) {
     const int   W      = 256, H = 256;
     const float dx     = 1.0f;
@@ -97,6 +98,7 @@ static void run(float Q, float q_test, float m_test, float r_orb,
     gr_sim_set_em_inductive_enabled(sim, inductive_enabled);
     gr_sim_set_em_inductive_disc(sim, disc);
     gr_sim_set_em_inductive_sign(sim, inductive_sign);
+    gr_sim_set_j_time_correction_enabled(sim, j_time_correction);
     gr_sim_set_background_point_charge(sim, cx, cy, Q, eps);
     gr_sim_set_bg_mode(sim, GR_BG_MODE_ANALYTIC);
     /* CIC + LEGACY: EM gradient path doesn't yet have TSC/LB variants.
@@ -165,77 +167,78 @@ int main(void) {
     printf("            Coupling g_eff = |q*Q|*k_e/m = %g (matches gravity at m=1e-3).\n\n",
            (double) (fabsf(q_test * Q) / m_test));
 
-    /* Baseline: field evolution OFF.  Analytic-bg-only orbit. */
+    /* Baseline: field evolution OFF. */
     result_t base;
-    run(Q, q_test, m_test, r_orb, N, /*field_evolution=*/0, /*induct=*/1,
-        GR_INDUCTIVE_CENTERED, +1.0f, &base);
+    run(Q, q_test, m_test, r_orb, N, 0, 1, GR_INDUCTIVE_CENTERED, +1.0f, 0, &base);
     TEST_ASSERT(!base.nan, "baseline went NaN");
     TEST_ASSERT(base.n_completed == N,
                 "baseline didn't complete %d orbits (got %d)", N, base.n_completed);
 
-    /* PIC variant A: all pieces, CENTERED inductive (default). */
+    /* PIC variants: all centered inductive +1 unless noted. */
     result_t pic_centered;
-    run(Q, q_test, m_test, r_orb, N, /*field_evolution=*/1, /*induct=*/1,
-        GR_INDUCTIVE_CENTERED, +1.0f, &pic_centered);
+    run(Q, q_test, m_test, r_orb, N, 1, 1, GR_INDUCTIVE_CENTERED, +1.0f, 0, &pic_centered);
 
-    /* PIC variant B: inductive disabled entirely. */
     result_t pic_noind;
-    run(Q, q_test, m_test, r_orb, N, /*field_evolution=*/1, /*induct=*/0,
-        GR_INDUCTIVE_CENTERED, +1.0f, &pic_noind);
+    run(Q, q_test, m_test, r_orb, N, 1, 0, GR_INDUCTIVE_CENTERED, +1.0f, 0, &pic_noind);
 
-    /* PIC variant C: inductive ENABLED, BACKWARD difference. */
-    result_t pic_back;
-    run(Q, q_test, m_test, r_orb, N, /*field_evolution=*/1, /*induct=*/1,
-        GR_INDUCTIVE_BACKWARD, +1.0f, &pic_back);
-
-    /* PIC variant D: inductive ENABLED, CENTERED diff, SIGN FLIPPED (-1).
-     * Diagnostic: if the heating is purely a sign-convention error, this
-     * should turn outward heating into inward inspiral. */
     result_t pic_flip;
-    run(Q, q_test, m_test, r_orb, N, /*field_evolution=*/1, /*induct=*/1,
-        GR_INDUCTIVE_CENTERED, -1.0f, &pic_flip);
+    run(Q, q_test, m_test, r_orb, N, 1, 1, GR_INDUCTIVE_CENTERED, -1.0f, 0, &pic_flip);
+
+    /* NEW: J time-correction enabled (option a from the audit). */
+    result_t pic_jt;
+    run(Q, q_test, m_test, r_orb, N, 1, 1, GR_INDUCTIVE_CENTERED, +1.0f, 1, &pic_jt);
+
+    /* No inductive + J time-correction (clean radiation-reaction with
+     * corrected source timing). */
+    result_t pic_jt_noind;
+    run(Q, q_test, m_test, r_orb, N, 1, 0, GR_INDUCTIVE_CENTERED, +1.0f, 1, &pic_jt_noind);
 
     printf("Radius drift at each pi-wrap:\n");
-    printf("  %-7s %-10s %-14s %-14s %-14s %-14s\n",
-           "orbit", "baseline", "centered (+1)", "no inductive", "backward (+1)", "centered (-1)");
+    printf("  %-7s %-10s %-12s %-12s %-12s %-14s %-14s\n",
+           "orbit", "baseline", "ind +1", "no ind", "ind -1", "ind+1 + J-tc", "no ind + J-tc");
     for (int k = 1; k <= N; k++) {
         const float bd = (base.r_at_orbit[k]          - r_orb) / r_orb;
         const float cd = (pic_centered.r_at_orbit[k]  - r_orb) / r_orb;
         const float nd = (pic_noind.r_at_orbit[k]     - r_orb) / r_orb;
-        const float xd = (pic_back.r_at_orbit[k]      - r_orb) / r_orb;
         const float fd = (pic_flip.r_at_orbit[k]      - r_orb) / r_orb;
-        char ccell[32], ncell[32], xcell[32], fcell[32];
+        const float jd = (pic_jt.r_at_orbit[k]        - r_orb) / r_orb;
+        const float jnd= (pic_jt_noind.r_at_orbit[k]  - r_orb) / r_orb;
+        char ccell[32], ncell[32], fcell[32], jcell[32], jncell[32];
         if (k > pic_centered.n_completed) snprintf(ccell, sizeof(ccell), "<unbound>"); else snprintf(ccell, sizeof(ccell), "%+7.3f%%", 100.0 * (double) cd);
         if (k > pic_noind.n_completed)    snprintf(ncell, sizeof(ncell), "<unbound>"); else snprintf(ncell, sizeof(ncell), "%+7.3f%%", 100.0 * (double) nd);
-        if (k > pic_back.n_completed)     snprintf(xcell, sizeof(xcell), "<unbound>"); else snprintf(xcell, sizeof(xcell), "%+7.3f%%", 100.0 * (double) xd);
         if (k > pic_flip.n_completed)     snprintf(fcell, sizeof(fcell), "<unbound>"); else snprintf(fcell, sizeof(fcell), "%+7.3f%%", 100.0 * (double) fd);
-        printf("  %-7d %+7.3f%%   %-14s %-14s %-14s %-14s\n",
-               k, 100.0 * (double) bd, ccell, ncell, xcell, fcell);
+        if (k > pic_jt.n_completed)       snprintf(jcell, sizeof(jcell), "<unbound>"); else snprintf(jcell, sizeof(jcell), "%+7.3f%%", 100.0 * (double) jd);
+        if (k > pic_jt_noind.n_completed) snprintf(jncell, sizeof(jncell), "<unbound>"); else snprintf(jncell, sizeof(jncell), "%+7.3f%%", 100.0 * (double) jnd);
+        printf("  %-7d %+7.3f%%   %-12s %-12s %-12s %-14s %-14s\n",
+               k, 100.0 * (double) bd, ccell, ncell, fcell, jcell, jncell);
     }
     printf("\n");
 
     /* Verdict. */
-    const float drift_cen   = (pic_centered.n_completed == N) ? (pic_centered.r_at_orbit[N] - r_orb) / r_orb : NAN;
-    const float drift_noind = (pic_noind.n_completed   == N) ? (pic_noind.r_at_orbit[N]    - r_orb) / r_orb : NAN;
-    const float drift_back  = (pic_back.n_completed    == N) ? (pic_back.r_at_orbit[N]     - r_orb) / r_orb : NAN;
-    const float drift_flip  = (pic_flip.n_completed    == N) ? (pic_flip.r_at_orbit[N]     - r_orb) / r_orb : NAN;
+    const float drift_cen      = (pic_centered.n_completed == N) ? (pic_centered.r_at_orbit[N] - r_orb) / r_orb : NAN;
+    const float drift_noind    = (pic_noind.n_completed    == N) ? (pic_noind.r_at_orbit[N]    - r_orb) / r_orb : NAN;
+    const float drift_flip     = (pic_flip.n_completed     == N) ? (pic_flip.r_at_orbit[N]     - r_orb) / r_orb : NAN;
+    const float drift_jt       = (pic_jt.n_completed       == N) ? (pic_jt.r_at_orbit[N]       - r_orb) / r_orb : NAN;
+    const float drift_jt_noind = (pic_jt_noind.n_completed == N) ? (pic_jt_noind.r_at_orbit[N] - r_orb) / r_orb : NAN;
 
     printf("After %d orbits:\n", N);
-    if (isfinite(drift_cen))   printf("  Centered inductive +1 (default):       drift = %+.3f%%\n", 100.0 * (double) drift_cen);
+    if (isfinite(drift_cen))   printf("  Centered inductive +1 (default):           drift = %+.3f%%\n", 100.0 * (double) drift_cen);
     else                       printf("  Centered inductive +1: UNBOUND\n");
-    if (isfinite(drift_noind)) printf("  Inductive disabled:                    drift = %+.3f%%\n", 100.0 * (double) drift_noind);
+    if (isfinite(drift_noind)) printf("  Inductive disabled:                        drift = %+.3f%%\n", 100.0 * (double) drift_noind);
     else                       printf("  Inductive disabled: UNBOUND\n");
-    if (isfinite(drift_back))  printf("  Backward-diff inductive +1:            drift = %+.3f%%\n", 100.0 * (double) drift_back);
-    else                       printf("  Backward-diff inductive: UNBOUND\n");
-    if (isfinite(drift_flip))  printf("  Centered inductive -1 (sign flipped):  drift = %+.3f%%\n", 100.0 * (double) drift_flip);
+    if (isfinite(drift_flip))  printf("  Centered inductive -1 (sign flipped):      drift = %+.3f%%\n", 100.0 * (double) drift_flip);
     else                       printf("  Centered inductive -1: UNBOUND\n");
+    if (isfinite(drift_jt))    printf("  Centered ind +1 + J time-correction:       drift = %+.3f%%\n", 100.0 * (double) drift_jt);
+    else                       printf("  Centered ind +1 + J time-correction: UNBOUND\n");
+    if (isfinite(drift_jt_noind)) printf("  No inductive + J time-correction:          drift = %+.3f%%\n", 100.0 * (double) drift_jt_noind);
+    else                       printf("  No inductive + J time-correction: UNBOUND\n");
 
-    /* Soft assertion. */
     int stable_count = 0;
-    if (isfinite(drift_cen)   && fabsf(drift_cen)   < 0.5f) stable_count++;
-    if (isfinite(drift_noind) && fabsf(drift_noind) < 0.5f) stable_count++;
-    if (isfinite(drift_back)  && fabsf(drift_back)  < 0.5f) stable_count++;
-    if (isfinite(drift_flip)  && fabsf(drift_flip)  < 0.5f) stable_count++;
+    if (isfinite(drift_cen)      && fabsf(drift_cen)      < 0.5f) stable_count++;
+    if (isfinite(drift_noind)    && fabsf(drift_noind)    < 0.5f) stable_count++;
+    if (isfinite(drift_flip)     && fabsf(drift_flip)     < 0.5f) stable_count++;
+    if (isfinite(drift_jt)       && fabsf(drift_jt)       < 0.5f) stable_count++;
+    if (isfinite(drift_jt_noind) && fabsf(drift_jt_noind) < 0.5f) stable_count++;
     TEST_ASSERT(stable_count >= 1, "All PIC variants unbound");
 
     printf("\nALL CHECKS PASSED.\n");
