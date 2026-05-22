@@ -82,6 +82,10 @@ struct gr_sim {
      * isolating the proper-time clock effect from the orbit-shape Lense-
      * Thirring response. */
     int gravitomagnetic_force_enabled;
+    /* GM inductive -m d_t A_g piece gate (Stage 28+).  Default 0 (OFF
+     * for backward compat with all existing gravity tests which were
+     * calibrated without this piece).  Symmetric to em_inductive_enabled. */
+    int gravitomagnetic_inductive_enabled;
 
     /* EM Lorentz force gate (Stage 23+).  Default 1 (enabled); 0 disables
      * all three EM Lorentz pieces (q v x B, -q grad phi, -q d_t A).
@@ -92,6 +96,12 @@ struct gr_sim {
      * contribution but keeps the q v x B and -q grad phi pieces.  Used
      * for diagnostic isolation in closed-loop PIC dynamics (Stage 27). */
     int em_inductive_enabled;
+    /* Discretization for the EM inductive piece. */
+    gr_inductive_disc_t em_inductive_disc;
+    /* Sign multipliers for diagnostic sign-flip experiments.  Default +1.0
+     * (variationally-correct sign of -q d_t A and -m d_t A_g respectively). */
+    float em_inductive_sign;
+    float grav_inductive_sign;
 
     /* If 0, the per-step wave-equation leapfrog on the six perturbation
      * fields is skipped (along with the buffer rotation).  Used by Stage 7/8

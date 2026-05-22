@@ -3236,9 +3236,10 @@ drifts:
 \toprule
 \textbf{Variant} & \textbf{Drift after 4 orbits} & \textbf{Mechanism} \\
 \midrule
-Baseline (\texttt{field\_evolution} OFF)        & $+0.003\%$  & --- (analytic bg only) \\
-PIC, all three EM Lorentz pieces                & $\mathbf{+18.6\%}$ & PIC heating dominates \\
-PIC, inductive ($-q\,\partial_t\vv{A}$) disabled & $\mathbf{-7.0\%}$  & radiation-reaction-style inspiral \\
+Baseline (\texttt{field\_evolution} OFF)         & $+0.003\%$         & --- (analytic bg only) \\
+PIC, all three EM Lorentz pieces, centered $\partial_t\vv{A}$ & $\mathbf{+18.6\%}$ & PIC heating dominates \\
+PIC, inductive ($-q\,\partial_t\vv{A}$) disabled  & $\mathbf{-7.0\%}$  & radiation-reaction-style inspiral \\
+PIC, backward-diff $\partial_t\vv{A}$            & \textbf{unbound by orbit 4} & worse heating (see below) \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -3269,22 +3270,55 @@ appears to inject a net positive-feedback torque on the orbit.
   \item The EM Lorentz force is correctly wired \emph{per piece}
     (Stages 9e/9f/9g all pass in isolation).  The instability is a
     \emph{closed-loop} PIC phenomenon, not a coefficient or sign bug.
-  \item Gravity (Stage 18b at $m_{\mathrm{test}} = 10^{-3}$) is
-    stable in part because it does \emph{not} implement an analogous
-    $-\partial_t\vv{A}_g$ piece (the doc's Tier-3 form
-    Eq.~\ref{eq:eih_full} includes it, but the implementation predates
-    Stage~9g and so has only the spatial-derivative GEM feedback,
-    where the coefficient~$+4$ on $\vv{v}\!\times\!\vv{B}_g$ gives a
-    strong stabilising counter-torque).
-  \item Disabling the inductive piece via
+  \item Gravity (Stage 18b at $m_{\mathrm{test}} = 10^{-3}$) appears
+    stable, but \emph{the gravity-side implementation does not include
+    an analogous $-m\,\partial_t\vv{A}_g$ piece}.  The doc's Tier-3
+    form (Eq.~\ref{eq:eih_full}, Section~\ref{sec:alg_rel} eqbox at
+    line 1040) does include it.  Stage 28 (added 2026-05-21 as a
+    diagnostic at the user's request) wires the GEM inductive piece
+    using the same centered-difference structure and reruns pic\_orbiting
+    at $m_{\mathrm{test}} = 10^{-3}$: gravity exhibits \textbf{essentially
+    identical heating} ($+23\%/4\,\mathrm{orbits}$ outward, even worse
+    than EM's $+18.6\%$).  The gravity ``stability'' of Stage 18b is
+    therefore an accidental consequence of omitting the inductive piece;
+    the issue is \emph{not} EM-specific.
+
+  \item \textbf{Sign-flip diagnostic.}  At the user's suggestion the
+    sign multiplier on $\partial_t\vv{A}$ was made runtime-tunable
+    (default $+1.0$; setting $-1.0$ flips the sign).  Both EM and gravity
+    show mirror-image behaviour: $-1$ produces $\sim-25\%$ inward drift,
+    $+1$ produces $\sim+25\%$ outward drift, both accelerating
+    orbit-by-orbit.  This RULES OUT a sign-convention bug --- if the sign
+    were just wrong, flipping should recover the small ($\sim 0.1\%/$
+    orbit) radiation-reaction inspiral predicted by the Larmor formula
+    at this coupling.  Instead, the flipped sign gives the
+    opposite-direction divergence at the same magnitude.  The
+    centered-time-difference inductive term injects a sign-determined
+    energy pump whose magnitude is $3$--$4\times$ larger than physical
+    radiation reaction at this coupling.  Whichever sign is chosen, the
+    discretization-induced effect dominates.
+  \item Two simple-difference discretizations of $\partial_t\vv{A}_{\mathrm{em}}$
+    were tried in Stage~27 and both heat:
+    \begin{itemize}
+      \item Centered $(\vv{A}^{n+1} - \vv{A}^{n-1})/(2\,\Delta t)$
+        at $t^n$: $+18.6\%$ over 4 orbits (heating dominates inspiral).
+      \item Backward $(\vv{A}^n - \vv{A}^{n-1})/\Delta t$
+        at $t^{n-1/2}$: unbound by orbit 4 ($+5\%, +22\%, +47\%, \infty$).
+        Initially seemed analogous to the read-prev fix for the
+        spatial gradient (both slices are pre-current-step), but the
+        SPATIAL-time mismatch (reading the field's past values at the
+        particle's \emph{current} position) injects even more energy
+        than the centered diff's self-deposit inclusion.
+    \end{itemize}
+  \item Disabling the inductive piece entirely via
     \texttt{gr\_sim\_set\_em\_inductive\_enabled(sim, 0)} is the
-    current production recommendation for closed-loop EM PIC, until
-    a better discretization is found.
-  \item Alternative discretizations to investigate: the
-    backward difference $(\vv{A}^n - \vv{A}^{n-1})/\Delta t$ at
-    $t^{n-1/2}$ (which would avoid reading $\vv{A}^{n+1}$ at the cost of
-    a half-step time shift), or implicit/symplectic time integration
-    of the combined particle + field system.
+    current production recommendation for closed-loop EM PIC.
+  \item The proper fix is likely \emph{implicit / symplectic time
+    integration of the combined particle + field system}, where the
+    field $\vv{A}^{n+1}$ at the new step is solved consistently with
+    the particle's new position $\vv{x}^{n+1}$, preserving discrete
+    energy conservation exactly.  This is a substantial restructuring
+    of the gr\_sim\_step pipeline and is left as future work.
 \end{itemize}
 
 The Stage 27 test passes if at least one of the two PIC variants stays

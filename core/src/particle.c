@@ -401,6 +401,7 @@ static inline void grav_force_at(const struct gr_sim* sim,
                                  float phi,
                                  float grad_x, float grad_y,
                                  float Bg_z,
+                                 float dAg_x, float dAg_y,
                                  float* Fx, float* Fy) {
     if (sim->force_tier == GR_FORCE_RELATIVISTIC) {
         /* EIH 1PN coordinate acceleration (Ali-Haïmoud, GR Fall 2019 lecture
@@ -434,6 +435,13 @@ static inline void grav_force_at(const struct gr_sim* sim,
      * when Bg_z = 0 the scalar tiers above are recovered bit-exactly. */
     *Fx += 4.0f * mass * vy * Bg_z;
     *Fy -= 4.0f * mass * vx * Bg_z;
+    /* GM inductive piece -m d_t A_g per Eq.1040 (Tier-3 eqbox).
+     * Coefficient is 1 (not 4) on the time-derivative piece, per the
+     * doc convention -- the factor of 4 lives on the v x B_g spatial
+     * cross-product, not on the d_t A_g term itself.  Default OFF; gated
+     * by gravitomagnetic_inductive_enabled (see Stage 28). */
+    *Fx -= mass * dAg_x;
+    *Fy -= mass * dAg_y;
 }
 
 /* EM Lorentz force on a charged particle.  Per gr_sandbox_v35.tex
@@ -613,6 +621,39 @@ static void phi_em_grad_at_total(const struct gr_sim* sim, float x, float y,
     *gy_out = gy_pert + gy_bg;
 }
 
+/* Time derivative of the GEM vector potential A_g at the particle, for
+ * the GM inductive piece -m d_t A_g of the Tier-3 gravity force
+ * (gr_sandbox_v35.tex eq:eih_full / sec:alg_rel eqbox line 1040).
+ *
+ * Centered difference (A_g^{n+1} - A_g^{n-1}) / (2 dt) at t^n, using
+ * fields[A_GX].curr/.next and fields[A_GY].curr/.next.  Gated by
+ * gravitomagnetic_inductive_enabled (default 0 -- existing gravity
+ * tests don't use this piece).  Stage 28 enables it as a diagnostic
+ * to test whether the closed-loop PIC heating observed for EM
+ * (Stage 27) also appears on the gravity side. */
+static void dt_A_g_at_total(const struct gr_sim* sim, float x, float y,
+                            float* dAx_out, float* dAy_out) {
+    *dAx_out = 0.0f;
+    *dAy_out = 0.0f;
+    if (!sim || !sim->gravitomagnetic_inductive_enabled) return;
+    const int   W  = sim->width;
+    const int   H  = sim->height;
+    const float dx = sim->dx;
+    const float inv_2dt = 1.0f / (2.0f * sim->dt);
+
+    const float Ax_curr = cic_interp_xedge(sim->fields[GR_FIELD_A_GX].curr,
+                                           W, H, dx, x, y);
+    const float Ax_next = cic_interp_xedge(sim->fields[GR_FIELD_A_GX].next,
+                                           W, H, dx, x, y);
+    const float Ay_curr = cic_interp_yedge(sim->fields[GR_FIELD_A_GY].curr,
+                                           W, H, dx, x, y);
+    const float Ay_next = cic_interp_yedge(sim->fields[GR_FIELD_A_GY].next,
+                                           W, H, dx, x, y);
+    const float s = sim->grav_inductive_sign;
+    *dAx_out = s * (Ax_curr - Ax_next) * inv_2dt;
+    *dAy_out = s * (Ay_curr - Ay_next) * inv_2dt;
+}
+
 /* Time derivative of the EM vector potential A_em at the particle, for
  * the inductive piece -q d_t A of the EM Lorentz force.
  *
@@ -649,8 +690,28 @@ static void dt_A_em_at_total(const struct gr_sim* sim, float x, float y,
     const int   W  = sim->width;
     const int   H  = sim->height;
     const float dx = sim->dx;
-    const float inv_2dt = 1.0f / (2.0f * sim->dt);
 
+    const float s = sim->em_inductive_sign;
+    if (sim->em_inductive_disc == GR_INDUCTIVE_BACKWARD) {
+        /* Backward difference (prev - next) / dt = (A^n - A^{n-1}) / dt,
+         * at t^{n-1/2}.  Both slices are pre-current-step; matches the
+         * .prev "no current-step self-deposit" convention used by the
+         * spatial-derivative pieces. */
+        const float inv_dt = 1.0f / sim->dt;
+        const float Ax_prev = cic_interp_xedge(sim->fields[GR_FIELD_A_X].prev,
+                                               W, H, dx, x, y);
+        const float Ax_next = cic_interp_xedge(sim->fields[GR_FIELD_A_X].next,
+                                               W, H, dx, x, y);
+        const float Ay_prev = cic_interp_yedge(sim->fields[GR_FIELD_A_Y].prev,
+                                               W, H, dx, x, y);
+        const float Ay_next = cic_interp_yedge(sim->fields[GR_FIELD_A_Y].next,
+                                               W, H, dx, x, y);
+        *dAx_out = s * (Ax_prev - Ax_next) * inv_dt;
+        *dAy_out = s * (Ay_prev - Ay_next) * inv_dt;
+        return;
+    }
+    /* Default: centered difference (curr - next) / (2 dt) at t^n. */
+    const float inv_2dt = 1.0f / (2.0f * sim->dt);
     const float Ax_curr = cic_interp_xedge(sim->fields[GR_FIELD_A_X].curr,
                                            W, H, dx, x, y);
     const float Ax_next = cic_interp_xedge(sim->fields[GR_FIELD_A_X].next,
@@ -659,8 +720,8 @@ static void dt_A_em_at_total(const struct gr_sim* sim, float x, float y,
                                            W, H, dx, x, y);
     const float Ay_next = cic_interp_yedge(sim->fields[GR_FIELD_A_Y].next,
                                            W, H, dx, x, y);
-    *dAx_out = (Ax_curr - Ax_next) * inv_2dt;
-    *dAy_out = (Ay_curr - Ay_next) * inv_2dt;
+    *dAx_out = s * (Ax_curr - Ax_next) * inv_2dt;
+    *dAy_out = s * (Ay_curr - Ay_next) * inv_2dt;
 }
 
 /* Total EM magnetic field B_z = (curl A)_z at the particle position.
@@ -735,6 +796,11 @@ void gr_particle_push_all(struct gr_sim* sim) {
          * after rotation.  Returns 0 when buffers are quiescent. */
         float E_dAx, E_dAy;
         dt_A_em_at_total(sim, p->x, p->y, &E_dAx, &E_dAy);
+        /* GM vector-potential time derivative for the analogous gravity
+         * inductive piece -m d_t A_g (Stage 28+).  Default OFF; gated by
+         * gravitomagnetic_inductive_enabled. */
+        float G_dAx, G_dAy;
+        dt_A_g_at_total(sim, p->x, p->y, &G_dAx, &G_dAy);
 
         /* v from lagged p^{n-1/2} — used to evaluate the velocity-dependent
          * Tier-2 force terms.  Negligible cost for Newtonian since grav_force_at
@@ -745,7 +811,7 @@ void gr_particle_push_all(struct gr_sim* sim) {
         const float vy_pre = p->py / (gamma * p->mass);
 
         float Fx, Fy;
-        grav_force_at(sim, p->mass, vx_pre, vy_pre, phi, grad_x, grad_y, Bg_z, &Fx, &Fy);
+        grav_force_at(sim, p->mass, vx_pre, vy_pre, phi, grad_x, grad_y, Bg_z, G_dAx, G_dAy, &Fx, &Fy);
         /* Additive EM Lorentz contribution: -q grad phi - q d_t A + q v x B
          * (Stages 23/24/25; full static-and-dynamic EM Lorentz force). */
         {
@@ -776,7 +842,7 @@ void gr_particle_push_all(struct gr_sim* sim) {
             const float vy_post = py_pred / (gamma_pred * p->mass);
             const float vx_mid = 0.5f * (vx_pre + vx_post);
             const float vy_mid = 0.5f * (vy_pre + vy_post);
-            grav_force_at(sim, p->mass, vx_mid, vy_mid, phi, grad_x, grad_y, Bg_z, &Fx, &Fy);
+            grav_force_at(sim, p->mass, vx_mid, vy_mid, phi, grad_x, grad_y, Bg_z, G_dAx, G_dAy, &Fx, &Fy);
             float Fx_em, Fy_em;
             em_force_at(p->charge, vx_mid, vy_mid,
                         E_phi_grad_x, E_phi_grad_y,
@@ -855,8 +921,11 @@ int gr_sim_add_particle(gr_sim_t* sim, float x, float y,
     phi_em_grad_at_total(sim, x, y, &Egx_init, &Egy_init);
     float dAx_init, dAy_init;
     dt_A_em_at_total(sim, x, y, &dAx_init, &dAy_init);
+    float G_dAx_init, G_dAy_init;
+    dt_A_g_at_total(sim, x, y, &G_dAx_init, &G_dAy_init);
     float Fx, Fy;
-    grav_force_at(sim, mass, vx, vy, phi_init, grad_x, grad_y, Bg_z_init, &Fx, &Fy);
+    grav_force_at(sim, mass, vx, vy, phi_init, grad_x, grad_y, Bg_z_init,
+                  G_dAx_init, G_dAy_init, &Fx, &Fy);
     {
         float Fx_em, Fy_em;
         em_force_at(charge, vx, vy, Egx_init, Egy_init,

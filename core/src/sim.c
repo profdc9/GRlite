@@ -44,9 +44,15 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
     sim->esirkepov_enabled       = 1;
     /* Tier-1 gravitomagnetic Lorentz force on by default (Stage 20+). */
     sim->gravitomagnetic_force_enabled = 1;
+    /* GM inductive piece OFF by default for backward compatibility
+     * (Stage 28+).  Existing gravity tests pre-date this piece. */
+    sim->gravitomagnetic_inductive_enabled = 0;
     /* EM Lorentz force on by default (Stage 23+); all sub-pieces on. */
     sim->em_lorentz_force_enabled      = 1;
     sim->em_inductive_enabled          = 1;
+    sim->em_inductive_disc             = GR_INDUCTIVE_CENTERED;
+    sim->em_inductive_sign             = +1.0f;
+    sim->grav_inductive_sign           = +1.0f;
     sim->esirkepov_violations    = 0;
     sim->rho_smooth_passes       = 0;
     sim->shape_function          = GR_SHAPE_CIC;
@@ -408,6 +414,14 @@ int gr_sim_get_gravitomagnetic_force_enabled(const gr_sim_t* sim) {
     return sim ? sim->gravitomagnetic_force_enabled : 0;
 }
 
+void gr_sim_set_gravitomagnetic_inductive_enabled(gr_sim_t* sim, int enabled) {
+    if (!sim) return;
+    sim->gravitomagnetic_inductive_enabled = enabled ? 1 : 0;
+}
+int gr_sim_get_gravitomagnetic_inductive_enabled(const gr_sim_t* sim) {
+    return sim ? sim->gravitomagnetic_inductive_enabled : 0;
+}
+
 void gr_sim_set_em_lorentz_force_enabled(gr_sim_t* sim, int enabled) {
     if (!sim) return;
     sim->em_lorentz_force_enabled = enabled ? 1 : 0;
@@ -422,6 +436,31 @@ void gr_sim_set_em_inductive_enabled(gr_sim_t* sim, int enabled) {
 }
 int gr_sim_get_em_inductive_enabled(const gr_sim_t* sim) {
     return sim ? sim->em_inductive_enabled : 0;
+}
+
+void gr_sim_set_em_inductive_disc(gr_sim_t* sim, gr_inductive_disc_t kind) {
+    if (!sim) return;
+    sim->em_inductive_disc = (kind == GR_INDUCTIVE_BACKWARD)
+                                 ? GR_INDUCTIVE_BACKWARD
+                                 : GR_INDUCTIVE_CENTERED;
+}
+gr_inductive_disc_t gr_sim_get_em_inductive_disc(const gr_sim_t* sim) {
+    return sim ? sim->em_inductive_disc : GR_INDUCTIVE_CENTERED;
+}
+
+void gr_sim_set_em_inductive_sign(gr_sim_t* sim, float sign) {
+    if (!sim) return;
+    sim->em_inductive_sign = sign;
+}
+float gr_sim_get_em_inductive_sign(const gr_sim_t* sim) {
+    return sim ? sim->em_inductive_sign : 1.0f;
+}
+void gr_sim_set_gravitomagnetic_inductive_sign(gr_sim_t* sim, float sign) {
+    if (!sim) return;
+    sim->grav_inductive_sign = sign;
+}
+float gr_sim_get_gravitomagnetic_inductive_sign(const gr_sim_t* sim) {
+    return sim ? sim->grav_inductive_sign : 1.0f;
 }
 
 const float* gr_sim_rho_matter_ptr(const gr_sim_t* sim) {

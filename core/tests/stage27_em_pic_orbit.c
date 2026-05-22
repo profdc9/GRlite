@@ -67,6 +67,7 @@ typedef struct {
 
 static void run(float Q, float q_test, float m_test, float r_orb,
                 int n_orbits, int field_evolution, int inductive_enabled,
+                gr_inductive_disc_t disc, float inductive_sign,
                 result_t* out) {
     const int   W      = 256, H = 256;
     const float dx     = 1.0f;
@@ -94,6 +95,8 @@ static void run(float Q, float q_test, float m_test, float r_orb,
     gr_sim_set_field_evolution(sim, field_evolution);
     gr_sim_set_particle_source_deposition(sim, field_evolution);
     gr_sim_set_em_inductive_enabled(sim, inductive_enabled);
+    gr_sim_set_em_inductive_disc(sim, disc);
+    gr_sim_set_em_inductive_sign(sim, inductive_sign);
     gr_sim_set_background_point_charge(sim, cx, cy, Q, eps);
     gr_sim_set_bg_mode(sim, GR_BG_MODE_ANALYTIC);
     /* CIC + LEGACY: EM gradient path doesn't yet have TSC/LB variants.
@@ -162,58 +165,78 @@ int main(void) {
     printf("            Coupling g_eff = |q*Q|*k_e/m = %g (matches gravity at m=1e-3).\n\n",
            (double) (fabsf(q_test * Q) / m_test));
 
-    /* Baseline: field evolution OFF.  Analytic-bg-only orbit;
-     * verified stable in Stage 26 (closes to ~0.2% / orbit). */
+    /* Baseline: field evolution OFF.  Analytic-bg-only orbit. */
     result_t base;
-    run(Q, q_test, m_test, r_orb, N, /*field_evolution=*/0, /*induct=*/1, &base);
+    run(Q, q_test, m_test, r_orb, N, /*field_evolution=*/0, /*induct=*/1,
+        GR_INDUCTIVE_CENTERED, +1.0f, &base);
     TEST_ASSERT(!base.nan, "baseline went NaN");
     TEST_ASSERT(base.n_completed == N,
                 "baseline didn't complete %d orbits (got %d)", N, base.n_completed);
 
-    /* PIC variant A: all EM Lorentz pieces enabled (production setup). */
-    result_t pic_all;
-    run(Q, q_test, m_test, r_orb, N, /*field_evolution=*/1, /*induct=*/1, &pic_all);
+    /* PIC variant A: all pieces, CENTERED inductive (default). */
+    result_t pic_centered;
+    run(Q, q_test, m_test, r_orb, N, /*field_evolution=*/1, /*induct=*/1,
+        GR_INDUCTIVE_CENTERED, +1.0f, &pic_centered);
 
-    /* PIC variant B: inductive piece (-q d_t A) disabled, keeping
-     * -q grad phi and q v x B.  If the inductive piece is the PIC-heating
-     * culprit, variant B should be much more stable than variant A. */
+    /* PIC variant B: inductive disabled entirely. */
     result_t pic_noind;
-    run(Q, q_test, m_test, r_orb, N, /*field_evolution=*/1, /*induct=*/0, &pic_noind);
+    run(Q, q_test, m_test, r_orb, N, /*field_evolution=*/1, /*induct=*/0,
+        GR_INDUCTIVE_CENTERED, +1.0f, &pic_noind);
 
-    printf("Radius drift at each pi-wrap (orbit completion at opposite side):\n");
-    printf("  %-8s %-14s %-14s %-14s\n",
-           "orbit", "baseline (no PIC)", "PIC all pieces", "PIC no induct");
+    /* PIC variant C: inductive ENABLED, BACKWARD difference. */
+    result_t pic_back;
+    run(Q, q_test, m_test, r_orb, N, /*field_evolution=*/1, /*induct=*/1,
+        GR_INDUCTIVE_BACKWARD, +1.0f, &pic_back);
+
+    /* PIC variant D: inductive ENABLED, CENTERED diff, SIGN FLIPPED (-1).
+     * Diagnostic: if the heating is purely a sign-convention error, this
+     * should turn outward heating into inward inspiral. */
+    result_t pic_flip;
+    run(Q, q_test, m_test, r_orb, N, /*field_evolution=*/1, /*induct=*/1,
+        GR_INDUCTIVE_CENTERED, -1.0f, &pic_flip);
+
+    printf("Radius drift at each pi-wrap:\n");
+    printf("  %-7s %-10s %-14s %-14s %-14s %-14s\n",
+           "orbit", "baseline", "centered (+1)", "no inductive", "backward (+1)", "centered (-1)");
     for (int k = 1; k <= N; k++) {
-        const float bd = (base.r_at_orbit[k]      - r_orb) / r_orb;
-        const float ad = (pic_all.r_at_orbit[k]   - r_orb) / r_orb;
-        const float nd = (pic_noind.r_at_orbit[k] - r_orb) / r_orb;
-        char acell[32], ncell[32];
-        if (k > pic_all.n_completed)   snprintf(acell, sizeof(acell), "<unbound>");
-        else                            snprintf(acell, sizeof(acell), "%+7.3f%%", 100.0 * (double) ad);
-        if (k > pic_noind.n_completed) snprintf(ncell, sizeof(ncell), "<unbound>");
-        else                            snprintf(ncell, sizeof(ncell), "%+7.3f%%", 100.0 * (double) nd);
-        printf("  %-8d  %+7.3f%%       %-14s   %-14s\n",
-               k, 100.0 * (double) bd, acell, ncell);
+        const float bd = (base.r_at_orbit[k]          - r_orb) / r_orb;
+        const float cd = (pic_centered.r_at_orbit[k]  - r_orb) / r_orb;
+        const float nd = (pic_noind.r_at_orbit[k]     - r_orb) / r_orb;
+        const float xd = (pic_back.r_at_orbit[k]      - r_orb) / r_orb;
+        const float fd = (pic_flip.r_at_orbit[k]      - r_orb) / r_orb;
+        char ccell[32], ncell[32], xcell[32], fcell[32];
+        if (k > pic_centered.n_completed) snprintf(ccell, sizeof(ccell), "<unbound>"); else snprintf(ccell, sizeof(ccell), "%+7.3f%%", 100.0 * (double) cd);
+        if (k > pic_noind.n_completed)    snprintf(ncell, sizeof(ncell), "<unbound>"); else snprintf(ncell, sizeof(ncell), "%+7.3f%%", 100.0 * (double) nd);
+        if (k > pic_back.n_completed)     snprintf(xcell, sizeof(xcell), "<unbound>"); else snprintf(xcell, sizeof(xcell), "%+7.3f%%", 100.0 * (double) xd);
+        if (k > pic_flip.n_completed)     snprintf(fcell, sizeof(fcell), "<unbound>"); else snprintf(fcell, sizeof(fcell), "%+7.3f%%", 100.0 * (double) fd);
+        printf("  %-7d %+7.3f%%   %-14s %-14s %-14s %-14s\n",
+               k, 100.0 * (double) bd, ccell, ncell, xcell, fcell);
     }
     printf("\n");
 
     /* Verdict. */
-    const float drift_all   = (pic_all.n_completed   == N) ? (pic_all.r_at_orbit[N]   - r_orb) / r_orb : NAN;
-    const float drift_noind = (pic_noind.n_completed == N) ? (pic_noind.r_at_orbit[N] - r_orb) / r_orb : NAN;
+    const float drift_cen   = (pic_centered.n_completed == N) ? (pic_centered.r_at_orbit[N] - r_orb) / r_orb : NAN;
+    const float drift_noind = (pic_noind.n_completed   == N) ? (pic_noind.r_at_orbit[N]    - r_orb) / r_orb : NAN;
+    const float drift_back  = (pic_back.n_completed    == N) ? (pic_back.r_at_orbit[N]     - r_orb) / r_orb : NAN;
+    const float drift_flip  = (pic_flip.n_completed    == N) ? (pic_flip.r_at_orbit[N]     - r_orb) / r_orb : NAN;
 
     printf("After %d orbits:\n", N);
-    if (isfinite(drift_all))   printf("  Full EM Lorentz (all pieces):  drift = %+.3f%%\n", 100.0 * (double) drift_all);
-    else                       printf("  Full EM Lorentz (all pieces):  UNBOUND\n");
-    if (isfinite(drift_noind)) printf("  Without inductive (-q d_t A):  drift = %+.3f%%\n", 100.0 * (double) drift_noind);
-    else                       printf("  Without inductive (-q d_t A):  UNBOUND\n");
+    if (isfinite(drift_cen))   printf("  Centered inductive +1 (default):       drift = %+.3f%%\n", 100.0 * (double) drift_cen);
+    else                       printf("  Centered inductive +1: UNBOUND\n");
+    if (isfinite(drift_noind)) printf("  Inductive disabled:                    drift = %+.3f%%\n", 100.0 * (double) drift_noind);
+    else                       printf("  Inductive disabled: UNBOUND\n");
+    if (isfinite(drift_back))  printf("  Backward-diff inductive +1:            drift = %+.3f%%\n", 100.0 * (double) drift_back);
+    else                       printf("  Backward-diff inductive: UNBOUND\n");
+    if (isfinite(drift_flip))  printf("  Centered inductive -1 (sign flipped):  drift = %+.3f%%\n", 100.0 * (double) drift_flip);
+    else                       printf("  Centered inductive -1: UNBOUND\n");
 
-    /* Soft assertion: at least one variant should be reasonably stable
-     * (drift < 50%).  If both blow up we have deeper trouble. */
+    /* Soft assertion. */
     int stable_count = 0;
-    if (isfinite(drift_all)   && fabsf(drift_all)   < 0.5f) stable_count++;
+    if (isfinite(drift_cen)   && fabsf(drift_cen)   < 0.5f) stable_count++;
     if (isfinite(drift_noind) && fabsf(drift_noind) < 0.5f) stable_count++;
-    TEST_ASSERT(stable_count >= 1,
-                "Both PIC variants unbound — deeper PIC heating issue than just inductive");
+    if (isfinite(drift_back)  && fabsf(drift_back)  < 0.5f) stable_count++;
+    if (isfinite(drift_flip)  && fabsf(drift_flip)  < 0.5f) stable_count++;
+    TEST_ASSERT(stable_count >= 1, "All PIC variants unbound");
 
     printf("\nALL CHECKS PASSED.\n");
     return 0;

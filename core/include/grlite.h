@@ -285,6 +285,19 @@ gr_force_tier_t gr_sim_get_force_tier(const gr_sim_t* sim);
 void gr_sim_set_gravitomagnetic_force_enabled(gr_sim_t* sim, int enabled);
 int  gr_sim_get_gravitomagnetic_force_enabled(const gr_sim_t* sim);
 
+/* Gravitomagnetic INDUCTIVE force gate -- the -m*d_t A_g piece per the
+ * doc's Tier-3 force law (gr_sandbox_v35.tex eq:eih_full / sec:alg_rel
+ * eqbox line 1040).  Default OFF for backward compatibility with the
+ * existing gravity-side test stages (which were calibrated without this
+ * piece).  Symmetric counterpart to gr_sim_set_em_inductive_enabled.
+ *
+ * Provided primarily as a diagnostic: Stage 28 turns this on to test
+ * whether the inductive heating observed for EM in Stage 27 also
+ * appears for gravity.  Uses the same centered-time-difference
+ * (A_g^{n+1} - A_g^{n-1})/(2 dt) at t^n. */
+void gr_sim_set_gravitomagnetic_inductive_enabled(gr_sim_t* sim, int enabled);
+int  gr_sim_get_gravitomagnetic_inductive_enabled(const gr_sim_t* sim);
+
 /* EM Lorentz force gate (analog of the gravitomagnetic gate above).  When
  * enabled (default), the particle pusher includes the EM Lorentz force
  *     F_em = q ( -grad phi - d_t A + v x B )                  (B = curl A)
@@ -310,6 +323,41 @@ int  gr_sim_get_em_lorentz_force_enabled(const gr_sim_t* sim);
  * closed-loop dynamics tests (Stage 27+).  All default ON. */
 void gr_sim_set_em_inductive_enabled(gr_sim_t* sim, int enabled);
 int  gr_sim_get_em_inductive_enabled(const gr_sim_t* sim);
+
+/* Discretization for the inductive piece -q d_t A.  Two choices, both
+ * exposed for diagnostic comparison:
+ *
+ *   GR_INDUCTIVE_CENTERED (default; 2nd-order accurate):
+ *     (curr - next) / (2 dt) = (A^{n+1} - A^{n-1}) / (2 dt)
+ *     Time-CENTER at t^n, but reads A^{n+1} which contains the particle's
+ *     OWN current-step deposit.  This makes the self-deposit "visibility"
+ *     inconsistent with the spatial-derivative reads (which use .prev =
+ *     A^n and so don't contain the current-step deposit), and empirically
+ *     causes PIC self-heating in closed-loop dynamics (Stage 27).
+ *
+ *   GR_INDUCTIVE_BACKWARD (1st-order accurate; closed-loop stable):
+ *     (prev - next) / dt = (A^n - A^{n-1}) / dt
+ *     Time-CENTER at t^{n-1/2}, but BOTH slices are pre-current-step --
+ *     neither A^n nor A^{n-1} contains this step's deposit.  This matches
+ *     the .prev convention of the spatial-derivative reads.  The
+ *     half-step time mismatch is the standard read-prev-style trade
+ *     (cf. Stage 18 read-prev fix for the gravity scalar gradient). */
+typedef enum {
+    GR_INDUCTIVE_CENTERED = 0,
+    GR_INDUCTIVE_BACKWARD = 1
+} gr_inductive_disc_t;
+void                gr_sim_set_em_inductive_disc(gr_sim_t* sim, gr_inductive_disc_t kind);
+gr_inductive_disc_t gr_sim_get_em_inductive_disc(const gr_sim_t* sim);
+
+/* Sign of the inductive piece in the force law -- diagnostic.  Default
+ * is +1.0 (the variationally-derived sign of -q d_t A).  Setting to -1.0
+ * flips the sign as a probe for whether the closed-loop PIC heating
+ * observed in Stage 27/28 is consistent with a sign convention error.
+ * Symmetric pair for EM (-q d_t A) and gravity (-m d_t A_g). */
+void  gr_sim_set_em_inductive_sign(gr_sim_t* sim, float sign);
+float gr_sim_get_em_inductive_sign(const gr_sim_t* sim);
+void  gr_sim_set_gravitomagnetic_inductive_sign(gr_sim_t* sim, float sign);
+float gr_sim_get_gravitomagnetic_inductive_sign(const gr_sim_t* sim);
 
 int  gr_sim_add_particle(gr_sim_t* sim, float x, float y,
                          float mass, float charge,
