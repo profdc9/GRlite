@@ -305,6 +305,12 @@ int  gr_sim_get_gravitomagnetic_force_enabled(const gr_sim_t* sim);
 void gr_sim_set_em_lorentz_force_enabled(gr_sim_t* sim, int enabled);
 int  gr_sim_get_em_lorentz_force_enabled(const gr_sim_t* sim);
 
+/* Fine-grained gates on the three EM Lorentz pieces — useful for
+ * isolating which piece (if any) drives PIC self-heating in
+ * closed-loop dynamics tests (Stage 27+).  All default ON. */
+void gr_sim_set_em_inductive_enabled(gr_sim_t* sim, int enabled);
+int  gr_sim_get_em_inductive_enabled(const gr_sim_t* sim);
+
 int  gr_sim_add_particle(gr_sim_t* sim, float x, float y,
                          float mass, float charge,
                          float vx, float vy);
@@ -527,6 +533,21 @@ void gr_sim_set_background_uniform_electric(gr_sim_t* sim,
                                             float x0, float y0,
                                             float Ex, float Ey);
 
+/* Softened point charge — EM analog of gr_sim_set_background_point_mass.
+ * Fills phi^{bg} (EM scalar) with the Coulomb potential
+ *
+ *   phi^{bg}(x) = +k_e * Q / sqrt(|x - x0|^2 + epsilon^2)
+ *
+ * For a test particle of charge q_test, the resulting force is
+ *   F = -q_test * grad phi^{bg} = +q_test * k_e * Q * (r - r0) / s^{3/2}.
+ * Like-sign Q and q_test repel; opposite-sign attract.  Stage 26 EM
+ * Kepler analog uses Q > 0 and q_test < 0 to get an attractive orbit
+ * structurally identical to gravity (gravitational coupling
+ * G_eff M_mass <-> EM coupling |q_test Q| k_e / m_test). */
+void gr_sim_set_background_point_charge(gr_sim_t* sim,
+                                        float x0, float y0,
+                                        float Q, float epsilon);
+
 /* ----------------------------------------------------------------------------
  * Background evaluation mode
  *
@@ -556,7 +577,8 @@ typedef enum {
     GR_BG_KIND_SPINNING_POINT_MASS     = 2,
     GR_BG_KIND_UNIFORM_GRAVITOMAGNETIC = 3,
     GR_BG_KIND_UNIFORM_MAGNETIC        = 4,
-    GR_BG_KIND_UNIFORM_ELECTRIC        = 5
+    GR_BG_KIND_UNIFORM_ELECTRIC        = 5,
+    GR_BG_KIND_POINT_CHARGE            = 6
     /* Future: CHARGED_POINT_MASS, KERR_NEWMAN, ... */
 } gr_bg_kind_t;
 

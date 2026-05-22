@@ -643,6 +643,9 @@ static void dt_A_em_at_total(const struct gr_sim* sim, float x, float y,
     *dAx_out = 0.0f;
     *dAy_out = 0.0f;
     if (!sim || !sim->em_lorentz_force_enabled) return;
+    /* Fine-grained gate: skip the centered-time-difference if the
+     * inductive piece is disabled (diagnostic isolation for Stage 27). */
+    if (!sim->em_inductive_enabled) return;
     const int   W  = sim->width;
     const int   H  = sim->height;
     const float dx = sim->dx;

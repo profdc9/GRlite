@@ -333,6 +333,49 @@ void gr_sim_set_background_uniform_electric(gr_sim_t* sim,
     sim->bg_Ey_em = Ey;
 }
 
+/* Softened point-charge background.  EM analog of point-mass:
+ *   phi^{bg}(x, y) = +k_e * Q / sqrt(r^2 + epsilon^2)
+ * sampled at CORNER sublattice nodes (i, j) * dx.  Like the mass case,
+ * the smoothing length epsilon ~ a few cells avoids the 1/r singularity. */
+void gr_sim_set_background_point_charge(gr_sim_t* sim,
+                                        float x0, float y0,
+                                        float Q, float epsilon) {
+    if (!sim) return;
+    gr_sim_clear_background(sim);
+    float* phi = ensure_bg_alloc(sim, GR_FIELD_PHI_EM);
+    if (!phi) return;
+
+    const int   W    = sim->width;
+    const int   H    = sim->height;
+    const float dx   = sim->dx;
+    const float eps2 = epsilon * epsilon;
+    const float coeff = sim->k_e * Q;     /* +k_e Q out front of 1/sqrt(s) */
+
+    for (int j = 0; j < H; j++) {
+        const float y  = (float) j * dx;
+        const float dy = y - y0;
+        const int   row = j * W;
+        for (int i = 0; i < W; i++) {
+            const float x   = (float) i * dx;
+            const float dxi = x - x0;
+            const float r2  = dxi * dxi + dy * dy;
+            phi[row + i] = coeff / sqrtf(r2 + eps2);
+        }
+    }
+
+    sim->bg_kind  = GR_BG_KIND_POINT_CHARGE;
+    sim->bg_x0    = x0;
+    sim->bg_y0    = y0;
+    sim->bg_GM    = 0.0f;
+    sim->bg_eps   = epsilon;
+    sim->bg_Jz    = 0.0f;
+    sim->bg_B0    = 0.0f;
+    sim->bg_B0_em = 0.0f;
+    sim->bg_Ex_em = 0.0f;
+    sim->bg_Ey_em = 0.0f;
+    sim->bg_charge = Q;
+}
+
 /* Analytic-mode evaluation of the installed background generator at the
  * particle's exact (x, y).  See gr_sandbox §12.6 / §12.8 for the rationale:
  * the sampled CIC+FD path introduces an O((dx/r)^2) tangential force error
@@ -363,7 +406,8 @@ int gr_bg_eval_analytic(const struct gr_sim* sim, float x, float y,
     }
     case GR_BG_KIND_UNIFORM_GRAVITOMAGNETIC:
     case GR_BG_KIND_UNIFORM_MAGNETIC:
-    case GR_BG_KIND_UNIFORM_ELECTRIC: {
+    case GR_BG_KIND_UNIFORM_ELECTRIC:
+    case GR_BG_KIND_POINT_CHARGE: {
         /* No scalar gravity in these backgrounds. */
         *phi_out = 0.0f;
         *gx_out  = 0.0f;
@@ -520,6 +564,21 @@ int gr_bg_eval_phi_em(const struct gr_sim* sim, float x, float y,
         *phi_out = -(sim->bg_Ex_em * dxi + sim->bg_Ey_em * dyi);
         *gx_out  = -sim->bg_Ex_em;
         *gy_out  = -sim->bg_Ey_em;
+        return 1;
+    }
+    case GR_BG_KIND_POINT_CHARGE: {
+        /* phi(x,y) = +k_e Q / sqrt(r^2 + eps^2),
+         * grad     = -k_e Q (r - r0) / (r^2 + eps^2)^{3/2}. */
+        const float dxi = x - sim->bg_x0;
+        const float dyi = y - sim->bg_y0;
+        const float r2  = dxi * dxi + dyi * dyi;
+        const float s2  = r2 + sim->bg_eps * sim->bg_eps;
+        const float inv_s  = 1.0f / sqrtf(s2);
+        const float inv_s3 = inv_s / s2;
+        const float coeff  = sim->k_e * sim->bg_charge;
+        *phi_out = coeff * inv_s;
+        *gx_out  = -coeff * dxi * inv_s3;
+        *gy_out  = -coeff * dyi * inv_s3;
         return 1;
     }
     default:

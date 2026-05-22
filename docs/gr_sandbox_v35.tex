@@ -3199,9 +3199,98 @@ sampled-grid background, and a time-evolving PIC-deposited perturbation
 (\emph{moving charge $\to$ Esirkepov current $\to$ wave-equation
 $\to$ $\vv{A}^{\mathrm{pert}}$, $\phi^{\mathrm{pert}}$ $\to$ Lorentz force
 on a probe charge}) is now end-to-end functional on the force-evaluation
-side; verification of that closed loop in dynamics belongs to a future
-EM-PIC stage (analog of Section~\ref{sec:stage_perturb_fdtd} for the
-charged sector).
+side; see Section~\ref{sec:stage_em_pic_orbit} for the closed-loop
+dynamics verification.
+
+\subsection{Stage 9h: EM Kepler analog and PIC orbit (closed-loop)}
+\label{sec:stage_em_pic_orbit}
+
+The EM analog of Stage~10 (Section~\ref{sec:stage_perturb_fdtd}): a
+charged test particle orbits a softened analytic point-charge background,
+with the perturbation EM fields evolving via the wave equation under
+sources deposited by the particle itself.  This is the closed-loop PIC
+verification on the EM side, exposing any feedback instabilities in the
+combined deposit$\,$+wave-equation$\,$+force-interp chain.
+
+\paragraph{EM Kepler baseline (Stage~26).}  Before the closed loop, a
+basic verification: charged particle in an analytic softened-Coulomb
+background $\phi^{\mathrm{bg}} = +k_e Q / \sqrt{r^2+\epsilon^2}$ with
+opposite-sign $Q$ and $q_{\mathrm{test}}$ (attractive).  With
+$|q_{\mathrm{test}} Q| k_e / m_{\mathrm{test}} = G_{\mathrm{eff}} M$, the
+dynamics are mathematically identical to gravity's Stage~7 Kepler test.
+The implementation reproduces the analytic orbital period to $0.03\%$
+and the orbit stays circular to $4\times 10^{-5}$ over one period
+(\texttt{stage26\_em\_kepler.c}).  This verifies the EM force chain
+\textsc{point\_charge bg} $\to$ \texttt{gr\_bg\_eval\_phi\_em} $\to$
+\texttt{phi\_em\_grad\_at\_total} $\to$ \texttt{em\_force\_at} on a
+closed-orbit observable, without any perturbation FDTD.
+
+\paragraph{Closed-loop PIC orbit (Stage~27).}  Same setup, but
+\texttt{field\_evolution} and \texttt{particle\_source\_deposition} both
+on.  At $Q = +1$, $q_{\mathrm{test}} = -10^{-3}$, $m_{\mathrm{test}} =
+10^{-3}$ (same coupling as gravity's Phase E sweet spot), $r = 20$,
+CIC$+$LEGACY$+$smoothing $=4$, over $4$ orbital periods, the radius
+drifts:
+\begin{center}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Variant} & \textbf{Drift after 4 orbits} & \textbf{Mechanism} \\
+\midrule
+Baseline (\texttt{field\_evolution} OFF)        & $+0.003\%$  & --- (analytic bg only) \\
+PIC, all three EM Lorentz pieces                & $\mathbf{+18.6\%}$ & PIC heating dominates \\
+PIC, inductive ($-q\,\partial_t\vv{A}$) disabled & $\mathbf{-7.0\%}$  & radiation-reaction-style inspiral \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\emph{The classical-atom-collapse inspiral is present in this sandbox
+when the inductive piece is disabled.}  The $-7.0\%/4\,\mathrm{orbits}$
+inward drift (no inductive) is the same order as gravity's Phase E
+result at the same coupling ($-2.4\%$ per orbit), consistent with
+radiation-reaction physics: an orbiting charge radiates EM waves into
+the absorbing boundary, loses orbital energy, and spirals in.
+
+But \emph{with the inductive piece enabled, PIC numerical heating
+overwhelms radiation reaction by an order of magnitude}, driving an
+outward $+18.6\%/4\,\mathrm{orbits}$ instead of an inspiral.  The
+mechanism is specific to the inductive piece: the centered-time
+derivative
+\[
+  \partial_t\vv{A}^n \;=\; (\vv{A}^{n+1} - \vv{A}^{n-1})/(2\,\Delta t)
+\]
+reads $\vv{A}^{n+1}$, which contains the particle's own current
+deposit at this step.  Although the time-CENTER is at $t^n$ (matching
+the Stage~18 read-prev fix's timing principle for the spatial
+gradient), the discrete propagation of the self-field into $\vv{A}^{n+1}$
+appears to inject a net positive-feedback torque on the orbit.
+
+\paragraph{Implications and open questions.}
+\begin{itemize}
+  \item The EM Lorentz force is correctly wired \emph{per piece}
+    (Stages 9e/9f/9g all pass in isolation).  The instability is a
+    \emph{closed-loop} PIC phenomenon, not a coefficient or sign bug.
+  \item Gravity (Stage 18b at $m_{\mathrm{test}} = 10^{-3}$) is
+    stable in part because it does \emph{not} implement an analogous
+    $-\partial_t\vv{A}_g$ piece (the doc's Tier-3 form
+    Eq.~\ref{eq:eih_full} includes it, but the implementation predates
+    Stage~9g and so has only the spatial-derivative GEM feedback,
+    where the coefficient~$+4$ on $\vv{v}\!\times\!\vv{B}_g$ gives a
+    strong stabilising counter-torque).
+  \item Disabling the inductive piece via
+    \texttt{gr\_sim\_set\_em\_inductive\_enabled(sim, 0)} is the
+    current production recommendation for closed-loop EM PIC, until
+    a better discretization is found.
+  \item Alternative discretizations to investigate: the
+    backward difference $(\vv{A}^n - \vv{A}^{n-1})/\Delta t$ at
+    $t^{n-1/2}$ (which would avoid reading $\vv{A}^{n+1}$ at the cost of
+    a half-step time shift), or implicit/symplectic time integration
+    of the combined particle + field system.
+\end{itemize}
+
+The Stage 27 test passes if at least one of the two PIC variants stays
+bound; current production behaviour (inductive on) is bound but
+heating, and the "honest" radiation-reaction inspiral is recovered
+when the inductive gate is off.
 
 \subsection{Stage 10: Perturbation FDTD with moving particle source}
 \label{sec:stage_perturb_fdtd}

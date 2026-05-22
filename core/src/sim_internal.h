@@ -84,9 +84,14 @@ struct gr_sim {
     int gravitomagnetic_force_enabled;
 
     /* EM Lorentz force gate (Stage 23+).  Default 1 (enabled); 0 disables
-     * the q*(v x B_em) piece (and any future -q*grad phi_em / -q*d_t A
-     * pieces).  Mirror of gravitomagnetic_force_enabled. */
+     * all three EM Lorentz pieces (q v x B, -q grad phi, -q d_t A).
+     * Mirror of gravitomagnetic_force_enabled. */
     int em_lorentz_force_enabled;
+    /* Fine-grained gate for the inductive -q d_t A piece (Stage 25+).
+     * Default 1.  When disabled, the EM Lorentz force omits the inductive
+     * contribution but keeps the q v x B and -q grad phi pieces.  Used
+     * for diagnostic isolation in closed-loop PIC dynamics (Stage 27). */
+    int em_inductive_enabled;
 
     /* If 0, the per-step wave-equation leapfrog on the six perturbation
      * fields is skipped (along with the buffer rotation).  Used by Stage 7/8
