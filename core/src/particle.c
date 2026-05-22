@@ -436,6 +436,28 @@ static inline void grav_force_at(const struct gr_sim* sim,
     *Fy -= 4.0f * mass * vx * Bg_z;
 }
 
+/* EM Lorentz force on a charged particle.  Per gr_sandbox_v35.tex
+ * eq:eih_full (line 921) and the Tier-3 eqbox (line 1045):
+ *
+ *   F_em = q ( -grad phi - d_t A + v x B )                  (B = curl A)
+ *
+ * Currently implemented pieces (Stage 23+):
+ *   v x B   — coefficient +1 (no spin-2 enhancement; cf. the +4 on v x B_g).
+ *
+ * Not yet wired (to come in subsequent stages):
+ *   -grad phi  (static Coulomb / scalar EM background)
+ *   -d_t A      (induced electric field from time-varying A)
+ *
+ * Until those are added, this routine returns the magnetic Lorentz piece
+ * alone.  Component formulas in 2D with B_z along +z (same identity as the
+ * GM case): (v x B_z z)_x = +v_y B_z, (v x B_z z)_y = -v_x B_z. */
+static inline void em_force_at(float charge, float vx, float vy,
+                               float B_em_z,
+                               float* Fx, float* Fy) {
+    *Fx = +charge * vy * B_em_z;
+    *Fy = -charge * vx * B_em_z;
+}
+
 /* Yee curl: B_g_z = d/dx A_{g,y} - d/dy A_{g,x} on the cell-center
  * sublattice (i+0.5, j+0.5) * dx from edge-staggered A_g arrays
  * (gr_sandbox_v35.tex §9.1, Yee staggering).  A_{g,x} lives on X_EDGE
@@ -516,6 +538,32 @@ static float B_g_z_at_total(const struct gr_sim* sim, float x, float y) {
     return bg + pert;
 }
 
+/* Total EM magnetic field B_z = (curl A)_z at the particle position.
+ * Structurally identical to B_g_z_at_total but points at the EM arrays
+ * (Ax_bg / Ay_bg for the background, fields[A_X] / fields[A_Y] for the
+ * perturbation).  The curl evaluator is shared (curl_Agz_sampled_at is
+ * sublattice-aware via the X_EDGE / Y_EDGE conventions and applies to any
+ * pair of edge-staggered components).  Gated by em_lorentz_force_enabled. */
+static float B_em_z_at_total(const struct gr_sim* sim, float x, float y) {
+    if (!sim || !sim->em_lorentz_force_enabled) return 0.0f;
+    float bg = 0.0f;
+    if (sim->bg_mode == GR_BG_MODE_ANALYTIC) {
+        gr_bg_eval_B_em(sim, x, y, &bg);
+    } else {
+        bg = curl_Agz_sampled_at(sim->Ax_bg, sim->Ay_bg,
+                                 sim->width, sim->height, sim->dx, x, y);
+    }
+    const float* Ax_pert = sim->field_evolution_enabled
+                               ? sim->fields[GR_FIELD_A_X].prev
+                               : sim->fields[GR_FIELD_A_X].curr;
+    const float* Ay_pert = sim->field_evolution_enabled
+                               ? sim->fields[GR_FIELD_A_Y].prev
+                               : sim->fields[GR_FIELD_A_Y].curr;
+    const float pert = curl_Agz_sampled_at(Ax_pert, Ay_pert,
+                                           sim->width, sim->height, sim->dx, x, y);
+    return bg + pert;
+}
+
 /* Boris-leapfrog kick-drift for one timestep.
  *
  * gr_sandbox_v32.tex §9.2:
@@ -545,6 +593,12 @@ void gr_particle_push_all(struct gr_sim* sim) {
          * gravitomagnetic_force_enabled flag so that stage09 (clock-only
          * isolation) can disable the v x B_g piece. */
         const float Bg_z = B_g_z_at_total(sim, p->x, p->y);
+        /* EM magnetic field B_em_z at the particle for the q v x B Lorentz
+         * piece (Stage 23+).  Same combined bg+perturbation evaluator as
+         * B_g_z but pointing at the EM arrays.  Gated by em_lorentz_force_
+         * enabled.  When the particle is neutral or no EM A is present
+         * this contributes nothing. */
+        const float B_em_z = B_em_z_at_total(sim, p->x, p->y);
 
         /* v from lagged p^{n-1/2} — used to evaluate the velocity-dependent
          * Tier-2 force terms.  Negligible cost for Newtonian since grav_force_at
@@ -556,12 +610,24 @@ void gr_particle_push_all(struct gr_sim* sim) {
 
         float Fx, Fy;
         grav_force_at(sim, p->mass, vx_pre, vy_pre, phi, grad_x, grad_y, Bg_z, &Fx, &Fy);
+        /* Additive EM Lorentz contribution (currently the q v x B piece;
+         * scalar -q grad phi_em and -q d_t A pieces land in later stages). */
+        {
+            float Fx_em, Fy_em;
+            em_force_at(p->charge, vx_pre, vy_pre, B_em_z, &Fx_em, &Fy_em);
+            Fx += Fx_em;
+            Fy += Fy_em;
+        }
 
         /* Corrector iteration for velocity-dependent terms (Tier-2 scalar
-         * coupling + Tier-1 gravitomagnetic v x B_g): midpoint velocity gives
-         * 2nd-order time accuracy.  Engage it whenever the force depends on
-         * v — RELATIVISTIC tier always, plus any tier when Bg_z != 0. */
-        if (sim->force_tier == GR_FORCE_RELATIVISTIC || Bg_z != 0.0f) {
+         * coupling + Tier-1 gravitomagnetic v x B_g + EM v x B_em):
+         * midpoint velocity gives 2nd-order time accuracy.  Engage it
+         * whenever the force depends on v — RELATIVISTIC tier always,
+         * plus any tier when Bg_z != 0 or B_em_z != 0 (and the particle
+         * carries charge for the EM piece). */
+        const int em_velocity_dep = (B_em_z != 0.0f) && (p->charge != 0.0f);
+        if (sim->force_tier == GR_FORCE_RELATIVISTIC
+            || Bg_z != 0.0f || em_velocity_dep) {
             const float px_pred = p->px + Fx * dt;
             const float py_pred = p->py + Fy * dt;
             const float pmag2_pred = px_pred * px_pred + py_pred * py_pred;
@@ -571,6 +637,10 @@ void gr_particle_push_all(struct gr_sim* sim) {
             const float vx_mid = 0.5f * (vx_pre + vx_post);
             const float vy_mid = 0.5f * (vy_pre + vy_post);
             grav_force_at(sim, p->mass, vx_mid, vy_mid, phi, grad_x, grad_y, Bg_z, &Fx, &Fy);
+            float Fx_em, Fy_em;
+            em_force_at(p->charge, vx_mid, vy_mid, B_em_z, &Fx_em, &Fy_em);
+            Fx += Fx_em;
+            Fy += Fy_em;
         }
 
         p->px += Fx * dt;
@@ -632,13 +702,20 @@ int gr_sim_add_particle(gr_sim_t* sim, float x, float y,
     float grad_x, grad_y;
     grav_grad_at(sim, x, y, &grad_x, &grad_y);
     const float phi_init = gr_phi_g_total_at(sim, x, y);
-    /* Tier-1 gravitomagnetic B_g_z at the initial position.  Uses the same
-     * total (background + perturbation, analytic or sampled) evaluator as
-     * gr_particle_push_all so the half-step-back kick stays consistent
-     * with what the pusher will apply on step 0. */
-    const float Bg_z_init = B_g_z_at_total(sim, x, y);
+    /* Tier-1 gravitomagnetic B_g_z + EM B_z at the initial position.  Uses
+     * the same total (background + perturbation, analytic or sampled)
+     * evaluators as gr_particle_push_all so the half-step-back kick stays
+     * consistent with what the pusher will apply on step 0. */
+    const float Bg_z_init   = B_g_z_at_total(sim, x, y);
+    const float B_em_z_init = B_em_z_at_total(sim, x, y);
     float Fx, Fy;
     grav_force_at(sim, mass, vx, vy, phi_init, grad_x, grad_y, Bg_z_init, &Fx, &Fy);
+    {
+        float Fx_em, Fy_em;
+        em_force_at(charge, vx, vy, B_em_z_init, &Fx_em, &Fy_em);
+        Fx += Fx_em;
+        Fy += Fy_em;
+    }
     /* p^0 = gamma_0 m v (relativistic). */
     const float gamma0 = 1.0f / sqrtf(fmaxf(1.0f - (vx * vx + vy * vy) / c2, 1e-12f));
     const float px0    = gamma0 * mass * vx;

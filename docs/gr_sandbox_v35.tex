@@ -2978,6 +2978,81 @@ discrepancy at the PIC level can be localized to deposition, smoothing,
 or the wave-equation evolution, rather than to the curl evaluator
 itself.
 
+\subsection{Stage 9e: EM Lorentz force --- unit isolation}
+\label{sec:stage_em_cyclotron}
+
+EM analog of Stage~9b/9d.  The Tier-3 force-law eqbox of
+Section~\ref{sec:alg_rel} contains the EM Lorentz piece
+\begin{equation}
+\label{eq:Fem_lorentz}
+  \vv{F}_{\mathrm{em}}
+  = q\bigl(-\nabla\phi - \partial_t\vv{A} + \vv{v}\!\times\!\vv{B}\bigr),
+  \qquad \vv{B} = \nabla\!\times\!\vv{A},
+\end{equation}
+with coefficient $+1$ on $\vv{v}\!\times\!\vv{B}$ --- the EM analogue of the
+GEM coefficient $+4$, but without the spin-2 enhancement.  Until the
+scalar $-q\nabla\phi$ and inductive $-q\partial_t\vv{A}$ pieces land
+(planned with the static-Coulomb stage), the implementation realizes the
+$q\,\vv{v}\!\times\!\vv{B}$ piece alone.  Stage~9e verifies that piece in
+isolation, mirroring Stage~9b but for the EM sector.
+
+\paragraph{Construction.}  The new analytic background generator
+\texttt{gr\_sim\_set\_background\_uniform\_magnetic} installs the same
+symmetric-gauge pattern as the GEM case, applied to the EM potential
+arrays:
+\begin{equation}
+\label{eq:em_uniform_bg_symmetric_gauge}
+  \phi^{\mathrm{bg}} = 0,\qquad
+  A_{x}^{\mathrm{bg}}(x,y) = -\tfrac{1}{2}B_0\,(y - y_0),\qquad
+  A_{y}^{\mathrm{bg}}(x,y) = +\tfrac{1}{2}B_0\,(x - x_0),
+\end{equation}
+producing $B_z = B_0$ everywhere.  The same Yee-curl evaluator
+introduced in Stage~9d serves the EM side identically --- the X\_EDGE /
+Y\_EDGE staggering of $A_x, A_y$ is structurally identical to the GEM
+case, so the curl kernel in
+\texttt{particle.c:curl\_Agz\_sampled\_at} is shared between both.
+
+\paragraph{Analytic prediction.}  With $\phi = 0$ and $\partial_t\vv{A}
+= 0$ the force reduces to $\vv{F} = q\,(\vv{v}\!\times\!B_0\hat z)$, giving
+the standard EM cyclotron:
+\begin{equation}
+  \omega_c = \frac{q\,|B_0|}{\gamma\,m},\qquad
+  T       = \frac{2\pi}{\omega_c},\qquad
+  r_L     = \frac{v_0}{\omega_c} = \frac{\gamma\,m\,v_0}{q\,|B_0|}.
+\end{equation}
+For $q > 0$, $B_0 > 0$, and $\vv{v}(0) = v_0\hat x$, the particle
+gyrates clockwise (viewed from $+\hat z$); sign reversal of either
+$q$ or $B_0$ flips the direction.
+
+\paragraph{Test (\texttt{stage23\_em\_cyclotron.c}).}  At
+$q = 1$, $m = 1$, $v_0 = 0.1c$, $B_0 = 4\times 10^{-3}$ (chosen so
+$r_L \approx 25$ cells, matching the Stage~9b/9d orbit geometry on a
+$128\times 128$ grid):
+\begin{itemize}
+  \item ANALYTIC bg: $r_L$ error $3\times 10^{-6}$,
+    $|\vv{v}|^2$ drift $3\times 10^{-6}$,
+    closure 0.10\% (the same $\dd t \cdot \omega_c$ phase-rounding
+    floor as Stage 9b).  Gyration direction is correct.
+  \item SAMPLED bg: $r_L$ error $5\times 10^{-6}$, agreeing with
+    ANALYTIC to $\sim 5\times 10^{-6}$ in absolute $r_L$.  Linear
+    $\vv{A}^{\mathrm{bg}}$ -> Yee curl is exact, as Stage 9d showed.
+  \item Sign reversal: $B_0 \to -B_0$ flips gyration from CW to CCW
+    correctly.
+  \item Neutral particle ($q = 0$): feels no force (drifts linearly),
+    confirming the EM Lorentz piece is correctly gated by charge.
+\end{itemize}
+
+\paragraph{Status of the rest of $\vv{F}_{\mathrm{em}}$.}
+Eq.~(\ref{eq:Fem_lorentz}) has three pieces.  Stage~9e covers the
+$q\,\vv{v}\!\times\!\vv{B}$ term.  The $-q\nabla\phi$ scalar (Coulomb)
+term and the $-q\,\partial_t\vv{A}$ inductive term are not yet wired
+into the pusher; they will land with the static-Coulomb verification
+stage (analog of Stage~3 Poisson for EM) and the radiative-EM stage
+respectively.  Until then, charged particles in a non-magnetic EM
+background feel no EM force.  This was a conscious scope cut to keep
+the present verification focused on the curl-evaluator chain shared
+with the GEM side.
+
 \subsection{Stage 10: Perturbation FDTD with moving particle source}
 \label{sec:stage_perturb_fdtd}
 

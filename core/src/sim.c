@@ -44,6 +44,8 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
     sim->esirkepov_enabled       = 1;
     /* Tier-1 gravitomagnetic Lorentz force on by default (Stage 20+). */
     sim->gravitomagnetic_force_enabled = 1;
+    /* EM Lorentz force on by default (Stage 23+). */
+    sim->em_lorentz_force_enabled      = 1;
     sim->esirkepov_violations    = 0;
     sim->rho_smooth_passes       = 0;
     sim->shape_function          = GR_SHAPE_CIC;
@@ -403,6 +405,14 @@ void gr_sim_set_gravitomagnetic_force_enabled(gr_sim_t* sim, int enabled) {
 }
 int gr_sim_get_gravitomagnetic_force_enabled(const gr_sim_t* sim) {
     return sim ? sim->gravitomagnetic_force_enabled : 0;
+}
+
+void gr_sim_set_em_lorentz_force_enabled(gr_sim_t* sim, int enabled) {
+    if (!sim) return;
+    sim->em_lorentz_force_enabled = enabled ? 1 : 0;
+}
+int gr_sim_get_em_lorentz_force_enabled(const gr_sim_t* sim) {
+    return sim ? sim->em_lorentz_force_enabled : 0;
 }
 
 const float* gr_sim_rho_matter_ptr(const gr_sim_t* sim) {

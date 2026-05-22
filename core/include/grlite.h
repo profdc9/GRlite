@@ -285,6 +285,26 @@ gr_force_tier_t gr_sim_get_force_tier(const gr_sim_t* sim);
 void gr_sim_set_gravitomagnetic_force_enabled(gr_sim_t* sim, int enabled);
 int  gr_sim_get_gravitomagnetic_force_enabled(const gr_sim_t* sim);
 
+/* EM Lorentz force gate (analog of the gravitomagnetic gate above).  When
+ * enabled (default), the particle pusher includes the EM Lorentz force
+ *     F_em = q ( -grad phi - d_t A + v x B )                  (B = curl A)
+ * on each charged particle, with phi, A read from the background (analytic
+ * or sampled) plus the perturbation fields (always sampled).  The factor
+ * on v x B is +1 (no spin-2 enhancement, unlike the GEM coefficient +4).
+ * See gr_sandbox_v35.tex eq:eih_full / sec:alg_rel Tier-3 eqbox.
+ *
+ * Currently implemented pieces (Stage 23+):
+ *   v x B   - via the Yee curl of A_x, A_y arrays (mirror of the GM path).
+ *
+ * Not yet wired (planned):
+ *   -grad phi_em  - the scalar Coulomb force (next stage).
+ *   -d_t A        - the inductive electric field from time-varying A.
+ *
+ * The flag exists so future tests can isolate clock effects analogous to
+ * Stage 9 Phase B (where the GM Lorentz force is gated off). */
+void gr_sim_set_em_lorentz_force_enabled(gr_sim_t* sim, int enabled);
+int  gr_sim_get_em_lorentz_force_enabled(const gr_sim_t* sim);
+
 int  gr_sim_add_particle(gr_sim_t* sim, float x, float y,
                          float mass, float charge,
                          float vx, float vy);
@@ -476,6 +496,23 @@ void gr_sim_set_background_uniform_gravitomagnetic(gr_sim_t* sim,
                                                    float x0, float y0,
                                                    float B0);
 
+/* Uniform electromagnetic magnetic field — EM analog of the gravitomagnetic
+ * variant above.  Fills A_x^{bg}, A_y^{bg} with the symmetric-gauge
+ * potentials producing a spatially constant magnetic field B_z = B_0:
+ *
+ *   phi^{bg}   = 0                  (no scalar EM)
+ *   A_x        = -0.5 * B_0 * (y - y_0)
+ *   A_y        = +0.5 * B_0 * (x - x_0)
+ *   B_z        = d/dx A_y - d/dy A_x = B_0  (uniform, by construction)
+ *
+ * Stage 23 cyclotron test for the EM Lorentz force F = q (v x B); a
+ * charged particle traces a circle at omega_c = q |B_0| / (gamma m).
+ * Coefficient is +1 on v x B (no spin-2 factor, unlike gravity).  See
+ * gr_sandbox_v35.tex eq:eih_full / sec:alg_rel Tier-3 eqbox line 1045. */
+void gr_sim_set_background_uniform_magnetic(gr_sim_t* sim,
+                                            float x0, float y0,
+                                            float B0);
+
 /* ----------------------------------------------------------------------------
  * Background evaluation mode
  *
@@ -500,10 +537,11 @@ void gr_sim_set_background_uniform_gravitomagnetic(gr_sim_t* sim,
  * --------------------------------------------------------------------------*/
 
 typedef enum {
-    GR_BG_KIND_NONE                  = 0,
-    GR_BG_KIND_POINT_MASS            = 1,
-    GR_BG_KIND_SPINNING_POINT_MASS   = 2,
-    GR_BG_KIND_UNIFORM_GRAVITOMAGNETIC = 3
+    GR_BG_KIND_NONE                    = 0,
+    GR_BG_KIND_POINT_MASS              = 1,
+    GR_BG_KIND_SPINNING_POINT_MASS     = 2,
+    GR_BG_KIND_UNIFORM_GRAVITOMAGNETIC = 3,
+    GR_BG_KIND_UNIFORM_MAGNETIC        = 4
     /* Future: CHARGED_POINT_MASS, KERR_NEWMAN, ... */
 } gr_bg_kind_t;
 

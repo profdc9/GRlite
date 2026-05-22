@@ -57,6 +57,7 @@ void gr_sim_clear_background(gr_sim_t* sim) {
     sim->bg_charge = 0.0f;
     sim->bg_Jz     = 0.0f;
     sim->bg_B0     = 0.0f;
+    sim->bg_B0_em  = 0.0f;
 }
 
 /* Lazily allocate and zero a background array if not already present. */
@@ -237,6 +238,57 @@ void gr_sim_set_background_uniform_gravitomagnetic(gr_sim_t* sim,
     sim->bg_B0   = B0;
 }
 
+/* Uniform EM magnetic background — EM analog of
+ * gr_sim_set_background_uniform_gravitomagnetic.  Symmetric-gauge
+ * potentials fill A_x_bg, A_y_bg arrays such that
+ *   B_z = d/dx A_y - d/dy A_x = B_0   (uniform).
+ * No scalar EM is installed; phi_bg is left NULL (sampled mode treats
+ * NULL as zero). */
+void gr_sim_set_background_uniform_magnetic(gr_sim_t* sim,
+                                            float x0, float y0,
+                                            float B0) {
+    if (!sim) return;
+    gr_sim_clear_background(sim);
+    float* Ax = ensure_bg_alloc(sim, GR_FIELD_A_X);
+    float* Ay = ensure_bg_alloc(sim, GR_FIELD_A_Y);
+    if (!Ax || !Ay) return;
+
+    const int   W  = sim->width;
+    const int   H  = sim->height;
+    const float dx = sim->dx;
+
+    /* X_EDGE sublattice for A_x: nodes at (i+0.5, j) * dx.
+     *   A_x(x, y) = -0.5 B_0 (y - y_0). */
+    for (int j = 0; j < H; j++) {
+        const float y  = (float) j * dx;
+        const float dy = y - y0;
+        const int   row = j * W;
+        const float val = -0.5f * B0 * dy;
+        for (int i = 0; i < W; i++) {
+            Ax[row + i] = val;
+        }
+    }
+    /* Y_EDGE sublattice for A_y: nodes at (i, j+0.5) * dx.
+     *   A_y(x, y) = +0.5 B_0 (x - x_0). */
+    for (int j = 0; j < H; j++) {
+        const int row = j * W;
+        for (int i = 0; i < W; i++) {
+            const float x   = (float) i * dx;
+            const float dxc = x - x0;
+            Ay[row + i] = 0.5f * B0 * dxc;
+        }
+    }
+
+    sim->bg_kind  = GR_BG_KIND_UNIFORM_MAGNETIC;
+    sim->bg_x0    = x0;
+    sim->bg_y0    = y0;
+    sim->bg_GM    = 0.0f;
+    sim->bg_eps   = 0.0f;
+    sim->bg_Jz    = 0.0f;
+    sim->bg_B0    = 0.0f;
+    sim->bg_B0_em = B0;
+}
+
 /* Analytic-mode evaluation of the installed background generator at the
  * particle's exact (x, y).  See gr_sandbox §12.6 / §12.8 for the rationale:
  * the sampled CIC+FD path introduces an O((dx/r)^2) tangential force error
@@ -265,8 +317,9 @@ int gr_bg_eval_analytic(const struct gr_sim* sim, float x, float y,
         (void) x; (void) y;
         return 1;
     }
-    case GR_BG_KIND_UNIFORM_GRAVITOMAGNETIC: {
-        /* No scalar gravity in this background. */
+    case GR_BG_KIND_UNIFORM_GRAVITOMAGNETIC:
+    case GR_BG_KIND_UNIFORM_MAGNETIC: {
+        /* No scalar gravity in these backgrounds. */
         *phi_out = 0.0f;
         *gx_out  = 0.0f;
         *gy_out  = 0.0f;
@@ -355,6 +408,51 @@ int gr_bg_eval_B_g(const struct gr_sim* sim, float x, float y,
     }
     default:
         *Bgz_out = 0.0f;
+        return 0;
+    }
+}
+
+/* Analytic-mode evaluation of the EM vector potential A_em(x, y). */
+int gr_bg_eval_A_em(const struct gr_sim* sim, float x, float y,
+                    float* Ax_out, float* Ay_out) {
+    if (!sim) {
+        *Ax_out = 0.0f;
+        *Ay_out = 0.0f;
+        return 0;
+    }
+    switch (sim->bg_kind) {
+    case GR_BG_KIND_UNIFORM_MAGNETIC: {
+        /* Symmetric-gauge form:
+         *   A_x = -0.5 B_0 (y - y_0),  A_y = +0.5 B_0 (x - x_0). */
+        const float dxi = x - sim->bg_x0;
+        const float dyi = y - sim->bg_y0;
+        *Ax_out = -0.5f * sim->bg_B0_em * dyi;
+        *Ay_out =  0.5f * sim->bg_B0_em * dxi;
+        return 1;
+    }
+    default:
+        *Ax_out = 0.0f;
+        *Ay_out = 0.0f;
+        return 0;
+    }
+}
+
+/* Analytic-mode B_em_z(x, y) = (curl A)_z = d/dx A_y - d/dy A_x. */
+int gr_bg_eval_B_em(const struct gr_sim* sim, float x, float y,
+                    float* Bz_out) {
+    if (!sim) {
+        *Bz_out = 0.0f;
+        return 0;
+    }
+    switch (sim->bg_kind) {
+    case GR_BG_KIND_UNIFORM_MAGNETIC: {
+        /* Constant by construction. */
+        (void) x; (void) y;
+        *Bz_out = sim->bg_B0_em;
+        return 1;
+    }
+    default:
+        *Bz_out = 0.0f;
         return 0;
     }
 }
