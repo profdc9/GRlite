@@ -156,6 +156,11 @@ struct gr_sim {
      *   A_x = -0.5 B0_em (y - bg_y0),  A_y = +0.5 B0_em (x - bg_x0).
      * Stage 23 unit-isolation test for the q v x B EM Lorentz force. */
     float        bg_B0_em;
+    /* Uniform EM electric field (E_x, E_y), used by GR_BG_KIND_UNIFORM_ELECTRIC.
+     *   phi^{bg}(x, y) = -( bg_Ex_em (x - bg_x0) + bg_Ey_em (y - bg_y0) )
+     * Stage 24 unit-isolation test for the q E EM Lorentz force. */
+    float        bg_Ex_em;
+    float        bg_Ey_em;
     /* Reserved slot for the charged variants (Stage 11+). */
     float        bg_charge;
 };
@@ -257,5 +262,16 @@ int gr_bg_eval_A_em(const struct gr_sim* sim, float x, float y,
  *   *Bz_out : B_z(x, y) = d/dx A_y - d/dy A_x. */
 int gr_bg_eval_B_em(const struct gr_sim* sim, float x, float y,
                     float* Bz_out);
+
+/* Defined in background.c — analytic-mode evaluation of the EM scalar
+ * potential phi(x, y) and its spatial gradient, for the installed
+ * background generator.  Returns 1 if a nonzero phi_em is available,
+ * 0 otherwise.  Output:
+ *   *phi_out : phi^{bg}(x, y)
+ *   *gx_out  : d/dx phi^{bg}(x, y)
+ *   *gy_out  : d/dy phi^{bg}(x, y)
+ * For UNIFORM_ELECTRIC: phi = -( Ex (x-x0) + Ey (y-y0) ), grad = (-Ex, -Ey). */
+int gr_bg_eval_phi_em(const struct gr_sim* sim, float x, float y,
+                      float* phi_out, float* gx_out, float* gy_out);
 
 #endif /* GRLITE_SIM_INTERNAL_H */

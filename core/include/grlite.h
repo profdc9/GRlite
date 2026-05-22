@@ -513,6 +513,20 @@ void gr_sim_set_background_uniform_magnetic(gr_sim_t* sim,
                                             float x0, float y0,
                                             float B0);
 
+/* Uniform electric field — fills phi^{bg} (EM scalar potential) so the
+ * gradient gives a spatially constant (E_x, E_y):
+ *
+ *   phi^{bg}(x, y)   = -( E_x (x - x_0) + E_y (y - y_0) )
+ *   -grad phi^{bg}   = ( E_x, E_y )                       (uniform)
+ *   A^{bg}           = 0                                  (no magnetic part)
+ *
+ * Stage 24 unit-isolation test for the q E piece of the EM Lorentz force.
+ * A charged particle at rest accelerates uniformly along the E direction:
+ * p(t) = q E t  (relativistic momentum form). */
+void gr_sim_set_background_uniform_electric(gr_sim_t* sim,
+                                            float x0, float y0,
+                                            float Ex, float Ey);
+
 /* ----------------------------------------------------------------------------
  * Background evaluation mode
  *
@@ -541,7 +555,8 @@ typedef enum {
     GR_BG_KIND_POINT_MASS              = 1,
     GR_BG_KIND_SPINNING_POINT_MASS     = 2,
     GR_BG_KIND_UNIFORM_GRAVITOMAGNETIC = 3,
-    GR_BG_KIND_UNIFORM_MAGNETIC        = 4
+    GR_BG_KIND_UNIFORM_MAGNETIC        = 4,
+    GR_BG_KIND_UNIFORM_ELECTRIC        = 5
     /* Future: CHARGED_POINT_MASS, KERR_NEWMAN, ... */
 } gr_bg_kind_t;
 

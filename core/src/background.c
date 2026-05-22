@@ -58,6 +58,8 @@ void gr_sim_clear_background(gr_sim_t* sim) {
     sim->bg_Jz     = 0.0f;
     sim->bg_B0     = 0.0f;
     sim->bg_B0_em  = 0.0f;
+    sim->bg_Ex_em  = 0.0f;
+    sim->bg_Ey_em  = 0.0f;
 }
 
 /* Lazily allocate and zero a background array if not already present. */
@@ -289,6 +291,48 @@ void gr_sim_set_background_uniform_magnetic(gr_sim_t* sim,
     sim->bg_B0_em = B0;
 }
 
+/* Uniform EM electric background — fills the EM scalar phi_bg with a
+ * linear potential whose negative gradient is the desired uniform field:
+ *   phi^{bg}(x, y) = -( E_x (x - x_0) + E_y (y - y_0) ),
+ *   -grad phi^{bg} = ( E_x, E_y )                       (uniform).
+ * No A^{bg} is installed.  Used by Stage 24 to isolate the q E piece of
+ * the EM Lorentz force from the v x B piece. */
+void gr_sim_set_background_uniform_electric(gr_sim_t* sim,
+                                            float x0, float y0,
+                                            float Ex, float Ey) {
+    if (!sim) return;
+    gr_sim_clear_background(sim);
+    float* phi = ensure_bg_alloc(sim, GR_FIELD_PHI_EM);
+    if (!phi) return;
+
+    const int   W  = sim->width;
+    const int   H  = sim->height;
+    const float dx = sim->dx;
+
+    /* CORNER sublattice for phi: nodes at (i, j) * dx. */
+    for (int j = 0; j < H; j++) {
+        const float y  = (float) j * dx;
+        const float dyi = y - y0;
+        const int   row = j * W;
+        for (int i = 0; i < W; i++) {
+            const float x   = (float) i * dx;
+            const float dxi = x - x0;
+            phi[row + i] = -(Ex * dxi + Ey * dyi);
+        }
+    }
+
+    sim->bg_kind  = GR_BG_KIND_UNIFORM_ELECTRIC;
+    sim->bg_x0    = x0;
+    sim->bg_y0    = y0;
+    sim->bg_GM    = 0.0f;
+    sim->bg_eps   = 0.0f;
+    sim->bg_Jz    = 0.0f;
+    sim->bg_B0    = 0.0f;
+    sim->bg_B0_em = 0.0f;
+    sim->bg_Ex_em = Ex;
+    sim->bg_Ey_em = Ey;
+}
+
 /* Analytic-mode evaluation of the installed background generator at the
  * particle's exact (x, y).  See gr_sandbox §12.6 / §12.8 for the rationale:
  * the sampled CIC+FD path introduces an O((dx/r)^2) tangential force error
@@ -318,7 +362,8 @@ int gr_bg_eval_analytic(const struct gr_sim* sim, float x, float y,
         return 1;
     }
     case GR_BG_KIND_UNIFORM_GRAVITOMAGNETIC:
-    case GR_BG_KIND_UNIFORM_MAGNETIC: {
+    case GR_BG_KIND_UNIFORM_MAGNETIC:
+    case GR_BG_KIND_UNIFORM_ELECTRIC: {
         /* No scalar gravity in these backgrounds. */
         *phi_out = 0.0f;
         *gx_out  = 0.0f;
@@ -453,6 +498,34 @@ int gr_bg_eval_B_em(const struct gr_sim* sim, float x, float y,
     }
     default:
         *Bz_out = 0.0f;
+        return 0;
+    }
+}
+
+/* Analytic-mode evaluation of the EM scalar potential phi^{bg}(x, y)
+ * and its gradient. */
+int gr_bg_eval_phi_em(const struct gr_sim* sim, float x, float y,
+                      float* phi_out, float* gx_out, float* gy_out) {
+    if (!sim) {
+        *phi_out = 0.0f;
+        *gx_out  = 0.0f;
+        *gy_out  = 0.0f;
+        return 0;
+    }
+    switch (sim->bg_kind) {
+    case GR_BG_KIND_UNIFORM_ELECTRIC: {
+        /* phi = -( Ex (x-x0) + Ey (y-y0) ) ; grad = (-Ex, -Ey). */
+        const float dxi = x - sim->bg_x0;
+        const float dyi = y - sim->bg_y0;
+        *phi_out = -(sim->bg_Ex_em * dxi + sim->bg_Ey_em * dyi);
+        *gx_out  = -sim->bg_Ex_em;
+        *gy_out  = -sim->bg_Ey_em;
+        return 1;
+    }
+    default:
+        *phi_out = 0.0f;
+        *gx_out  = 0.0f;
+        *gy_out  = 0.0f;
         return 0;
     }
 }

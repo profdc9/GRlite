@@ -3044,14 +3044,95 @@ $128\times 128$ grid):
 
 \paragraph{Status of the rest of $\vv{F}_{\mathrm{em}}$.}
 Eq.~(\ref{eq:Fem_lorentz}) has three pieces.  Stage~9e covers the
-$q\,\vv{v}\!\times\!\vv{B}$ term.  The $-q\nabla\phi$ scalar (Coulomb)
-term and the $-q\,\partial_t\vv{A}$ inductive term are not yet wired
-into the pusher; they will land with the static-Coulomb verification
-stage (analog of Stage~3 Poisson for EM) and the radiative-EM stage
-respectively.  Until then, charged particles in a non-magnetic EM
-background feel no EM force.  This was a conscious scope cut to keep
-the present verification focused on the curl-evaluator chain shared
-with the GEM side.
+$q\,\vv{v}\!\times\!\vv{B}$ term.  Stage~9f
+(Section~\ref{sec:stage_em_estatic}) adds the $-q\nabla\phi$ scalar
+(electrostatic) term.  Only the $-q\,\partial_t\vv{A}$ inductive piece
+remains unwired; it will land with the radiative-EM stage (where a
+time-varying perturbation $\vv{A}$ is the primary observable).
+
+\subsection{Stage 9f: Electrostatic force --- unit isolation}
+\label{sec:stage_em_estatic}
+
+Wires the $-q\nabla\phi$ piece of Eq.~(\ref{eq:Fem_lorentz}) into the
+pusher.  Stage~9e covers $q\vv{v}\!\times\!\vv{B}$; Stage~9f covers
+$-q\nabla\phi$; together they handle the full EM Lorentz force
+\emph{for static $\vv{A}$ backgrounds} (the $-q\,\partial_t\vv{A}$
+inductive piece is still pending and only matters when $\vv{A}$ is
+time-varying).
+
+\paragraph{Construction.}  A new analytic background generator
+\texttt{gr\_sim\_set\_background\_uniform\_electric} installs the linear
+EM scalar potential
+\begin{equation}
+\label{eq:em_uniform_e_bg}
+  \phi^{\mathrm{bg}}(x, y) = -\bigl(E_x(x - x_0) + E_y(y - y_0)\bigr),
+\end{equation}
+producing $-\nabla\phi^{\mathrm{bg}} = (E_x, E_y)$ uniformly.  No
+$\vv{A}^{\mathrm{bg}}$ is installed; the magnetic Lorentz piece
+contributes nothing.
+
+In the pusher, the gradient $\nabla\phi_{\mathrm{em}}^{\mathrm{total}}$
+at the particle is computed by
+\texttt{particle.c:phi\_em\_grad\_at\_total}, which mirrors the
+grav\_grad\_at structure exactly: analytic background via
+\texttt{gr\_bg\_eval\_phi\_em} (when \texttt{bg\_mode} is
+\textsc{analytic}), centered finite-difference of $\phi^{\mathrm{bg}}$
+on the CORNER sublattice plus CIC interpolation (when \textsc{sampled}),
+and the perturbation contribution from \texttt{fields[PHI\_EM]} read
+with the same \texttt{.prev} half-step convention as $\Phig$.  The
+TSC and Lewis--Birdsall variants of the EM gradient kernel are not yet
+ported; they will mirror the GEM-side
+(Section~\ref{sec:stage_perturb_fdtd}) when self-consistent PIC
+dynamics arrive on the EM side.
+
+\paragraph{Analytic prediction.}  With a uniform $\vv{E} = E_0\hat x$
+and no $\vv{B}$ or scalar gravity, a particle of charge $q$ and rest
+mass $m$ starting at rest follows
+\begin{align}
+\label{eq:em_uniform_e_dynamics}
+  p_x(t)        &= q E_0\,t, \qquad p_y(t) = 0, \\
+  x(t) - x(0)   &= \frac{m c^2}{q E_0}\!\left[\sqrt{1 + \!\Bigl(\tfrac{q E_0 t}{m c}\Bigr)^{\!2}} - 1\right],
+\end{align}
+the exact relativistic kinematic integral.  The Boris half-step
+convention stores $p^{N-1/2}$ at simulation step $N$, so the recorded
+momentum at step $N$ is $p_x^{N-1/2} = q E_0 (N - \tfrac{1}{2})\Delta t$.
+
+\paragraph{Test (\texttt{stage24\_uniform\_e\_field.c}).}  At $q = 1$,
+$m = 1$, $E_0 = 10^{-3}$, $c = 1$, $\Delta t = 1/\sqrt{2}$, $N = 200$:
+\begin{itemize}
+  \item ANALYTIC bg:  $p_x$ matches Eq.~(\ref{eq:em_uniform_e_dynamics})
+    to a relative error of $1.1\times 10^{-6}$ (float32 precision floor
+    of the kinematic integral); $p_y = 0$ exactly; position drift
+    matches the exact relativistic formula to $2.5\times 10^{-6}$.
+  \item SAMPLED bg:  $p_x$ \emph{bit-identical} to ANALYTIC mode (linear
+    $\phi^{\mathrm{bg}} \Rightarrow$ centered FD is exact, as established
+    by Stage~9d for the GEM curl analogue).
+  \item Sign reversal: $|p_x(E_0 > 0) + p_x(E_0 < 0)| < 10^{-8}$ ---
+    exact antisymmetry to round-off.
+  \item Neutral particle ($q = 0$): zero momentum and zero drift after
+    200 steps, confirming the electrostatic force is correctly gated
+    by charge.
+\end{itemize}
+
+\paragraph{Status of the EM Lorentz force after Stages~9e and 9f.}
+\begin{center}
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Piece of $\vv{F}_{\mathrm{em}}$} & \textbf{Implemented} & \textbf{Verified by} & \textbf{Bg evaluator} \\
+\midrule
+$+ q\,\vv{v}\!\times\!\vv{B}$ (magnetic Lorentz) & yes & Stage 9e & \texttt{gr\_bg\_eval\_B\_em} \\
+$- q\nabla\phi$ (electrostatic)                  & yes & Stage 9f & \texttt{gr\_bg\_eval\_phi\_em} \\
+$- q\,\partial_t\vv{A}$ (inductive)              & not yet & ---  & --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+The inductive $-q\,\partial_t\vv{A}$ piece requires sampling a one-sided
+time derivative of the $\vv{A}$ arrays in the pusher ($(\vv{A}_{\mathrm{curr}}
+- \vv{A}_{\mathrm{prev}})/\Delta t$, evaluated at the same half-step
+time as the magnetic curl).  For a static or slowly-varying
+$\vv{A}^{\mathrm{bg}}$ this piece is negligible; it will be wired in
+with the radiative-EM verification stage when a time-varying
+$\vv{A}^{\mathrm{pert}}$ becomes the primary observable.
 
 \subsection{Stage 10: Perturbation FDTD with moving particle source}
 \label{sec:stage_perturb_fdtd}

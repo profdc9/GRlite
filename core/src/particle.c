@@ -442,20 +442,24 @@ static inline void grav_force_at(const struct gr_sim* sim,
  *   F_em = q ( -grad phi - d_t A + v x B )                  (B = curl A)
  *
  * Currently implemented pieces (Stage 23+):
- *   v x B   — coefficient +1 (no spin-2 enhancement; cf. the +4 on v x B_g).
+ *   v x B    — Stage 23 unit isolation.  Coefficient +1.
+ *   -grad phi — Stage 24 unit isolation (electrostatic).  Passed as
+ *               (phi_grad_x, phi_grad_y) so the force contribution is
+ *                   F_E = -q * (phi_grad_x, phi_grad_y).
  *
- * Not yet wired (to come in subsequent stages):
- *   -grad phi  (static Coulomb / scalar EM background)
- *   -d_t A      (induced electric field from time-varying A)
+ * Not yet wired (planned):
+ *   -d_t A    (induced electric field from time-varying A).  Until this
+ *             lands, the EM force on a particle in a TIME-VARYING A
+ *             background omits the inductive piece; static A is fine.
  *
- * Until those are added, this routine returns the magnetic Lorentz piece
- * alone.  Component formulas in 2D with B_z along +z (same identity as the
- * GM case): (v x B_z z)_x = +v_y B_z, (v x B_z z)_y = -v_x B_z. */
+ * Component formulas in 2D with B_z along +z (same identity as the GM
+ * case): (v x B_z hat z)_x = +v_y B_z, (v x B_z hat z)_y = -v_x B_z. */
 static inline void em_force_at(float charge, float vx, float vy,
+                               float phi_grad_x, float phi_grad_y,
                                float B_em_z,
                                float* Fx, float* Fy) {
-    *Fx = +charge * vy * B_em_z;
-    *Fy = -charge * vx * B_em_z;
+    *Fx = -charge * phi_grad_x + charge * vy * B_em_z;
+    *Fy = -charge * phi_grad_y - charge * vx * B_em_z;
 }
 
 /* Yee curl: B_g_z = d/dx A_{g,y} - d/dy A_{g,x} on the cell-center
@@ -538,6 +542,79 @@ static float B_g_z_at_total(const struct gr_sim* sim, float x, float y) {
     return bg + pert;
 }
 
+/* EM scalar gradient at the particle: grad phi_em^{total} = grad phi^{bg}
+ * + grad phi^{pert}.  Returns (gx, gy) such that the electrostatic force
+ * piece on charge q is F = -q * (gx, gy).  Mirrors grav_grad_at's CORNER-
+ * sublattice centered-FD + CIC-interp scheme — Phi_em lives on the CORNER
+ * sublattice, same as Phi_g, so the kernel is structurally identical.
+ *
+ * For now this routine implements the basic CIC+FD path (no TSC, no LB).
+ * The EM scalar source typically has no PIC-deposition self-consistency
+ * concern at our use cases — Stage 24 uses an ANALYTIC linear background;
+ * future stages with deposited rho_q will benefit from the TSC/LB upgrades,
+ * but those should mirror the GM-side variants when added.  Gated by
+ * em_lorentz_force_enabled (zero output disables the q E piece). */
+static void phi_em_grad_at_total(const struct gr_sim* sim, float x, float y,
+                                 float* gx_out, float* gy_out) {
+    *gx_out = 0.0f;
+    *gy_out = 0.0f;
+    if (!sim || !sim->em_lorentz_force_enabled) return;
+    const int   W  = sim->width;
+    const int   H  = sim->height;
+    const float dx = sim->dx;
+    const float inv_2dx = 1.0f / (2.0f * dx);
+
+    /* Background contribution (analytic or sampled). */
+    float gx_bg = 0.0f, gy_bg = 0.0f;
+    const float* bg_corner = NULL;
+    if (sim->bg_mode == GR_BG_MODE_ANALYTIC && sim->bg_kind != GR_BG_KIND_NONE) {
+        float phi_a;
+        gr_bg_eval_phi_em(sim, x, y, &phi_a, &gx_bg, &gy_bg);
+    } else if (sim->bg_mode == GR_BG_MODE_SAMPLED) {
+        bg_corner = sim->phi_bg;   /* may be NULL */
+    }
+
+    /* Perturbation: read prev when field evolution is active (same
+     * read-prev convention as Phi_g). */
+    const float* pert = sim->field_evolution_enabled
+                            ? sim->fields[GR_FIELD_PHI_EM].prev
+                            : sim->fields[GR_FIELD_PHI_EM].curr;
+
+    /* CIC-corner interp at (x, y); centered FD on neighbor stencil. */
+    const float xn = x / dx;
+    const float yn = y / dx;
+    const int   ic = (int) floorf(xn);
+    const int   jc = (int) floorf(yn);
+    if (ic < 1 || ic >= W - 2 || jc < 1 || jc >= H - 2) {
+        *gx_out = gx_bg;
+        *gy_out = gy_bg;
+        return;
+    }
+    const float alpha = xn - (float) ic;
+    const float beta  = yn - (float) jc;
+    float gx_pert = 0.0f, gy_pert = 0.0f;
+    for (int dq = 0; dq < 2; dq++) {
+        const int jj  = jc + dq;
+        const int row = jj * W;
+        for (int dp = 0; dp < 2; dp++) {
+            const int ii = ic + dp;
+            float vgx = (pert[row + ii + 1] - pert[row + ii - 1]) * inv_2dx;
+            float vgy = (pert[row + W + ii] - pert[row - W + ii]) * inv_2dx;
+            if (bg_corner) {
+                vgx += (bg_corner[row + ii + 1] - bg_corner[row + ii - 1]) * inv_2dx;
+                vgy += (bg_corner[row + W + ii] - bg_corner[row - W + ii]) * inv_2dx;
+            }
+            const float wx = (dp == 0) ? (1.0f - alpha) : alpha;
+            const float wy = (dq == 0) ? (1.0f - beta)  : beta;
+            const float w = wx * wy;
+            gx_pert += w * vgx;
+            gy_pert += w * vgy;
+        }
+    }
+    *gx_out = gx_pert + gx_bg;
+    *gy_out = gy_pert + gy_bg;
+}
+
 /* Total EM magnetic field B_z = (curl A)_z at the particle position.
  * Structurally identical to B_g_z_at_total but points at the EM arrays
  * (Ax_bg / Ay_bg for the background, fields[A_X] / fields[A_Y] for the
@@ -599,6 +676,11 @@ void gr_particle_push_all(struct gr_sim* sim) {
          * enabled.  When the particle is neutral or no EM A is present
          * this contributes nothing. */
         const float B_em_z = B_em_z_at_total(sim, p->x, p->y);
+        /* EM scalar gradient at the particle for the -q grad phi
+         * electrostatic piece (Stage 24+).  Combines bg + perturbation;
+         * gated by em_lorentz_force_enabled. */
+        float E_phi_grad_x, E_phi_grad_y;
+        phi_em_grad_at_total(sim, p->x, p->y, &E_phi_grad_x, &E_phi_grad_y);
 
         /* v from lagged p^{n-1/2} — used to evaluate the velocity-dependent
          * Tier-2 force terms.  Negligible cost for Newtonian since grav_force_at
@@ -610,11 +692,13 @@ void gr_particle_push_all(struct gr_sim* sim) {
 
         float Fx, Fy;
         grav_force_at(sim, p->mass, vx_pre, vy_pre, phi, grad_x, grad_y, Bg_z, &Fx, &Fy);
-        /* Additive EM Lorentz contribution (currently the q v x B piece;
-         * scalar -q grad phi_em and -q d_t A pieces land in later stages). */
+        /* Additive EM Lorentz contribution: -q grad phi + q v x B
+         * (Stages 23/24).  The -q d_t A inductive piece is still pending. */
         {
             float Fx_em, Fy_em;
-            em_force_at(p->charge, vx_pre, vy_pre, B_em_z, &Fx_em, &Fy_em);
+            em_force_at(p->charge, vx_pre, vy_pre,
+                        E_phi_grad_x, E_phi_grad_y,
+                        B_em_z, &Fx_em, &Fy_em);
             Fx += Fx_em;
             Fy += Fy_em;
         }
@@ -624,7 +708,8 @@ void gr_particle_push_all(struct gr_sim* sim) {
          * midpoint velocity gives 2nd-order time accuracy.  Engage it
          * whenever the force depends on v — RELATIVISTIC tier always,
          * plus any tier when Bg_z != 0 or B_em_z != 0 (and the particle
-         * carries charge for the EM piece). */
+         * carries charge for the EM piece).  The -q grad phi piece is
+         * v-independent so it doesn't drive the corrector. */
         const int em_velocity_dep = (B_em_z != 0.0f) && (p->charge != 0.0f);
         if (sim->force_tier == GR_FORCE_RELATIVISTIC
             || Bg_z != 0.0f || em_velocity_dep) {
@@ -638,7 +723,9 @@ void gr_particle_push_all(struct gr_sim* sim) {
             const float vy_mid = 0.5f * (vy_pre + vy_post);
             grav_force_at(sim, p->mass, vx_mid, vy_mid, phi, grad_x, grad_y, Bg_z, &Fx, &Fy);
             float Fx_em, Fy_em;
-            em_force_at(p->charge, vx_mid, vy_mid, B_em_z, &Fx_em, &Fy_em);
+            em_force_at(p->charge, vx_mid, vy_mid,
+                        E_phi_grad_x, E_phi_grad_y,
+                        B_em_z, &Fx_em, &Fy_em);
             Fx += Fx_em;
             Fy += Fy_em;
         }
@@ -702,17 +789,20 @@ int gr_sim_add_particle(gr_sim_t* sim, float x, float y,
     float grad_x, grad_y;
     grav_grad_at(sim, x, y, &grad_x, &grad_y);
     const float phi_init = gr_phi_g_total_at(sim, x, y);
-    /* Tier-1 gravitomagnetic B_g_z + EM B_z at the initial position.  Uses
-     * the same total (background + perturbation, analytic or sampled)
-     * evaluators as gr_particle_push_all so the half-step-back kick stays
-     * consistent with what the pusher will apply on step 0. */
+    /* Tier-1 gravitomagnetic B_g_z + EM B_z + EM grad phi at the initial
+     * position.  Uses the same total evaluators as gr_particle_push_all so
+     * the half-step-back kick stays consistent with what the pusher will
+     * apply on step 0. */
     const float Bg_z_init   = B_g_z_at_total(sim, x, y);
     const float B_em_z_init = B_em_z_at_total(sim, x, y);
+    float Egx_init, Egy_init;
+    phi_em_grad_at_total(sim, x, y, &Egx_init, &Egy_init);
     float Fx, Fy;
     grav_force_at(sim, mass, vx, vy, phi_init, grad_x, grad_y, Bg_z_init, &Fx, &Fy);
     {
         float Fx_em, Fy_em;
-        em_force_at(charge, vx, vy, B_em_z_init, &Fx_em, &Fy_em);
+        em_force_at(charge, vx, vy, Egx_init, Egy_init, B_em_z_init,
+                    &Fx_em, &Fy_em);
         Fx += Fx_em;
         Fy += Fy_em;
     }
