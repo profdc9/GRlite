@@ -537,14 +537,28 @@ static float B_g_z_at_total(const struct gr_sim* sim, float x, float y) {
         bg = curl_Agz_sampled_at(sim->Agx_bg, sim->Agy_bg,
                                  sim->width, sim->height, sim->dx, x, y);
     }
-    const float* Agx_pert = sim->field_evolution_enabled
-                                ? sim->fields[GR_FIELD_A_GX].prev
-                                : sim->fields[GR_FIELD_A_GX].curr;
-    const float* Agy_pert = sim->field_evolution_enabled
-                                ? sim->fields[GR_FIELD_A_GY].prev
-                                : sim->fields[GR_FIELD_A_GY].curr;
-    const float pert = curl_Agz_sampled_at(Agx_pert, Agy_pert,
-                                           sim->width, sim->height, sim->dx, x, y);
+    /* Half-step A_g convention: perturbation A_g lives at half-integer times,
+     * so .prev = A_g^{n-1/2} and .curr = A_g^{n+1/2}.  To evaluate B_g at
+     * the integer time t^n where the particle lives, average the curls of
+     * the two surrounding half-step slices:
+     *    B_g^n ≈ ( curl A_g^{n-1/2} + curl A_g^{n+1/2} ) / 2.
+     * When field_evolution is off, prev and curr are both at their static
+     * values (no rotation, both buffers untouched), so the average reduces
+     * to a single-slice read. */
+    float pert = 0.0f;
+    if (sim->field_evolution_enabled) {
+        const float c1 = curl_Agz_sampled_at(sim->fields[GR_FIELD_A_GX].prev,
+                                             sim->fields[GR_FIELD_A_GY].prev,
+                                             sim->width, sim->height, sim->dx, x, y);
+        const float c2 = curl_Agz_sampled_at(sim->fields[GR_FIELD_A_GX].curr,
+                                             sim->fields[GR_FIELD_A_GY].curr,
+                                             sim->width, sim->height, sim->dx, x, y);
+        pert = 0.5f * (c1 + c2);
+    } else {
+        pert = curl_Agz_sampled_at(sim->fields[GR_FIELD_A_GX].curr,
+                                   sim->fields[GR_FIELD_A_GY].curr,
+                                   sim->width, sim->height, sim->dx, x, y);
+    }
     return bg + pert;
 }
 
@@ -622,15 +636,16 @@ static void phi_em_grad_at_total(const struct gr_sim* sim, float x, float y,
 }
 
 /* Time derivative of the GEM vector potential A_g at the particle, for
- * the GM inductive piece -m d_t A_g of the Tier-3 gravity force
- * (gr_sandbox_v35.tex eq:eih_full / sec:alg_rel eqbox line 1040).
+ * the GM inductive piece -m d_t A_g of the Tier-3 gravity force.
  *
- * Centered difference (A_g^{n+1} - A_g^{n-1}) / (2 dt) at t^n, using
- * fields[A_GX].curr/.next and fields[A_GY].curr/.next.  Gated by
- * gravitomagnetic_inductive_enabled (default 0 -- existing gravity
- * tests don't use this piece).  Stage 28 enables it as a diagnostic
- * to test whether the closed-loop PIC heating observed for EM
- * (Stage 27) also appears on the gravity side. */
+ * Half-step A_g convention (v36): the A_g buffers store half-step time
+ * slices, so .prev = A^{n-1/2}, .curr = A^{n+1/2} after the leapfrog +
+ * rotation.  Then the 1-step centered difference
+ *     d_t A_g^n = (curr - prev) / dt = (A^{n+1/2} - A^{n-1/2}) / dt
+ * is centered cleanly at t^n with a tight 1-step stencil.  The source
+ * J^{n-1/2} fed into the wave equation now matches A's half-step time
+ * naturally, dissolving the source-time staggering issue.  Both pieces
+ * resolve in one architectural change. */
 static void dt_A_g_at_total(const struct gr_sim* sim, float x, float y,
                             float* dAx_out, float* dAy_out) {
     *dAx_out = 0.0f;
@@ -639,19 +654,19 @@ static void dt_A_g_at_total(const struct gr_sim* sim, float x, float y,
     const int   W  = sim->width;
     const int   H  = sim->height;
     const float dx = sim->dx;
-    const float inv_2dt = 1.0f / (2.0f * sim->dt);
+    const float inv_dt = 1.0f / sim->dt;
 
     const float Ax_curr = cic_interp_xedge(sim->fields[GR_FIELD_A_GX].curr,
                                            W, H, dx, x, y);
-    const float Ax_next = cic_interp_xedge(sim->fields[GR_FIELD_A_GX].next,
+    const float Ax_prev = cic_interp_xedge(sim->fields[GR_FIELD_A_GX].prev,
                                            W, H, dx, x, y);
     const float Ay_curr = cic_interp_yedge(sim->fields[GR_FIELD_A_GY].curr,
                                            W, H, dx, x, y);
-    const float Ay_next = cic_interp_yedge(sim->fields[GR_FIELD_A_GY].next,
+    const float Ay_prev = cic_interp_yedge(sim->fields[GR_FIELD_A_GY].prev,
                                            W, H, dx, x, y);
     const float s = sim->grav_inductive_sign;
-    *dAx_out = s * (Ax_curr - Ax_next) * inv_2dt;
-    *dAy_out = s * (Ay_curr - Ay_next) * inv_2dt;
+    *dAx_out = s * (Ax_curr - Ax_prev) * inv_dt;
+    *dAy_out = s * (Ay_curr - Ay_prev) * inv_dt;
 }
 
 /* Time derivative of the EM vector potential A_em at the particle, for
@@ -692,36 +707,22 @@ static void dt_A_em_at_total(const struct gr_sim* sim, float x, float y,
     const float dx = sim->dx;
 
     const float s = sim->em_inductive_sign;
-    if (sim->em_inductive_disc == GR_INDUCTIVE_BACKWARD) {
-        /* Backward difference (prev - next) / dt = (A^n - A^{n-1}) / dt,
-         * at t^{n-1/2}.  Both slices are pre-current-step; matches the
-         * .prev "no current-step self-deposit" convention used by the
-         * spatial-derivative pieces. */
-        const float inv_dt = 1.0f / sim->dt;
-        const float Ax_prev = cic_interp_xedge(sim->fields[GR_FIELD_A_X].prev,
-                                               W, H, dx, x, y);
-        const float Ax_next = cic_interp_xedge(sim->fields[GR_FIELD_A_X].next,
-                                               W, H, dx, x, y);
-        const float Ay_prev = cic_interp_yedge(sim->fields[GR_FIELD_A_Y].prev,
-                                               W, H, dx, x, y);
-        const float Ay_next = cic_interp_yedge(sim->fields[GR_FIELD_A_Y].next,
-                                               W, H, dx, x, y);
-        *dAx_out = s * (Ax_prev - Ax_next) * inv_dt;
-        *dAy_out = s * (Ay_prev - Ay_next) * inv_dt;
-        return;
-    }
-    /* Default: centered difference (curr - next) / (2 dt) at t^n. */
-    const float inv_2dt = 1.0f / (2.0f * sim->dt);
+    /* Half-step A_em convention (v36): .prev = A^{n-1/2}, .curr = A^{n+1/2}.
+     * d_t A^n = (curr - prev) / dt = 1-step centered diff at t^n.  The
+     * BACKWARD discretization option is now structurally equivalent and
+     * retained for API compat (legacy stages that didn't drive A.next).
+     * CENTERED (default) reads the natural 1-step diff. */
+    const float inv_dt = 1.0f / sim->dt;
     const float Ax_curr = cic_interp_xedge(sim->fields[GR_FIELD_A_X].curr,
                                            W, H, dx, x, y);
-    const float Ax_next = cic_interp_xedge(sim->fields[GR_FIELD_A_X].next,
+    const float Ax_prev = cic_interp_xedge(sim->fields[GR_FIELD_A_X].prev,
                                            W, H, dx, x, y);
     const float Ay_curr = cic_interp_yedge(sim->fields[GR_FIELD_A_Y].curr,
                                            W, H, dx, x, y);
-    const float Ay_next = cic_interp_yedge(sim->fields[GR_FIELD_A_Y].next,
+    const float Ay_prev = cic_interp_yedge(sim->fields[GR_FIELD_A_Y].prev,
                                            W, H, dx, x, y);
-    *dAx_out = s * (Ax_curr - Ax_next) * inv_2dt;
-    *dAy_out = s * (Ay_curr - Ay_next) * inv_2dt;
+    *dAx_out = s * (Ax_curr - Ax_prev) * inv_dt;
+    *dAy_out = s * (Ay_curr - Ay_prev) * inv_dt;
 }
 
 /* Total EM magnetic field B_z = (curl A)_z at the particle position.
@@ -739,14 +740,21 @@ static float B_em_z_at_total(const struct gr_sim* sim, float x, float y) {
         bg = curl_Agz_sampled_at(sim->Ax_bg, sim->Ay_bg,
                                  sim->width, sim->height, sim->dx, x, y);
     }
-    const float* Ax_pert = sim->field_evolution_enabled
-                               ? sim->fields[GR_FIELD_A_X].prev
-                               : sim->fields[GR_FIELD_A_X].curr;
-    const float* Ay_pert = sim->field_evolution_enabled
-                               ? sim->fields[GR_FIELD_A_Y].prev
-                               : sim->fields[GR_FIELD_A_Y].curr;
-    const float pert = curl_Agz_sampled_at(Ax_pert, Ay_pert,
-                                           sim->width, sim->height, sim->dx, x, y);
+    /* Half-step A convention: same averaging as B_g_z_at_total. */
+    float pert = 0.0f;
+    if (sim->field_evolution_enabled) {
+        const float c1 = curl_Agz_sampled_at(sim->fields[GR_FIELD_A_X].prev,
+                                             sim->fields[GR_FIELD_A_Y].prev,
+                                             sim->width, sim->height, sim->dx, x, y);
+        const float c2 = curl_Agz_sampled_at(sim->fields[GR_FIELD_A_X].curr,
+                                             sim->fields[GR_FIELD_A_Y].curr,
+                                             sim->width, sim->height, sim->dx, x, y);
+        pert = 0.5f * (c1 + c2);
+    } else {
+        pert = curl_Agz_sampled_at(sim->fields[GR_FIELD_A_X].curr,
+                                   sim->fields[GR_FIELD_A_Y].curr,
+                                   sim->width, sim->height, sim->dx, x, y);
+    }
     return bg + pert;
 }
 

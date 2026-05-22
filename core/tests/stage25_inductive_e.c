@@ -80,18 +80,19 @@ static void run_inductive(int sign_A, float charge, int n_steps, run_t* out) {
     gr_sim_set_bg_mode(sim, GR_BG_MODE_ANALYTIC);   /* no bg fields installed */
 
     const float dt = gr_sim_dt(sim);
-    /* Manually populate fields[A_X].curr and .next so that the centered
-     * difference (curr - next) / (2 dt) = A_0 at every interior cell.
-     * Set curr = +A_0 dt, next = -A_0 dt uniformly over the grid. */
+    /* Manually populate fields[A_X].prev and .curr so that the 1-step
+     * centered difference (curr - prev) / dt = A_0 at every interior cell.
+     * Half-step convention: .prev = A^{n-1/2}, .curr = A^{n+1/2}.
+     * Choose prev = -A_0 dt / 2, curr = +A_0 dt / 2 so the diff is A_0. */
     float* Ax_curr = sim->fields[GR_FIELD_A_X].curr;
-    float* Ax_next = sim->fields[GR_FIELD_A_X].next;
-    const float curr_val = +A0 * dt;
-    const float next_val = -A0 * dt;
+    float* Ax_prev = sim->fields[GR_FIELD_A_X].prev;
+    const float curr_val = +A0 * dt * 0.5f;
+    const float prev_val = -A0 * dt * 0.5f;
     for (int k = 0; k < W * H; k++) {
         Ax_curr[k] = curr_val;
-        Ax_next[k] = next_val;
+        Ax_prev[k] = prev_val;
     }
-    /* A_y curr/next stay at zero -> no d_t A_y. */
+    /* A_y prev/curr stay at zero -> no d_t A_y. */
 
     gr_sim_add_particle(sim, cx, cy, /*mass=*/1.0f, charge,
                         /*vx=*/0.0f, /*vy=*/0.0f);
