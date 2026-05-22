@@ -436,6 +436,86 @@ static inline void grav_force_at(const struct gr_sim* sim,
     *Fy -= 4.0f * mass * vx * Bg_z;
 }
 
+/* Yee curl: B_g_z = d/dx A_{g,y} - d/dy A_{g,x} on the cell-center
+ * sublattice (i+0.5, j+0.5) * dx from edge-staggered A_g arrays
+ * (gr_sandbox_v35.tex §9.1, Yee staggering).  A_{g,x} lives on X_EDGE
+ * (nodes at (i+0.5, j) * dx); A_{g,y} on Y_EDGE (nodes at (i, j+0.5) * dx).
+ * Forward differences:
+ *   d/dx A_{g,y}     = (A_gy[j, i+1] - A_gy[j, i]) / dx
+ *   d/dy A_{g,x}     = (A_gx[j+1, i] - A_gx[j, i]) / dx
+ * yielding B_g_z at cell center (i+0.5, j+0.5).  Bilinear interpolation of
+ * the four cell-center values around the particle gives B_g_z at (x, y).
+ * Returns 0 if either array is NULL or the stencil straddles the box edge. */
+static float curl_Agz_sampled_at(const float* Agx, const float* Agy,
+                                 int W, int H, float dx,
+                                 float x, float y) {
+    if (!Agx || !Agy) return 0.0f;
+    const float inv_dx = 1.0f / dx;
+    /* Cell-center coordinates of the particle. */
+    const float u = x * inv_dx - 0.5f;
+    const float v = y * inv_dx - 0.5f;
+    const int   ic = (int) floorf(u);
+    const int   jc = (int) floorf(v);
+    /* Need cell centers (ic, jc), (ic+1, jc), (ic, jc+1), (ic+1, jc+1).
+     * Curl at (ic+1, jc+1) reads A_gy at column ic+2 and A_gx at row jc+2,
+     * so interior bounds are ic in [0, W-3], jc in [0, H-3]. */
+    if (ic < 0 || ic > W - 3 || jc < 0 || jc > H - 3) return 0.0f;
+    const float fx = u - (float) ic;
+    const float fy = v - (float) jc;
+    /* Inline the curl at each of the four cell centers (ic+di, jc+dj). */
+    float bz[4];
+    for (int dj = 0; dj < 2; dj++) {
+        const int j = jc + dj;
+        for (int di = 0; di < 2; di++) {
+            const int i = ic + di;
+            const float dAgy_dx = (Agy[j * W + (i + 1)] - Agy[j * W + i]) * inv_dx;
+            const float dAgx_dy = (Agx[(j + 1) * W + i] - Agx[j * W + i]) * inv_dx;
+            bz[dj * 2 + di] = dAgy_dx - dAgx_dy;
+        }
+    }
+    const float w00 = (1.0f - fx) * (1.0f - fy);
+    const float w10 =         fx  * (1.0f - fy);
+    const float w01 = (1.0f - fx) *         fy;
+    const float w11 =         fx  *         fy;
+    return w00 * bz[0] + w10 * bz[1] + w01 * bz[2] + w11 * bz[3];
+}
+
+/* Total gravitomagnetic field B_g_z at the particle position, combining
+ * background (analytic OR sampled) and perturbation (always sampled).
+ * Returns 0 if the gravitomagnetic force is gated off.
+ *
+ * Background:
+ *   - bg_mode = ANALYTIC: closed form via gr_bg_eval_B_g (handles
+ *     UNIFORM_GRAVITOMAGNETIC, SPINNING_POINT_MASS; zero otherwise).
+ *   - bg_mode = SAMPLED:  Yee curl of Agx_bg, Agy_bg arrays (zero when
+ *     the kind has no A_g background, since those arrays remain NULL).
+ *
+ * Perturbation: Yee curl of fields[A_GX] and fields[A_GY] arrays.  Reads
+ * .prev when field_evolution_enabled (same read-prev convention as Phi_g
+ * for time-consistency with the deposit done at the start of this step);
+ * falls back to .curr when field evolution is off (static fields).  When
+ * the perturbation A_g potentials are unsourced and zero this contributes
+ * nothing, preserving Stage 7-21 behavior bit-exactly. */
+static float B_g_z_at_total(const struct gr_sim* sim, float x, float y) {
+    if (!sim || !sim->gravitomagnetic_force_enabled) return 0.0f;
+    float bg = 0.0f;
+    if (sim->bg_mode == GR_BG_MODE_ANALYTIC) {
+        gr_bg_eval_B_g(sim, x, y, &bg);
+    } else {
+        bg = curl_Agz_sampled_at(sim->Agx_bg, sim->Agy_bg,
+                                 sim->width, sim->height, sim->dx, x, y);
+    }
+    const float* Agx_pert = sim->field_evolution_enabled
+                                ? sim->fields[GR_FIELD_A_GX].prev
+                                : sim->fields[GR_FIELD_A_GX].curr;
+    const float* Agy_pert = sim->field_evolution_enabled
+                                ? sim->fields[GR_FIELD_A_GY].prev
+                                : sim->fields[GR_FIELD_A_GY].curr;
+    const float pert = curl_Agz_sampled_at(Agx_pert, Agy_pert,
+                                           sim->width, sim->height, sim->dx, x, y);
+    return bg + pert;
+}
+
 /* Boris-leapfrog kick-drift for one timestep.
  *
  * gr_sandbox_v32.tex §9.2:
@@ -458,18 +538,13 @@ void gr_particle_push_all(struct gr_sim* sim) {
         grav_grad_at(sim, p->x, p->y, &grad_x, &grad_y);
         const float phi = gr_phi_g_total_at(sim, p->x, p->y);
 
-        /* Gravitomagnetic field at the particle (Tier-1 source for the
-         * v x B_g term in grav_force_at).  Background contribution only for
-         * now — perturbation A_g contributes when a sampled-mode evaluator
-         * for curl(A_g_pert) is added.  Returns 0 when no A_g background is
-         * installed (bg_kind = NONE/POINT_MASS), recovering Tier-0/2 paths.
-         * Gated by the gravitomagnetic_force_enabled runtime flag so that
-         * stage09 (clock-only isolation) can disable the v x B_g piece. */
-        float Bg_z = 0.0f;
-        if (sim->gravitomagnetic_force_enabled
-            && sim->bg_mode == GR_BG_MODE_ANALYTIC) {
-            gr_bg_eval_B_g(sim, p->x, p->y, &Bg_z);
-        }
+        /* Total gravitomagnetic field B_g_z at the particle (Tier-1 source
+         * for the v x B_g term in grav_force_at).  Combines background
+         * (analytic OR sampled, depending on bg_mode) and perturbation
+         * (always sampled, via Yee curl).  Gated by the
+         * gravitomagnetic_force_enabled flag so that stage09 (clock-only
+         * isolation) can disable the v x B_g piece. */
+        const float Bg_z = B_g_z_at_total(sim, p->x, p->y);
 
         /* v from lagged p^{n-1/2} — used to evaluate the velocity-dependent
          * Tier-2 force terms.  Negligible cost for Newtonian since grav_force_at
@@ -557,15 +632,11 @@ int gr_sim_add_particle(gr_sim_t* sim, float x, float y,
     float grad_x, grad_y;
     grav_grad_at(sim, x, y, &grad_x, &grad_y);
     const float phi_init = gr_phi_g_total_at(sim, x, y);
-    /* Tier-1 gravitomagnetic B_g_z at the initial position (analytic mode
-     * only; sampled-mode evaluation matches gr_particle_push_all).  Gated
-     * by gravitomagnetic_force_enabled so the half-step-back kick stays
-     * consistent with what the pusher will apply on step 0. */
-    float Bg_z_init = 0.0f;
-    if (sim->gravitomagnetic_force_enabled
-        && sim->bg_mode == GR_BG_MODE_ANALYTIC) {
-        gr_bg_eval_B_g(sim, x, y, &Bg_z_init);
-    }
+    /* Tier-1 gravitomagnetic B_g_z at the initial position.  Uses the same
+     * total (background + perturbation, analytic or sampled) evaluator as
+     * gr_particle_push_all so the half-step-back kick stays consistent
+     * with what the pusher will apply on step 0. */
+    const float Bg_z_init = B_g_z_at_total(sim, x, y);
     float Fx, Fy;
     grav_force_at(sim, mass, vx, vy, phi_init, grad_x, grad_y, Bg_z_init, &Fx, &Fy);
     /* p^0 = gamma_0 m v (relativistic). */

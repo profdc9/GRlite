@@ -2917,6 +2917,67 @@ Lorentz force on the orbit, EIH precession --- are independent at
 $\order{J_z}$ and $\order{(v/c)^2}$, and the verification stages
 isolate each in turn.
 
+\subsection{Stage 9d: Sampled-mode curl of A\_g}
+\label{sec:stage_sampled_curl}
+
+Stages~9b and 9c verified the gravitomagnetic Lorentz force with
+\emph{analytic-mode} B$_g$ — closed-form curls of the uniform and
+spinning-point-mass backgrounds.  Stage~9d extends the verification to
+the \emph{sampled-mode} path: a 2-point Yee curl of the
+\textsc{X\_EDGE} and \textsc{Y\_EDGE} potential arrays.  This is the
+machinery the pusher will use once moving masses generate a
+\emph{self-consistent} perturbation $\Ag^{\mathrm{pert}}$ that has no
+closed form — the same code path stages 9b/9c exercise indirectly via
+the background route.
+
+\paragraph{Kernel.}  $B_{g,z}$ lives naturally on the cell-center
+sublattice $(i+\tfrac12, j+\tfrac12)\Delta x$.  The discrete curl is
+\begin{equation}
+\label{eq:Bgz_yee_curl}
+  B_{g,z}\bigl[i+\tfrac12, j+\tfrac12\bigr]
+  = \frac{A_{g,y}[i+1, j] - A_{g,y}[i, j]}{\Delta x}
+  - \frac{A_{g,x}[i, j+1] - A_{g,x}[i, j]}{\Delta x},
+\end{equation}
+using the X\_EDGE indexing of $A_{g,x}$ (sample at $(i+\tfrac12, j)\Delta x$)
+and the Y\_EDGE indexing of $A_{g,y}$ (sample at $(i, j+\tfrac12)\Delta x$).
+The particle's $B_{g,z}$ is the bilinear interpolation of the four
+surrounding cell-center values.  The total $B_{g,z}$ at the particle
+is the sum of (i) the background contribution
+(analytic via $\texttt{gr\_bg\_eval\_B\_g}$ when \texttt{bg\_mode} is
+\textsc{analytic}, sampled via Eq.~\ref{eq:Bgz_yee_curl} when
+\textsc{sampled}), and (ii) the perturbation contribution (always
+sampled, reading the \texttt{.prev} buffer when field evolution is
+active to match the deposit half-step time --- the same read-prev
+convention as for $\Phig$ in Stage 18's energy-conservation fix).
+
+\paragraph{Test (\texttt{stage22\_sampled\_bg\_curl.c}).}
+\begin{itemize}
+  \item \emph{Phase A — uniform $\vv{B}_g$:}  Symmetric-gauge
+    $\Ag$ is linear in $(x, y)$, so the 2-point Yee forward
+    difference is \emph{exact}.  The sampled $B_{g,z}$ matches
+    $B_0$ at every interior sample point to floating-point round-off
+    ($\sim 10^{-10}$ relative).
+  \item \emph{Phase B — dipole $\vv{B}_g(r)$:}  At
+    $J_z = 2$, $\epsilon = 1$, $\Delta x = 1$, the relative error
+    against the analytic curl is $0.62\%$ at $r=20$, $0.16\%$ at $r=40$,
+    $0.04\%$ at $r=80$.  Convergence ratios: $3.97\times$ and $4.00\times$
+    --- exactly the expected 2nd-order behaviour
+    ($\mathrm{err} \propto (\Delta x/r)^2$).
+  \item \emph{Phase C — Stage 9b cyclotron repeated with sampled
+    $\vv{B}_g$:}  Larmor-radius error is $5\times 10^{-6}$, identical
+    to the analytic-mode result --- linear $\Ag$ gives bit-clean
+    agreement.
+\end{itemize}
+
+\paragraph{Implication.}  The same curl kernel will compute $B_{g,z}$
+from the perturbation $\Ag^{\mathrm{pert}}$ that arises when a moving
+mass deposits the GEM current $\vv{J}_m$ and the wave equation
+propagates the response.  Stage~22 confirms that path is correct
+\emph{before} the dynamics get self-consistent, so any later
+discrepancy at the PIC level can be localized to deposition, smoothing,
+or the wave-equation evolution, rather than to the curl evaluator
+itself.
+
 \subsection{Stage 10: Perturbation FDTD with moving particle source}
 \label{sec:stage_perturb_fdtd}
 
