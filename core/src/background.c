@@ -546,6 +546,118 @@ int gr_bg_eval_B_em(const struct gr_sim* sim, float x, float y,
     }
 }
 
+/* Evaluate Phi_g^{bg}(x, y) at an arbitrary point using whichever path is
+ * available: prefer the analytic generator (exact), else CIC-interpolate
+ * the sampled phi_g_bg array on the CORNER sublattice, else return 0.
+ * Used by the Shapiro c_local^2 recompute below.  Out-of-range positions
+ * (outside the grid) snap to the nearest cell-edge sample. */
+static float bg_phi_g_at(const struct gr_sim* sim, float xp, float yp) {
+    if (!sim) return 0.0f;
+    /* Analytic path: only the kinds that set phi_g_bg (POINT_MASS,
+     * SPINNING_POINT_MASS) return a nonzero Phi_g. */
+    if (sim->bg_kind == GR_BG_KIND_POINT_MASS
+        || sim->bg_kind == GR_BG_KIND_SPINNING_POINT_MASS) {
+        float phi, gx, gy;
+        if (gr_bg_eval_analytic(sim, xp, yp, &phi, &gx, &gy)) {
+            return phi;
+        }
+    }
+    /* Fall back to sampled CORNER array with bilinear interpolation. */
+    if (!sim->phi_g_bg) return 0.0f;
+    const int   W  = sim->width;
+    const int   H  = sim->height;
+    const float dx = sim->dx;
+    /* CORNER nodes at (i, j) * dx. */
+    float u = xp / dx;
+    float v = yp / dx;
+    if (u < 0.0f) u = 0.0f;
+    if (v < 0.0f) v = 0.0f;
+    if (u > (float) (W - 1)) u = (float) (W - 1);
+    if (v > (float) (H - 1)) v = (float) (H - 1);
+    int i0 = (int) u;
+    int j0 = (int) v;
+    if (i0 > W - 2) i0 = W - 2;
+    if (j0 > H - 2) j0 = H - 2;
+    const float fx = u - (float) i0;
+    const float fy = v - (float) j0;
+    const float* a = sim->phi_g_bg;
+    const float v00 = a[ j0      * W + i0    ];
+    const float v10 = a[ j0      * W + i0 + 1];
+    const float v01 = a[(j0 + 1) * W + i0    ];
+    const float v11 = a[(j0 + 1) * W + i0 + 1];
+    const float wy0 = 1.0f - fy;
+    const float wy1 = fy;
+    const float wx0 = 1.0f - fx;
+    const float wx1 = fx;
+    return wy0 * (wx0 * v00 + wx1 * v10) + wy1 * (wx0 * v01 + wx1 * v11);
+}
+
+/* Shapiro delay (Stage 31+): the EM wave equation propagates at
+ *
+ *   c_local(x) = c * (1 + 2 Phi_g(x) / c^2)
+ *
+ * (gr_sandbox_v35.tex sec:shapiro eq:c_local).  We precompute c_local^2
+ * sampled at each EM-field sublattice's own node positions so the
+ * field-evolution kernel can read it without per-step interpolation.
+ *
+ * Floor:  for the weak-field regime in which the c_local approximation
+ * is valid, (1 + 2 Phi_g/c^2) > 0.  We clamp to 1e-3 as a defensive
+ * floor against pathological strong-field probes that would otherwise
+ * make c_local^2 vanish or go negative; in that regime the linearized
+ * approximation is no longer trustworthy anyway. */
+void gr_em_shapiro_recompute_c_local2(struct gr_sim* sim) {
+    if (!sim) return;
+    const int   W   = sim->width;
+    const int   H   = sim->height;
+    const float dx  = sim->dx;
+    const size_t n  = (size_t) W * (size_t) H;
+    const float c   = sim->c_eff;
+    const float c2  = c * c;
+    const float inv_c2 = 1.0f / c2;
+
+    if (!sim->c_local2_corner) sim->c_local2_corner = (float*) calloc(n, sizeof(float));
+    if (!sim->c_local2_xedge)  sim->c_local2_xedge  = (float*) calloc(n, sizeof(float));
+    if (!sim->c_local2_yedge)  sim->c_local2_yedge  = (float*) calloc(n, sizeof(float));
+    if (!sim->c_local2_corner || !sim->c_local2_xedge || !sim->c_local2_yedge) return;
+
+    /* CORNER sublattice: nodes at (i, j) * dx -- for phi_em. */
+    for (int j = 0; j < H; j++) {
+        const float y = (float) j * dx;
+        const int   row = j * W;
+        for (int i = 0; i < W; i++) {
+            const float x   = (float) i * dx;
+            const float phi = bg_phi_g_at(sim, x, y);
+            float f = 1.0f + 2.0f * phi * inv_c2;
+            if (f < 1.0e-3f) f = 1.0e-3f;
+            sim->c_local2_corner[row + i] = c2 * f * f;
+        }
+    }
+    /* X_EDGE sublattice: nodes at (i + 0.5, j) * dx -- for A_x. */
+    for (int j = 0; j < H; j++) {
+        const float y = (float) j * dx;
+        const int   row = j * W;
+        for (int i = 0; i < W; i++) {
+            const float x   = ((float) i + 0.5f) * dx;
+            const float phi = bg_phi_g_at(sim, x, y);
+            float f = 1.0f + 2.0f * phi * inv_c2;
+            if (f < 1.0e-3f) f = 1.0e-3f;
+            sim->c_local2_xedge[row + i] = c2 * f * f;
+        }
+    }
+    /* Y_EDGE sublattice: nodes at (i, j + 0.5) * dx -- for A_y. */
+    for (int j = 0; j < H; j++) {
+        const float y = ((float) j + 0.5f) * dx;
+        const int   row = j * W;
+        for (int i = 0; i < W; i++) {
+            const float x   = (float) i * dx;
+            const float phi = bg_phi_g_at(sim, x, y);
+            float f = 1.0f + 2.0f * phi * inv_c2;
+            if (f < 1.0e-3f) f = 1.0e-3f;
+            sim->c_local2_yedge[row + i] = c2 * f * f;
+        }
+    }
+}
+
 /* Analytic-mode evaluation of the EM scalar potential phi^{bg}(x, y)
  * and its gradient. */
 int gr_bg_eval_phi_em(const struct gr_sim* sim, float x, float y,

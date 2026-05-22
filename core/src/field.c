@@ -145,6 +145,116 @@ static void leapfrog_field_undamped(gr_field_state_t* f,
     }
 }
 
+/* Shapiro variant of the leapfrog: per-cell wave-speed c_local^2(x) on
+ * the Laplacian term, fixed c on the source-coupling term.
+ *
+ * Continuum PDE (per gr_sandbox_v35.tex sec:shapiro):
+ *   (1/c_local^2) ∂_t^2 A - ∇^2 A = (4 pi / c^2) k_e J
+ * Multiplying through by c_local^2:
+ *   ∂_t^2 A = c_local^2 ∇^2 A + (c_local^2 / c^2) · 4 pi k_e J
+ * In the implementation we make the pedagogical simplification that
+ * Shapiro modifies only the free-propagation speed (the Laplacian term),
+ * not the source coupling.  That keeps the source-side identical to the
+ * uniform-c kernel, which is the path the source-coupling tests
+ * (Stage 23/24/26) were calibrated against.
+ *
+ * Discretized form (zero-Dirichlet boundary, the most common path):
+ *   A^{n+1} = 2 A^n - A^{n-1} + dt^2 ( c_local^2(k) · Lap + c^2 · sc · src ).
+ *
+ * Used only for EM fields (PHI_EM, A_X, A_Y) when sim->em_shapiro_enabled
+ * and the c_local^2 arrays are allocated; GEM fields always use the
+ * uniform-c kernel above. */
+static void leapfrog_field_shapiro_damped(gr_field_state_t* f, const float* damp,
+                                          const float* c_local2,
+                                          int W, int H, float c2, float dt2,
+                                          float inv_dx2) {
+    const float* prev = f->prev;
+    const float* curr = f->curr;
+    float*       next = f->next;
+    const float* src  = f->source;
+    const float  sc   = f->source_coeff;
+    const int    damped = (damp != NULL);
+    for (int j = 1; j < H - 1; j++) {
+        const int row = j * W;
+        for (int i = 1; i < W - 1; i++) {
+            const int   k     = row + i;
+            const float lap   = ((curr[k - 1] + curr[k + 1] + curr[k - W] + curr[k + W])
+                                 - 4.0f * curr[k]) * inv_dx2;
+            const float upd   = 2.0f * curr[k] - prev[k]
+                              + dt2 * (c_local2[k] * lap + c2 * sc * src[k]);
+            next[k] = damped ? upd * (1.0f - damp[k]) : upd;
+        }
+    }
+    for (int i = 0; i < W; i++) {
+        next[i] = 0.0f;
+        next[(H - 1) * W + i] = 0.0f;
+    }
+    for (int j = 0; j < H; j++) {
+        next[j * W] = 0.0f;
+        next[j * W + (W - 1)] = 0.0f;
+    }
+}
+
+static void leapfrog_field_shapiro_critical(gr_field_state_t* f, const float* damp,
+                                            const float* c_local2,
+                                            int W, int H, float c2, float dt2,
+                                            float inv_dx2) {
+    const float* prev = f->prev;
+    const float* curr = f->curr;
+    float*       next = f->next;
+    const float* src  = f->source;
+    const float  sc   = f->source_coeff;
+    for (int j = 1; j < H - 1; j++) {
+        const int row = j * W;
+        for (int i = 1; i < W - 1; i++) {
+            const int   k     = row + i;
+            const float gamma = 1.0f - damp[k];
+            const float lap   = ((curr[k - 1] + curr[k + 1] + curr[k - W] + curr[k + W])
+                                 - 4.0f * curr[k]) * inv_dx2;
+            next[k] = 2.0f * gamma * curr[k] - gamma * gamma * prev[k]
+                      + dt2 * (c_local2[k] * lap + c2 * sc * src[k]);
+        }
+    }
+    for (int i = 0; i < W; i++) {
+        next[i] = 0.0f;
+        next[(H - 1) * W + i] = 0.0f;
+    }
+    for (int j = 0; j < H; j++) {
+        next[j * W] = 0.0f;
+        next[j * W + (W - 1)] = 0.0f;
+    }
+}
+
+static void leapfrog_field_shapiro_periodic(gr_field_state_t* f, const float* damp,
+                                            const float* c_local2,
+                                            int W, int H, float c2, float dt2,
+                                            float inv_dx2) {
+    const float* prev = f->prev;
+    const float* curr = f->curr;
+    float*       next = f->next;
+    const float* src  = f->source;
+    const float  sc   = f->source_coeff;
+    const int    damped = (damp != NULL);
+    for (int j = 0; j < H; j++) {
+        const int jm = (j == 0) ? (H - 1) : (j - 1);
+        const int jp = (j == H - 1) ? 0 : (j + 1);
+        const int row  = j  * W;
+        const int rowm = jm * W;
+        const int rowp = jp * W;
+        for (int i = 0; i < W; i++) {
+            const int im = (i == 0) ? (W - 1) : (i - 1);
+            const int ip = (i == W - 1) ? 0 : (i + 1);
+            const int k = row + i;
+            const float lap = ((curr[row + im] + curr[row + ip]
+                                + curr[rowm + i] + curr[rowp + i])
+                               - 4.0f * curr[k]) * inv_dx2;
+            const float upd = 2.0f * curr[k] - prev[k]
+                            + dt2 * (c_local2[k] * lap + c2 * sc * src[k]);
+            next[k] = damped ? upd * (1.0f - damp[k]) : upd;
+        }
+    }
+}
+
 /* Periodic-BC leapfrog: wrap-around indexing at all four edges.  Updates
  * every cell (no boundary-zeroing), restoring translation invariance of
  * the discrete Laplacian. */
@@ -174,16 +284,38 @@ static void leapfrog_field_periodic(gr_field_state_t* f, const float* damp,
     }
 }
 
+/* Per-EM-field sublattice lookup for the Shapiro c_local^2 array.  Returns
+ * NULL for GEM fields (those always use the uniform-c kernel).  Returns NULL
+ * for EM fields too if the arrays haven't been built, which forces the
+ * caller to fall back to the uniform-c kernel. */
+static const float* shapiro_c_local2_for(const struct gr_sim* sim, int f) {
+    if (!sim->em_shapiro_enabled) return NULL;
+    switch (f) {
+    case GR_FIELD_PHI_EM: return sim->c_local2_corner;
+    case GR_FIELD_A_X:    return sim->c_local2_xedge;
+    case GR_FIELD_A_Y:    return sim->c_local2_yedge;
+    default:              return NULL;  /* GEM fields */
+    }
+}
+
 void gr_field_leapfrog_step_all(struct gr_sim* sim) {
     const int   W       = sim->width;
     const int   H       = sim->height;
-    const float c2dt2   = sim->c_eff * sim->c_eff * sim->dt * sim->dt;
+    const float c2      = sim->c_eff * sim->c_eff;
+    const float dt2     = sim->dt * sim->dt;
+    const float c2dt2   = c2 * dt2;
     const float inv_dx2 = 1.0f / (sim->dx * sim->dx);
     const float* damp   = sim->damping_d;  /* may be NULL */
     if (sim->periodic_bc) {
         for (int f = 0; f < GR_FIELD_COUNT; f++) {
             (void) gr_array_lattice((gr_array_id_t) f);
-            leapfrog_field_periodic(&sim->fields[f], damp, W, H, c2dt2, inv_dx2);
+            const float* c_loc2 = shapiro_c_local2_for(sim, f);
+            if (c_loc2) {
+                leapfrog_field_shapiro_periodic(&sim->fields[f], damp, c_loc2,
+                                                W, H, c2, dt2, inv_dx2);
+            } else {
+                leapfrog_field_periodic(&sim->fields[f], damp, W, H, c2dt2, inv_dx2);
+            }
         }
         return;
     }
@@ -191,7 +323,13 @@ void gr_field_leapfrog_step_all(struct gr_sim* sim) {
         if (sim->damp_time_form == GR_DAMP_TIME_CRITICAL) {
             for (int f = 0; f < GR_FIELD_COUNT; f++) {
                 (void) gr_array_lattice((gr_array_id_t) f);
-                leapfrog_field_critical(&sim->fields[f], damp, W, H, c2dt2, inv_dx2);
+                const float* c_loc2 = shapiro_c_local2_for(sim, f);
+                if (c_loc2) {
+                    leapfrog_field_shapiro_critical(&sim->fields[f], damp, c_loc2,
+                                                    W, H, c2, dt2, inv_dx2);
+                } else {
+                    leapfrog_field_critical(&sim->fields[f], damp, W, H, c2dt2, inv_dx2);
+                }
             }
             return;
         }
@@ -201,12 +339,24 @@ void gr_field_leapfrog_step_all(struct gr_sim* sim) {
              * sublattice-invariant), but stays available for downstream
              * stages that may want sublattice-aware boundary handling. */
             (void) gr_array_lattice((gr_array_id_t) f);
-            leapfrog_field_damped(&sim->fields[f], damp, W, H, c2dt2, inv_dx2);
+            const float* c_loc2 = shapiro_c_local2_for(sim, f);
+            if (c_loc2) {
+                leapfrog_field_shapiro_damped(&sim->fields[f], damp, c_loc2,
+                                              W, H, c2, dt2, inv_dx2);
+            } else {
+                leapfrog_field_damped(&sim->fields[f], damp, W, H, c2dt2, inv_dx2);
+            }
         }
     } else {
         for (int f = 0; f < GR_FIELD_COUNT; f++) {
             (void) gr_array_lattice((gr_array_id_t) f);
-            leapfrog_field_undamped(&sim->fields[f], W, H, c2dt2, inv_dx2);
+            const float* c_loc2 = shapiro_c_local2_for(sim, f);
+            if (c_loc2) {
+                leapfrog_field_shapiro_damped(&sim->fields[f], /*damp=*/NULL, c_loc2,
+                                              W, H, c2, dt2, inv_dx2);
+            } else {
+                leapfrog_field_undamped(&sim->fields[f], W, H, c2dt2, inv_dx2);
+            }
         }
     }
 }

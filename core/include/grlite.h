@@ -359,6 +359,34 @@ float gr_sim_get_em_inductive_sign(const gr_sim_t* sim);
 void  gr_sim_set_gravitomagnetic_inductive_sign(gr_sim_t* sim, float sign);
 float gr_sim_get_gravitomagnetic_inductive_sign(const gr_sim_t* sim);
 
+/* Shapiro delay (Stage 31+).  When enabled, the EM-field leapfrog uses a
+ * per-cell wave speed
+ *
+ *   c_local(x) = c * (1 + 2 Phi_g(x) / c^2)
+ *
+ * (gr_sandbox_v35.tex sec:shapiro eq:c_local) on the Laplacian term in the
+ * wave equation for phi_em, A_x, A_y -- the three GEM fields are unaffected.
+ * Source-coupling is left at the bare c (Shapiro modifies free propagation,
+ * not source coupling).  This adds gravitational lensing and the Shapiro
+ * time delay to EM wave propagation as derived from the null geodesic
+ * condition (doc sec:shapiro).
+ *
+ * Implementation:  c_local^2(x) is precomputed at enable-time from the
+ * currently-installed Phi_g background (analytic generator preferred,
+ * sampled phi_g_bg fallback) and sampled at each EM-field's own Yee
+ * sublattice nodes.  If the background changes after enable, call this
+ * setter again to refresh the c_local^2 arrays.
+ *
+ * Stability:  for attractive (Phi_g < 0) backgrounds c_local < c, so the
+ * CFL bound is unchanged.  For repulsive Phi_g > 0 the bound tightens
+ * to dt^2 max(c_local^2) / dx^2 <= 1/2 (2D); use a smaller CFL or expect
+ * Nyquist-mode growth.
+ *
+ * Default: disabled.  This is a Tier-2 EM-completeness feature; existing
+ * tests that don't expect it stay calibrated. */
+void gr_sim_set_em_shapiro_enabled(gr_sim_t* sim, int enabled);
+int  gr_sim_get_em_shapiro_enabled(const gr_sim_t* sim);
+
 /* J time-centering correction (Stage 27/28 diagnostic).
  *
  * Esirkepov produces J^{n-1/2} satisfying discrete continuity with rho at

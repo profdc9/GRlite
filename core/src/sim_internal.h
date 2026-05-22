@@ -192,6 +192,20 @@ struct gr_sim {
     float        bg_Ey_em;
     /* Reserved slot for the charged variants (Stage 11+). */
     float        bg_charge;
+
+    /* Shapiro delay (Stage 31+): when nonzero, the EM-field leapfrog uses a
+     * per-cell wave speed c_local^2(x) = c^2 * (1 + 2 Phi_g(x)/c^2)^2 on the
+     * Laplacian term (gr_sandbox_v35.tex sec:shapiro eq:c_local).  Only the
+     * three EM fields (phi_em, A_x, A_y) are affected; the three GEM fields
+     * keep the uniform c.  The source-coupling term (sc * src) is left at the
+     * bare c -- Shapiro modifies free propagation, not source coupling.
+     *
+     * Storage: one array per EM-field sublattice, sampled at each field's
+     * own Yee node positions.  NULL when the feature is off. */
+    int    em_shapiro_enabled;
+    float* c_local2_corner;  /* phi_em sublattice */
+    float* c_local2_xedge;   /* A_x   sublattice */
+    float* c_local2_yedge;   /* A_y   sublattice */
 };
 
 /* Defined in field.c — steps all six fields in parallel. */
@@ -302,5 +316,15 @@ int gr_bg_eval_B_em(const struct gr_sim* sim, float x, float y,
  * For UNIFORM_ELECTRIC: phi = -( Ex (x-x0) + Ey (y-y0) ), grad = (-Ex, -Ey). */
 int gr_bg_eval_phi_em(const struct gr_sim* sim, float x, float y,
                       float* phi_out, float* gx_out, float* gy_out);
+
+/* Defined in background.c -- recompute the three c_local^2 arrays
+ * (CORNER, X_EDGE, Y_EDGE) from the current Phi_g background.  Allocates
+ * lazily on first call.  Uses the analytic generator when one is installed,
+ * else interpolates from the sampled phi_g_bg array, else writes c_eff^2
+ * (uniform = no Shapiro effect).  Clamps (1 + 2 Phi_g/c^2) to a small
+ * positive floor (1e-3) so that strong-field cells stay numerically
+ * stable; weak-field cases (the only place this approximation is valid)
+ * never trigger the floor. */
+void gr_em_shapiro_recompute_c_local2(struct gr_sim* sim);
 
 #endif /* GRLITE_SIM_INTERNAL_H */

@@ -125,6 +125,9 @@ void gr_sim_destroy(gr_sim_t* sim) {
     free(sim->phi_bg);
     free(sim->Ax_bg);
     free(sim->Ay_bg);
+    free(sim->c_local2_corner);
+    free(sim->c_local2_xedge);
+    free(sim->c_local2_yedge);
     free(sim->particles);
     free(sim);
 }
@@ -501,6 +504,20 @@ void gr_sim_set_gravitomagnetic_inductive_sign(gr_sim_t* sim, float sign) {
 }
 float gr_sim_get_gravitomagnetic_inductive_sign(const gr_sim_t* sim) {
     return sim ? sim->grav_inductive_sign : 1.0f;
+}
+
+void gr_sim_set_em_shapiro_enabled(gr_sim_t* sim, int enabled) {
+    if (!sim) return;
+    const int want = enabled ? 1 : 0;
+    sim->em_shapiro_enabled = want;
+    if (want) {
+        gr_em_shapiro_recompute_c_local2(sim);
+    }
+    /* Note: we leave the c_local2 arrays allocated on disable so that
+     * re-enable is cheap.  Memory is freed in gr_sim_destroy. */
+}
+int gr_sim_get_em_shapiro_enabled(const gr_sim_t* sim) {
+    return sim ? sim->em_shapiro_enabled : 0;
 }
 
 void gr_sim_set_j_time_correction_enabled(gr_sim_t* sim, int enabled) {

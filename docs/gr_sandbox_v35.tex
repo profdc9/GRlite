@@ -894,13 +894,16 @@ The two coefficients act in opposite directions:
 For a slow particle only the time component matters; the spatial component is negligible.  For a photon both contribute equally, doubling the deflection relative to the Newtonian prediction.
 
 \subsection{The Shapiro delay}
+\label{sec:shapiro}
 
 A photon follows a null geodesic ($\dd s^2=0$).  Solving for the coordinate speed of light:
 \begin{equation}
+  \label{eq:c_local}
   \frac{\dd x}{\dd t} \approx c\!\left(1 + \frac{2\Phig}{c^2}\right) \equiv c_{\mathrm{local}}.
 \end{equation}
 The factor of 2 in $c_{\mathrm{local}}$ comes from both metric coefficients contributing to the null condition.  The Shapiro delay is:
 \begin{equation}
+  \label{eq:shapiro_delay}
   \Delta t_{\mathrm{Shapiro}} = -\frac{2}{c^3}\int_{\mathrm{path}}\Phig\,\dd\ell.
 \end{equation}
 This is implemented in the simulator by stepping the EM wave equation with $c_{\mathrm{local}}$ rather than $c$.  The perturbation of photon paths (gravitational lensing) enters through the trajectory integration, where the same $c_{\mathrm{local}}$ modification of the wavefronts causes bending.
@@ -3410,6 +3413,67 @@ The pedagogical conclusion holds: when the full force law is active,
 the orbit slowly spirals in.  The classical-atom-collapse picture is
 faithfully demonstrated in this sandbox, with a CFL-convergent inspiral
 rate that emerges as a real prediction of the discrete PDE.
+
+\subsubsection{Stage 31: Shapiro delay in the EM wave equation}
+\label{sec:stage_shapiro_delay}
+
+The doc's headline EM physics addition: light slows in a gravitational
+potential, as derived from the null geodesic condition
+(Section~\ref{sec:shapiro}).  The implementation replaces the uniform
+wave speed $c$ in the EM-field leapfrog with a per-cell
+$c_{\mathrm{local}}(x) = c (1 + 2 \Phig(x) / c^2)$ on the Laplacian
+term; the source-coupling term keeps the bare $c$, since Shapiro
+modifies free propagation rather than source coupling.
+
+Only the three EM fields ($\phi$, $A_x$, $A_y$) are affected; the GEM
+fields keep the uniform $c$ (gravity propagates at $c$ regardless of
+background gravity, by construction of the toy).  Implementation:
+three per-sublattice arrays $c_{\mathrm{local}}^2$ on CORNER, X-EDGE,
+Y-EDGE are precomputed at enable-time from the installed $\Phig$
+background, sampled at each EM-field's own Yee node positions.
+
+\paragraph{Verification (Stage 31).}  An EM pulse (Gaussian initial
+condition on $\phi$ with zero initial time derivative, $\sigma = 4$
+cells, amplitude $1$) is launched at $(c_x - L/2,\ c_y)$ for $L = 120$
+cells, with a softened point-mass background ($GM = 0.5$, $\epsilon = 4$)
+at the grid center.  The arrival of the wavefront at the diametrically
+opposite probe is timed via parabolic-interpolated peak amplitude.
+
+\begin{center}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+                    & \textbf{No mass (baseline)} & \textbf{With mass (Shapiro)} \\
+\midrule
+Peak $|\phi|$       & 0.0652  & 0.0802 \\
+Arrival time        & 117.84  & 124.10 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Measured Shapiro delay: $\Delta t_{\mathrm{meas}} = +6.26$.  Analytic
+prediction (Eq.~\ref{eq:shapiro_delay} integrated along the axial ray
+through a softened point mass at impact parameter $b = 0$):
+
+\begin{equation}
+  \Delta t_{\mathrm{ana}} = \frac{4 G M}{c^3}\,
+    \operatorname{asinh}\!\left(\frac{L}{2 \epsilon}\right) = +6.80.
+\end{equation}
+
+Agreement within $\sim 8\%$ --- well within the pedagogical tolerance for
+a 2D-radial wavefront whose path samples a band of $\Phig$ values, not
+strictly the axial ray.  The amplitude focusing ($0.065 \to 0.080$) is
+the real signature of gravitational lensing: $c_{\mathrm{local}}$ is
+smaller near the central well, bunching the wavefront on the slow side
+of the obstacle.  See \texttt{core/tests/stage31\_shapiro\_delay.c}.
+
+\paragraph{Stability.}  For attractive $\Phig < 0$ backgrounds,
+$c_{\mathrm{local}} < c$ everywhere, so the CFL bound stays at
+$c\,\Delta t / \Delta x \le 1/\sqrt{2}$ (2D, 5-point Laplacian).
+A defensive floor clamps $1 + 2\Phig/c^2 \ge 10^{-3}$ to guard against
+pathological strong-field probes outside the weak-field regime in
+which the linearized $c_{\mathrm{local}}$ formula is valid; for the
+Stage~31 configuration $\min(1 + 2\Phig/c^2) \approx 0.75$, far from
+the floor.
 
 \subsection{Stage 10: Perturbation FDTD with moving particle source}
 \label{sec:stage_perturb_fdtd}
