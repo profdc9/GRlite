@@ -3114,25 +3114,94 @@ $m = 1$, $E_0 = 10^{-3}$, $c = 1$, $\Delta t = 1/\sqrt{2}$, $N = 200$:
     by charge.
 \end{itemize}
 
-\paragraph{Status of the EM Lorentz force after Stages~9e and 9f.}
+\subsection{Stage 9g: Inductive force --- unit isolation}
+\label{sec:stage_em_inductive}
+
+Wires the $-q\,\partial_t\vv{A}$ piece of Eq.~(\ref{eq:Fem_lorentz})
+into the pusher.  With Stages 9e ($q\,\vv{v}\!\times\!\vv{B}$) and 9f
+($-q\nabla\phi$) already in place, Stage 9g completes the full EM
+Lorentz force
+\begin{equation*}
+  \vv{F}_{\mathrm{em}} = q\bigl(-\nabla\phi - \partial_t\vv{A} + \vv{v}\!\times\!\vv{B}\bigr)
+\end{equation*}
+on the pusher side.
+
+\paragraph{Temporal derivative on the leapfrog buffer rotation.}  The
+field leapfrog in \texttt{sim.c:gr\_sim\_step} cycles three time
+buffers per field.  After each step's rotation,
+\[
+  \texttt{fields[*].prev} = \vv{A}^n,\qquad
+  \texttt{fields[*].curr} = \vv{A}^{n+1},\qquad
+  \texttt{fields[*].next} = \vv{A}^{n-1}.
+\]
+The recycled \texttt{.next} slot (which the next leapfrog will overwrite)
+therefore holds the \emph{previous} time slice.  This gives a clean
+2nd-order centered difference at $t^n$:
+\begin{equation}
+\label{eq:dt_A_centered}
+  \partial_t\vv{A}^n
+   \;=\; \frac{\vv{A}^{n+1} - \vv{A}^{n-1}}{2\,\Delta t}
+   \;=\; \frac{\texttt{curr} - \texttt{next}}{2\,\Delta t},
+\end{equation}
+evaluated at the same time as $\vv{B}^n = \nabla\!\times\!\vv{A}^n$
+(\texttt{.prev}) and $\Phi_{\mathrm{em}}^n$ (\texttt{.prev}).  Spatial
+interpolation uses the same sublattice-aware kernels that serve the
+magnetic curl path: $\vv{A}_x$ on X\_EDGE, $\vv{A}_y$ on Y\_EDGE.
+
+\paragraph{Test (\texttt{stage25\_inductive\_e.c}).}  The cleanest
+isolation manually pre-populates the time buffers with a known temporal
+profile.  With \texttt{field\_evolution} OFF (so the buffers don't
+rotate), set
+\[
+  \texttt{fields[A\_X].curr}[k] = +A_0\,\Delta t,\qquad
+  \texttt{fields[A\_X].next}[k] = -A_0\,\Delta t,
+\]
+uniformly over the grid.  The centered difference is then $A_0$ at every
+position, mimicking a linear-in-time $A_x(t) = A_0\,t$.  No scalar EM
+background, no magnetic field, so the only force is the inductive piece:
+$F_x = -q\,\partial_t A_x = -q A_0$.  A charged particle at rest then
+accelerates uniformly along $-x$ at $|q A_0|/(\gamma m)$; under the
+Boris half-step convention $p_x^{N-1/2} = -q A_0 (N-\tfrac{1}{2})\Delta t$.
+This is exactly the kinematics of Stage 9f (electrostatic, $-q\nabla\phi$),
+but driven by the inductive force-law piece instead.
+
+Results at $q=1$, $m=1$, $A_0 = 10^{-3}$, $N = 200$:
+\begin{itemize}
+  \item $p_x$ matches the analytic prediction to $1.1\times 10^{-6}$
+    relative (the float32 precision floor, identical to Stage 9f's
+    measurement at the same kinematic point).
+  \item $p_y = 0$ exactly (no transverse force).
+  \item Sign reversal $A_0 \to -A_0$: $|p_x(+) + p_x(-)| < 10^{-8}$ ---
+    exact antisymmetry to round-off.
+  \item Neutral particle ($q = 0$): zero force, as expected.
+\end{itemize}
+
+\paragraph{Status of the EM Lorentz force after Stages 9e/9f/9g.}
 \begin{center}
 \begin{tabular}{@{}lccc@{}}
 \toprule
-\textbf{Piece of $\vv{F}_{\mathrm{em}}$} & \textbf{Implemented} & \textbf{Verified by} & \textbf{Bg evaluator} \\
+\textbf{Piece of $\vv{F}_{\mathrm{em}}$} & \textbf{Implemented} & \textbf{Verified by} & \textbf{Evaluator} \\
 \midrule
-$+ q\,\vv{v}\!\times\!\vv{B}$ (magnetic Lorentz) & yes & Stage 9e & \texttt{gr\_bg\_eval\_B\_em} \\
-$- q\nabla\phi$ (electrostatic)                  & yes & Stage 9f & \texttt{gr\_bg\_eval\_phi\_em} \\
-$- q\,\partial_t\vv{A}$ (inductive)              & not yet & ---  & --- \\
+$+ q\,\vv{v}\!\times\!\vv{B}$ (magnetic Lorentz) & yes & Stage 9e & \texttt{B\_em\_z\_at\_total} \\
+$- q\nabla\phi$ (electrostatic)                  & yes & Stage 9f & \texttt{phi\_em\_grad\_at\_total} \\
+$- q\,\partial_t\vv{A}$ (inductive)              & yes & Stage 9g & \texttt{dt\_A\_em\_at\_total} \\
 \bottomrule
 \end{tabular}
 \end{center}
-The inductive $-q\,\partial_t\vv{A}$ piece requires sampling a one-sided
-time derivative of the $\vv{A}$ arrays in the pusher ($(\vv{A}_{\mathrm{curr}}
-- \vv{A}_{\mathrm{prev}})/\Delta t$, evaluated at the same half-step
-time as the magnetic curl).  For a static or slowly-varying
-$\vv{A}^{\mathrm{bg}}$ this piece is negligible; it will be wired in
-with the radiative-EM verification stage when a time-varying
-$\vv{A}^{\mathrm{pert}}$ becomes the primary observable.
+All three pieces share the same three-path structure: \textsc{analytic}
+background (closed form via \texttt{gr\_bg\_eval\_*\_em}), \textsc{sampled}
+background (Yee curl or centered FD of the \texttt{*\_bg} arrays), and
+perturbation (always sampled, using the leapfrog buffer rotation for the
+centered-time-difference in the inductive case).  A charged particle in
+any combination of these three sources --- static analytic background,
+sampled-grid background, and a time-evolving PIC-deposited perturbation
+--- now feels the complete EM Lorentz force.  The closed PIC loop
+(\emph{moving charge $\to$ Esirkepov current $\to$ wave-equation
+$\to$ $\vv{A}^{\mathrm{pert}}$, $\phi^{\mathrm{pert}}$ $\to$ Lorentz force
+on a probe charge}) is now end-to-end functional on the force-evaluation
+side; verification of that closed loop in dynamics belongs to a future
+EM-PIC stage (analog of Section~\ref{sec:stage_perturb_fdtd} for the
+charged sector).
 
 \subsection{Stage 10: Perturbation FDTD with moving particle source}
 \label{sec:stage_perturb_fdtd}

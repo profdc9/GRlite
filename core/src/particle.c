@@ -441,25 +441,23 @@ static inline void grav_force_at(const struct gr_sim* sim,
  *
  *   F_em = q ( -grad phi - d_t A + v x B )                  (B = curl A)
  *
- * Currently implemented pieces (Stage 23+):
- *   v x B    — Stage 23 unit isolation.  Coefficient +1.
- *   -grad phi — Stage 24 unit isolation (electrostatic).  Passed as
- *               (phi_grad_x, phi_grad_y) so the force contribution is
- *                   F_E = -q * (phi_grad_x, phi_grad_y).
+ * All three pieces are now implemented (Stages 23/24/25):
+ *   -grad phi  — electrostatic (Stage 24).  Passed as (phi_grad_x,
+ *                phi_grad_y); F_E = -q (phi_grad_x, phi_grad_y).
+ *   -d_t A     — inductive E (Stage 25).  Passed as (dAx, dAy);
+ *                F_ind = -q (dAx, dAy).
+ *   v x B      — magnetic (Stage 23).  Passed as B_em_z (scalar in 2D);
+ *                F_B = q (+v_y B_z, -v_x B_z).
  *
- * Not yet wired (planned):
- *   -d_t A    (induced electric field from time-varying A).  Until this
- *             lands, the EM force on a particle in a TIME-VARYING A
- *             background omits the inductive piece; static A is fine.
- *
- * Component formulas in 2D with B_z along +z (same identity as the GM
- * case): (v x B_z hat z)_x = +v_y B_z, (v x B_z hat z)_y = -v_x B_z. */
+ * The full coefficient on v x B is +1 (no spin-2 enhancement, unlike
+ * the GEM coefficient +4 on v x B_g). */
 static inline void em_force_at(float charge, float vx, float vy,
                                float phi_grad_x, float phi_grad_y,
+                               float dAx, float dAy,
                                float B_em_z,
                                float* Fx, float* Fy) {
-    *Fx = -charge * phi_grad_x + charge * vy * B_em_z;
-    *Fy = -charge * phi_grad_y - charge * vx * B_em_z;
+    *Fx = charge * (-phi_grad_x - dAx + vy * B_em_z);
+    *Fy = charge * (-phi_grad_y - dAy - vx * B_em_z);
 }
 
 /* Yee curl: B_g_z = d/dx A_{g,y} - d/dy A_{g,x} on the cell-center
@@ -615,6 +613,53 @@ static void phi_em_grad_at_total(const struct gr_sim* sim, float x, float y,
     *gy_out = gy_pert + gy_bg;
 }
 
+/* Time derivative of the EM vector potential A_em at the particle, for
+ * the inductive piece -q d_t A of the EM Lorentz force.
+ *
+ * The leapfrog rotation in gr_sim_step cycles the three time-buffers per
+ * field.  After each step's rotation:
+ *     fields[*].prev = A^n        (matched to particle's t = n dt)
+ *     fields[*].curr = A^{n+1}
+ *     fields[*].next = A^{n-1}    (recycled to hold next leapfrog's output)
+ * So the CENTERED difference at t^n is
+ *     d_t A^n = (A^{n+1} - A^{n-1}) / (2 dt) = (curr - next) / (2 dt),
+ * a 2nd-order accurate temporal derivative.  Spatial interpolation uses
+ * the sublattice-aware kernels (X_EDGE for A_x, Y_EDGE for A_y) -- the
+ * SAME interpolators that already serve the magnetic curl path.
+ *
+ * Background A:  for the static UNIFORM_MAGNETIC background and any
+ * other current analytic generator, A^{bg} is time-independent, so its
+ * contribution to d_t A vanishes by construction (sampled-bg arrays are
+ * never written by the leapfrog).  This routine therefore reads only the
+ * PERTURBATION arrays.  If a future time-varying analytic background is
+ * added, this is the place to add an extra term.
+ *
+ * Gated by em_lorentz_force_enabled.  When field_evolution_enabled is 0
+ * and the buffers haven't been manipulated by hand, all three buffers are
+ * zero so this evaluator returns zero -- bit-exact baseline.  Tests can
+ * manually pre-populate curr and next to drive a known d_t A. */
+static void dt_A_em_at_total(const struct gr_sim* sim, float x, float y,
+                             float* dAx_out, float* dAy_out) {
+    *dAx_out = 0.0f;
+    *dAy_out = 0.0f;
+    if (!sim || !sim->em_lorentz_force_enabled) return;
+    const int   W  = sim->width;
+    const int   H  = sim->height;
+    const float dx = sim->dx;
+    const float inv_2dt = 1.0f / (2.0f * sim->dt);
+
+    const float Ax_curr = cic_interp_xedge(sim->fields[GR_FIELD_A_X].curr,
+                                           W, H, dx, x, y);
+    const float Ax_next = cic_interp_xedge(sim->fields[GR_FIELD_A_X].next,
+                                           W, H, dx, x, y);
+    const float Ay_curr = cic_interp_yedge(sim->fields[GR_FIELD_A_Y].curr,
+                                           W, H, dx, x, y);
+    const float Ay_next = cic_interp_yedge(sim->fields[GR_FIELD_A_Y].next,
+                                           W, H, dx, x, y);
+    *dAx_out = (Ax_curr - Ax_next) * inv_2dt;
+    *dAy_out = (Ay_curr - Ay_next) * inv_2dt;
+}
+
 /* Total EM magnetic field B_z = (curl A)_z at the particle position.
  * Structurally identical to B_g_z_at_total but points at the EM arrays
  * (Ax_bg / Ay_bg for the background, fields[A_X] / fields[A_Y] for the
@@ -681,6 +726,12 @@ void gr_particle_push_all(struct gr_sim* sim) {
          * gated by em_lorentz_force_enabled. */
         float E_phi_grad_x, E_phi_grad_y;
         phi_em_grad_at_total(sim, p->x, p->y, &E_phi_grad_x, &E_phi_grad_y);
+        /* EM vector-potential time derivative at the particle for the
+         * -q d_t A inductive piece (Stage 25+).  Centered difference at
+         * t^n using fields[A_X/A_Y].curr (=A^{n+1}) and .next (=A^{n-1})
+         * after rotation.  Returns 0 when buffers are quiescent. */
+        float E_dAx, E_dAy;
+        dt_A_em_at_total(sim, p->x, p->y, &E_dAx, &E_dAy);
 
         /* v from lagged p^{n-1/2} — used to evaluate the velocity-dependent
          * Tier-2 force terms.  Negligible cost for Newtonian since grav_force_at
@@ -692,12 +743,13 @@ void gr_particle_push_all(struct gr_sim* sim) {
 
         float Fx, Fy;
         grav_force_at(sim, p->mass, vx_pre, vy_pre, phi, grad_x, grad_y, Bg_z, &Fx, &Fy);
-        /* Additive EM Lorentz contribution: -q grad phi + q v x B
-         * (Stages 23/24).  The -q d_t A inductive piece is still pending. */
+        /* Additive EM Lorentz contribution: -q grad phi - q d_t A + q v x B
+         * (Stages 23/24/25; full static-and-dynamic EM Lorentz force). */
         {
             float Fx_em, Fy_em;
             em_force_at(p->charge, vx_pre, vy_pre,
                         E_phi_grad_x, E_phi_grad_y,
+                        E_dAx, E_dAy,
                         B_em_z, &Fx_em, &Fy_em);
             Fx += Fx_em;
             Fy += Fy_em;
@@ -725,6 +777,7 @@ void gr_particle_push_all(struct gr_sim* sim) {
             float Fx_em, Fy_em;
             em_force_at(p->charge, vx_mid, vy_mid,
                         E_phi_grad_x, E_phi_grad_y,
+                        E_dAx, E_dAy,
                         B_em_z, &Fx_em, &Fy_em);
             Fx += Fx_em;
             Fy += Fy_em;
@@ -789,19 +842,22 @@ int gr_sim_add_particle(gr_sim_t* sim, float x, float y,
     float grad_x, grad_y;
     grav_grad_at(sim, x, y, &grad_x, &grad_y);
     const float phi_init = gr_phi_g_total_at(sim, x, y);
-    /* Tier-1 gravitomagnetic B_g_z + EM B_z + EM grad phi at the initial
-     * position.  Uses the same total evaluators as gr_particle_push_all so
-     * the half-step-back kick stays consistent with what the pusher will
-     * apply on step 0. */
+    /* Tier-1 gravitomagnetic B_g_z + EM (B_z, grad phi, d_t A) at the
+     * initial position.  Uses the same total evaluators as
+     * gr_particle_push_all so the half-step-back kick stays consistent
+     * with what the pusher will apply on step 0. */
     const float Bg_z_init   = B_g_z_at_total(sim, x, y);
     const float B_em_z_init = B_em_z_at_total(sim, x, y);
     float Egx_init, Egy_init;
     phi_em_grad_at_total(sim, x, y, &Egx_init, &Egy_init);
+    float dAx_init, dAy_init;
+    dt_A_em_at_total(sim, x, y, &dAx_init, &dAy_init);
     float Fx, Fy;
     grav_force_at(sim, mass, vx, vy, phi_init, grad_x, grad_y, Bg_z_init, &Fx, &Fy);
     {
         float Fx_em, Fy_em;
-        em_force_at(charge, vx, vy, Egx_init, Egy_init, B_em_z_init,
+        em_force_at(charge, vx, vy, Egx_init, Egy_init,
+                    dAx_init, dAy_init, B_em_z_init,
                     &Fx_em, &Fy_em);
         Fx += Fx_em;
         Fy += Fy_em;
