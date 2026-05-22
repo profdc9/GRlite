@@ -3475,6 +3475,69 @@ which the linearized $c_{\mathrm{local}}$ formula is valid; for the
 Stage~31 configuration $\min(1 + 2\Phig/c^2) \approx 0.75$, far from
 the floor.
 
+\subsubsection{Stage 32: EM binary PIC -- two-body mutual EM dynamics}
+\label{sec:stage_em_binary_pic}
+
+Two charged particles mutually orbit via the FDTD perturbation field
+alone (no analytic background).  Each deposits ($\rho_q$, $J_{qx}$,
+$J_{qy}$) via Esirkepov; each feels the other's $\phi_{\mathrm{em}}$
+and $\vv{A}_{\mathrm{em}}$ perturbation through the full EM Lorentz
+force.  This is the EM analog of the Stage~12 gravity binary; together
+with Stage~27 (single test charge in a softened-charge background) it
+exercises the entire EM Lorentz machinery end-to-end with two active
+sources.
+
+\paragraph{Sign convention.}  In this simulator's 2D-log Coulomb
+(PIC perturbation channel), \emph{same-sign} charges attract --- the
+direct analog of 2D-log gravity where positive masses attract via
+$\Phig = 2 G m \ln r$.  The Green's function of the 2D Laplacian
+flips the gradient direction relative to the 3D $1/r$ form.  The
+analytic $1/r$-shape point-charge background
+(\texttt{gr\_sim\_set\_background\_point\_charge}) is the deliberate
+exception: it superimposes a 3D-style 1/r potential on top of the 2D
+PDE so test-particle Kepler stages (Stage~26, Stage~27) recover the
+familiar ``opposite charges attract'' picture.  The PIC perturbation
+always carries the 2D-log sign, so for an attractive binary we use
+$q_1 = q_2 = +Q$.
+
+\paragraph{Centripetal balance.}  Identical structure to the gravity
+binary with $G_{\mathrm{eff}} m \to k_e Q^2$ and $v_{\mathrm{orb}}$
+independent of $r$:
+
+\begin{equation}
+  v_{\mathrm{orb}} = Q\sqrt{k_e / m},
+  \qquad T = \frac{2\pi r}{v_{\mathrm{orb}}}.
+\end{equation}
+
+\paragraph{Verification (Stage 32).}  Three checks mirror Stage 12:
+
+\begin{itemize}
+  \item \emph{Free-fall:} two like charges released at rest fall together
+        from $r = 8$ to $r_{\min} = 0.077$ ($1\%$ of $r_{\mathrm{init}}$,
+        essentially head-on contact) within 100 steps, then bounce out
+        with only $\sim 6\%$ excess radius ($r_{\max} = 8.46$) and
+        oscillate.  Mutual attraction engages with the correct sign.
+        Esirkepov violations $= 0$ throughout.
+  \item \emph{Short-horizon orbit:} at $r = 8$, $v_{\mathrm{orb}} = 0.1$,
+        the empirical $\omega$ matches the analytic $v_{\mathrm{orb}}/r$
+        to $0.4\%$ at $s = 20$ (one wave-crossing time after start).
+        Radial drift at $s = 20$ is $1.6\%$.
+  \item \emph{$v_{\mathrm{orb}}$ independent of $r$:} at $r = 6$ and
+        $r = 12$, $v_{\mathrm{meas}} = r \omega$ values are
+        $0.1027$ and $0.1031$ ---  matching each other to $0.4\%$ and
+        the analytic $Q\sqrt{k_e/m} = 0.1$ to $\sim 3\%$.  Confirms the
+        2D-log signature on the EM channel.
+\end{itemize}
+
+Long-time orbit stability is left for a future test, with the same
+caveats as Stage 12: sub-cell PIC heating and the inductive
+radiation-reaction inspiral act on overlapping timescales here; teasing
+them apart will need either a weak-coupling regime ($v/c \ll 1\%$) or
+a CFL sweep analogous to Stages 29/30.  Stage 32 is the basic
+end-to-end EM binary validity check.  See
+\texttt{core/scenarios/pic\_binary\_em.c} and
+\texttt{core/tests/stage32\_em\_binary\_pic.c}.
+
 \subsection{Stage 10: Perturbation FDTD with moving particle source}
 \label{sec:stage_perturb_fdtd}
 
