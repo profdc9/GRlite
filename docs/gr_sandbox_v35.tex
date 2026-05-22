@@ -2821,14 +2821,101 @@ Eq.~(\ref{eq:eih_full}) only for textual consistency with the cited
 derivation.  All implementations use the factor-of-4 form.
 
 \paragraph{Cross-references.}  This stage isolates the
-$\order{v/c}$ Lense--Thirring force piece; the orbit-shape Lense--Thirring
-precession around a \emph{spinning point mass} (where $\vv{B}_g$ varies
-spatially as $(\nabla\!\times\!\Ag)_z$ for the dipole) is a separate
-verification.  Together with Section~\ref{sec:stage_proper_time} Phase~B
-(clock effect) and a planned Lense--Thirring precession stage
-(Section~\ref{sec:stage_proper_time}'s spinning background with the GM
-force enabled), they exhaust the leading-order $\order{J_z}$ tests of
-the GEM coupling.
+$\order{v/c}$ Lense--Thirring force piece in a \emph{uniform} $\vv{B}_g$;
+Stage~9c (Section~\ref{sec:stage_lt_period}) extends the verification
+to a \emph{spatially-varying} $\vv{B}_g(r)$ around a spinning point mass.
+Together with Section~\ref{sec:stage_proper_time} Phase~B (clock effect)
+they exhaust the leading-order $\order{J_z}$ tests of the GEM coupling.
+
+\subsection{Stage 9c: Lense--Thirring orbital period asymmetry}
+\label{sec:stage_lt_period}
+
+Stage~9b verified the $+4\,\vv{v}\!\times\!\vv{B}_g$ Lorentz piece against
+a spatially uniform $\vv{B}_g$.  Stage~9c upgrades the verification to a
+\emph{spatially varying} $\vv{B}_g(r)$ around a spinning point mass --- the
+configuration of physical interest for Kerr-like dynamics --- and measures
+the leading-order Lense--Thirring response: the prograde vs.\ retrograde
+orbital-period asymmetry.
+
+\paragraph{Setup.}  A non-spinning test particle on a circular orbit of
+radius $r$ around the spinning-point-mass background of
+Section~\ref{sec:bg_mode}.  At the orbit's radius the gravitomagnetic
+field is the equatorial value of the dipole:
+\begin{equation}
+\label{eq:Bgz_dipole_equatorial}
+  B_{g,z}(r) \;=\; \frac{G_{\mathrm{eff}}\,J_z}{2\,c^2}\,
+                  \frac{2\epsilon^2 - r^2}{(r^2 + \epsilon^2)^{5/2}}
+              \;\xrightarrow{r \gg \epsilon}\;
+              -\frac{G_{\mathrm{eff}}\,J_z}{2\,c^2\,r^3}.
+\end{equation}
+The negative sign is the equatorial-plane value of a magnetic-type
+dipole (antiparallel to the dipole moment by a factor 1/2 of the polar
+value).  The Lorentz force $\vv{F} = 4m\,\vv{v}\!\times\!\vv{B}_g$ on
+a tangential velocity is purely radial: inward for prograde
+($\vv{v}\!\times\!B_{g,z}\hat z = +v\,B_{g,z}\,\hat r$, with $B_{g,z}<0$
+making this $-|B_{g,z}|\hat r$), outward for retrograde.
+
+\paragraph{Analytic prediction.}  The steady-state circular velocity
+satisfies the relativistic centripetal balance
+$\gamma v^2/r = a(r) \pm 4 v|B_{g,z}|$
+where $a(r) = G_{\mathrm{eff}} M r/(r^2+\epsilon^2)^{3/2}$ and
+$\gamma = (1-v^2/c^2)^{-1/2}$.  Linearising about the relativistic
+\emph{scalar} circular velocity $v_{\mathrm{rel}}$ (defined by
+$\gamma_{\mathrm{rel}} v_{\mathrm{rel}}^2 = a(r) r$; the same
+$v_{\mathrm{circ}}$ used in the Stage~7 kepler\_orbit scenario) gives
+\begin{equation}
+\label{eq:delta_v_lt}
+  \delta v \;=\; \frac{4\,|B_{g,z}|\,r}
+                      {\gamma_{\mathrm{rel}}\bigl(\,2 + \gamma_{\mathrm{rel}}^2\,v_{\mathrm{rel}}^2/c^2\,\bigr)},
+\end{equation}
+so $v_{\mathrm{pro}} = v_{\mathrm{rel}} + \delta v$ and
+$v_{\mathrm{ret}} = v_{\mathrm{rel}} - \delta v$, giving the period
+asymmetry
+\begin{equation}
+\label{eq:dT_lt}
+  T_{\mathrm{ret}} - T_{\mathrm{pro}}
+  \;\approx\;  \frac{4\pi r\,\delta v}{v_{\mathrm{rel}}^2}.
+\end{equation}
+Using the relativistic $v_{\mathrm{rel}}$ (not Newtonian) as the
+linearisation point is essential: the Newtonian
+$v^2 = a(r) r$ over-predicts $v$ by $\order{v^2/c^2}$ (1.3\% at our
+test parameters), which would put the integrator on a small ellipse
+rather than a circle and add an $\order{v^2/c^2}$ contamination to the
+measured period.
+
+\paragraph{Test (\texttt{stage21\_lense\_thirring\_period.c}).}
+At $GM=1$, $r=20$, $\epsilon=1$, $J_z=2$, $c=1$:
+$B_{g,z} = -1.236\times 10^{-4}$, $v_{\mathrm{rel}} = 0.2204$,
+$\gamma_{\mathrm{rel}} = 1.025$, $\delta v = 4.70\times 10^{-3}$,
+analytic $T_{\mathrm{ret}} - T_{\mathrm{pro}} = +24.33$
+(4.27\% of $T_{\mathrm{rel}} = 570.09$).  Measured over four orbits:
+\begin{itemize}
+  \item Prograde:   $T_{\mathrm{pro}} = 557.55$  ($r \in [19.98, 20.00]$).
+  \item Retrograde: $T_{\mathrm{ret}} = 582.13$  ($r \in [19.99, 20.00]$).
+  \item $T_{\mathrm{ret}} - T_{\mathrm{pro}} = +24.57$, agreeing with
+    Eq.~(\ref{eq:dT_lt}) to \textbf{0.97\%}.
+  \item Baseline (GM force disabled): prograde and retrograde periods
+    agree at $570.10$ vs.\ $569.93$, matching the relativistic
+    scalar prediction; the residual is the dt$\,$-rounded period-detection
+    error.
+\end{itemize}
+The orbits stay nearly perfectly circular ($\Delta r/r \lesssim 10^{-3}$),
+confirming that the perturbative $\delta v$ correction
+Eq.~(\ref{eq:delta_v_lt}) captures the steady-state circular condition
+in the GEM-corrected dynamics.
+
+\paragraph{Interpretation.}  This is the leading-order Lense--Thirring
+\emph{orbital} response: the spinning background's frame-dragging
+torques prograde vs.\ retrograde orbits differently, shifting their
+steady-state radii (and hence their periods) by $\order{J_z/(Mc^2)}$.
+It is distinct from (i) the proper-time clock effect of
+Section~\ref{sec:stage_proper_time} Phase~B, which is the
+$\order{J_z}$ contribution to $\dd\tau/\dd t$ at fixed orbit, and
+(ii) the Schwarzschild perihelion precession from the Tier-2 EIH terms,
+which is direction-symmetric.  The three signals --- clock effect, GM
+Lorentz force on the orbit, EIH precession --- are independent at
+$\order{J_z}$ and $\order{(v/c)^2}$, and the verification stages
+isolate each in turn.
 
 \subsection{Stage 10: Perturbation FDTD with moving particle source}
 \label{sec:stage_perturb_fdtd}
