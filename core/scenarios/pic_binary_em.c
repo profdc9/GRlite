@@ -1,32 +1,30 @@
 /* Scenario "pic_binary_em" -- EM analog of pic_binary.
  *
- * Two equal-mass, equal-charge (+Q, +Q) particles in circular orbit around
- * their common center, with ALL EM forces coming from the FDTD perturbation
- * field (no analytic background).  Each particle deposits (rho_q, J_qx,
- * J_qy) via Esirkepov; each feels the other's perturbation phi_em + A_em
- * via the full EM Lorentz force F_em = q(-grad phi - d_t A + v x B).
- * The inductive piece is production-ON (Stage 27/30 resolution).
+ * Two equal-mass, opposite-charge (+Q, -Q) particles in circular orbit
+ * around their common center, with ALL EM forces coming from the FDTD
+ * perturbation field (no analytic background).  Each particle deposits
+ * (rho_q, J_qx, J_qy) via Esirkepov; each feels the other's perturbation
+ * phi_em + A_em via the full EM Lorentz force F_em = q(-grad phi - d_t A
+ * + v x B).  The inductive piece is production-ON (Stage 27/30 resolution).
  *
- * SIGN CONVENTION (important):  In this simulator's 2D-log Coulomb
- * (perturbation-driven, not the optional 3D-1/r analytic background),
- * SAME-SIGN charges ATTRACT and opposite-sign charges REPEL -- the
- * mirror of standard 3D Maxwell, but the direct analog of 2D-log
- * gravity (where positive masses attract via Phi_g = 2 G m ln r).
- * Source convention:
- *   PDE      : (1/c^2) d_t^2 phi - Lap phi = -4 pi k_e rho
- *   2D log   : phi_pert(r) = 2 k_e Q ln(r) + const
- *   grad phi : 2 k_e Q / r * r_hat            (outward for Q > 0)
- *   F on q'  : -q' grad phi = -2 k_e q q' / r * r_hat
- *              => attractive if q q' > 0  (SAME sign).
- * (The 1/r-shape analytic point-charge background in
- * gr_sim_set_background_point_charge IS standard EM by deliberate
- * choice, but it overrides the 2D PDE for that one background option;
- * the PIC perturbation always carries the 2D-log sign.)
+ * SIGN CONVENTION (standard Maxwell after the v36 c_em flip):
+ *   PDE static limit : Lap phi = -4 pi k_e rho_q
+ *   2D log Green's   : phi_pert(r) = -2 k_e Q ln(r) + const
+ *   F on q'          : -q' grad phi = +2 k_e q q' / r * r_hat
+ *                      => REPULSIVE if q q' > 0 (like charges),
+ *                         ATTRACTIVE if q q' < 0 (opposite charges).
+ * The optional analytic point-charge background
+ * (gr_sim_set_background_point_charge) uses a 3D-1/r SHAPE for
+ * pedagogical familiarity (Stages 26/27); its sign convention matches
+ * standard Maxwell now that the PIC source coefficient is also
+ * standard.  Analytic and PIC paths are sign-consistent (both
+ * "opposite attracts"); they differ only in spatial shape (1/r vs
+ * 2D-log), so mixing them is meaningful, not contradictory.
  *
- * Pedagogical purpose: the classical-atom-collapse demo.  Both charges
- * attract via the 2D-log perturbation; the inductive back-reaction
- * (-q d_t A) slowly spirals the orbit in -- a self-consistent 2D
- * radiation-reaction inspiral.  Stage 27 already showed this for a
+ * Pedagogical purpose: the classical-atom-collapse demo.  Opposite
+ * charges attract via the 2D-log perturbation; the inductive back-
+ * reaction (-q d_t A) slowly spirals the orbit in -- a self-consistent
+ * 2D radiation-reaction inspiral.  Stage 27 already showed this for a
  * single test particle around a softened-charge background; this
  * scenario promotes both bodies to active sources.
  *
@@ -50,7 +48,7 @@
  *       F = -q' grad phi = -2 k_e q q' / d   (radial)
  *       sign: attractive if q q' < 0.
  *
- *   For same-sign charges (q1 = q2 = +Q) at d = 2 r:
+ *   For opposite charges (q1 = +Q, q2 = -Q) at d = 2 r:
  *       |F| = 2 k_e Q^2 / (2 r) = k_e Q^2 / r          (attractive)
  *   Centripetal balance for each particle at radius r from COM:
  *       m v^2 / r = k_e Q^2 / r   =>   v = Q sqrt(k_e / m)
@@ -111,14 +109,16 @@ static int build_pic_binary_em(gr_sim_t* sim, const float* params, int n_params)
     gr_sim_set_em_lorentz_force_enabled(sim, 1);
     gr_sim_set_em_inductive_enabled(sim, 1);
 
-    /* Two SAME-SIGN-charge particles counter-orbiting around (cx, cy):
+    /* Two OPPOSITE-SIGN-charge particles counter-orbiting around (cx, cy):
      *   p0 (charge +Q) at (cx - r, cy), velocity (0, +v)
-     *   p1 (charge +Q) at (cx + r, cy), velocity (0, -v)
-     * gives an attractive mutual orbit (2D-log Coulomb -- same sign
-     * attracts; see SIGN CONVENTION note above). */
+     *   p1 (charge -Q) at (cx + r, cy), velocity (0, -v)
+     * gives an attractive mutual orbit -- standard Maxwell sign
+     * convention (opposite attracts).  Velocities are tangential to the
+     * orbital plane; v_orb's magnitude is the same as for the
+     * gravity binary's centripetal balance (formula above). */
     gr_sim_add_particle(sim, cx - r_orb, cy, mass, /*charge=*/+Q,
                         /*vx=*/0.0f, /*vy=*/+v_orb);
-    gr_sim_add_particle(sim, cx + r_orb, cy, mass, /*charge=*/+Q,
+    gr_sim_add_particle(sim, cx + r_orb, cy, mass, /*charge=*/-Q,
                         /*vx=*/0.0f, /*vy=*/-v_orb);
 
     sim->step_count = 0;

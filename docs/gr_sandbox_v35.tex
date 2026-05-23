@@ -3487,18 +3487,24 @@ with Stage~27 (single test charge in a softened-charge background) it
 exercises the entire EM Lorentz machinery end-to-end with two active
 sources.
 
-\paragraph{Sign convention.}  In this simulator's 2D-log Coulomb
-(PIC perturbation channel), \emph{same-sign} charges attract --- the
-direct analog of 2D-log gravity where positive masses attract via
-$\Phig = 2 G m \ln r$.  The Green's function of the 2D Laplacian
-flips the gradient direction relative to the 3D $1/r$ form.  The
-analytic $1/r$-shape point-charge background
-(\texttt{gr\_sim\_set\_background\_point\_charge}) is the deliberate
-exception: it superimposes a 3D-style 1/r potential on top of the 2D
-PDE so test-particle Kepler stages (Stage~26, Stage~27) recover the
-familiar ``opposite charges attract'' picture.  The PIC perturbation
-always carries the 2D-log sign, so for an attractive binary we use
-$q_1 = q_2 = +Q$.
+\paragraph{Sign convention (v36 fix).}  The original code shared a
+single source-coupling sign between gravity and EM ($\mathrm{sc}_{em}
+= -4\pi k_e$, matching $\mathrm{sc}_{\mathrm{grav}} = -4\pi G$).
+For gravity this is the standard Newton Poisson sign (positive masses
+attract); but for EM it produced an ``anti-Maxwell'' channel in which
+PIC same-sign charges attracted.  The analytic point-charge background
+hand-coded with the standard $+k_e Q / r$ shape was inconsistent with
+the PIC sign, an asymmetry that didn't matter for Stages 23--27 (which
+use analytic backgrounds and tiny PIC perturbations) but did show up
+once Stage 32 promoted both bodies to active PIC sources.  v36 flips
+$\mathrm{sc}_{em}$ to $+4 \pi k_e$ (and the corresponding $A_{em}$
+coupling), so the PIC channel now obeys standard Maxwell:
+\emph{like charges repel, opposite charges attract}.  The analytic
+$1/r$ background remains standard-EM-signed and is now sign-consistent
+with the PIC channel; the two paths still differ in spatial shape
+($1/r$ vs.\ box-bounded 2D log), so they should not be mixed in the
+same simulation.  Stage 32 uses opposite-sign charges
+($q_1 = +Q$, $q_2 = -Q$) for the attractive orbit.
 
 \paragraph{Centripetal balance.}  Identical structure to the gravity
 binary with $G_{\mathrm{eff}} m \to k_e Q^2$ and $v_{\mathrm{orb}}$
@@ -3512,22 +3518,35 @@ independent of $r$:
 \paragraph{Verification (Stage 32).}  Three checks mirror Stage 12:
 
 \begin{itemize}
-  \item \emph{Free-fall:} two like charges released at rest fall together
-        from $r = 8$ to $r_{\min} = 0.077$ ($1\%$ of $r_{\mathrm{init}}$,
-        essentially head-on contact) within 100 steps, then bounce out
-        with only $\sim 6\%$ excess radius ($r_{\max} = 8.46$) and
-        oscillate.  Mutual attraction engages with the correct sign.
+  \item \emph{Free-fall:} two opposite-sign charges released at rest
+        attract, falling together from $r = 8$ to $r_{\min} \approx 0$
+        within ~100 steps.  Mutual attraction has the right sign.
         Esirkepov violations $= 0$ throughout.
   \item \emph{Short-horizon orbit:} at $r = 8$, $v_{\mathrm{orb}} = 0.1$,
-        the empirical $\omega$ matches the analytic $v_{\mathrm{orb}}/r$
-        to $0.4\%$ at $s = 20$ (one wave-crossing time after start).
-        Radial drift at $s = 20$ is $1.6\%$.
+        the empirical $\omega$ matches $v_{\mathrm{orb}}/r$ to $\lesssim 5\%$
+        in the first wave-crossing time.
   \item \emph{$v_{\mathrm{orb}}$ independent of $r$:} at $r = 6$ and
-        $r = 12$, $v_{\mathrm{meas}} = r \omega$ values are
-        $0.1027$ and $0.1031$ ---  matching each other to $0.4\%$ and
-        the analytic $Q\sqrt{k_e/m} = 0.1$ to $\sim 3\%$.  Confirms the
-        2D-log signature on the EM channel.
+        $r = 12$, $v_{\mathrm{meas}} = r \omega$ values match each
+        other and the analytic $Q\sqrt{k_e/m}$ to within a few percent
+        --- the 2D-log signature on the EM channel.
 \end{itemize}
+
+\paragraph{Stage 32b: sign-convention verification.}  Three direct
+sign tests on the PIC EM channel:
+\begin{itemize}
+  \item Two like-sign charges at rest \emph{repel} (Coulomb sign).
+  \item Two opposite-sign charges at rest \emph{attract}.
+  \item $\phi_{\mathrm{em}}$ from a single $+Q$ source is positive and
+        decreases monotonically with distance (the expected
+        box-bounded 2D Green's function shape).
+\end{itemize}
+The clean Amp\`ere PIC-dynamics test (parallel like-currents attract
+via $\vv{v}\times\vv{B}$ at $\order{(v/c)^2}$) is deferred: at the
+$v/c \gtrsim 0.1$ needed to see a measurable magnetic effect, the
+moving-source PIC self-heating (Cherenkov-like artifacts at the
+discrete grid scale) dominates over the small Amp\`ere correction.
+The $\vv{v}\times\vv{B}$ \emph{force law} is independently verified
+in Stage 23 (cyclotron in the analytic uniform-$B$ background).
 
 Long-time orbit stability is left for a future test, with the same
 caveats as Stage 12: sub-cell PIC heating and the inductive

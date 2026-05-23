@@ -145,24 +145,24 @@ int main(void) {
     /* (c) Curl B_z = d_x A_y - d_y A_x via centered FD (cell-centered analog
      * of §9.1 eq:yee_curl). For our case A_y ~ 0, so B_z = -d_y A_x.
      *
-     * Analytic at sample point (x0, y0 + r), in our normalization:
-     *   leapfrog source coefficient for phi_em is -4 pi k_e, so the static
-     *   Poisson form is Lap phi_em = 4 pi k_e rho_q. For a point charge Q
-     *   the 2D Green's function gives phi_em(r) = 2 k_e Q ln r + C
-     *   (slope 2 k_e Q, as verified in Stage 3 for the gravitational
-     *   analogue), hence d_r phi_em = 2 k_e Q / r.
-     *   A_x  = (v_x / c^2) * phi_em
-     *   B_z  = -d_y A_x|_(x0, y0+r) = -(v_x / c^2) * 2 k_e Q / r */
+     * Analytic at sample point (x0, y0 + r), POST-v36 EM sign fix:
+     *   leapfrog source coefficient for phi_em is +4 pi k_e (standard Maxwell),
+     *   so the static Poisson form is Lap phi_em = -4 pi k_e rho_q.  For a
+     *   point charge Q the 2D Green's function gives
+     *     phi_em(r) = -2 k_e Q ln r + C   (slope -2 k_e Q),
+     *   hence d_r phi_em = -2 k_e Q / r.
+     *   A_x  = (v_x / c^2) * phi_em = -(v_x/c^2) * 2 k_e Q ln r + C
+     *   B_z  = -d_y A_x|_(x0, y0+r) = +(v_x / c^2) * 2 k_e Q / r */
     const float inv_2dx = 1.0f / (2.0f * dx);
     float max_rel_bz = 0.0f;
-    printf("  B_z (= -d_y A_x) along +y axis, expected = -(v_x/c^2) * 2 k_e Q / r:\n");
+    printf("  B_z (= -d_y A_x) along +y axis, expected = +(v_x/c^2) * 2 k_e Q / r:\n");
     for (int s = 0; s < n_r; s++) {
         const int r = radii[s];
         const int k = (cy + r) * W + cx;
         const float dAx_dy = (mean[GR_FIELD_A_X][k + W] - mean[GR_FIELD_A_X][k - W]) * inv_2dx;
         const float dAy_dx = (mean[GR_FIELD_A_Y][k + 1] - mean[GR_FIELD_A_Y][k - 1]) * inv_2dx;
         const float Bz_obs = dAy_dx - dAx_dy;
-        const float Bz_ana = -(vx / (c_eff * c_eff)) * 2.0f * k_e * charge / (float) r;
+        const float Bz_ana = +(vx / (c_eff * c_eff)) * 2.0f * k_e * charge / (float) r;
         const float rel = fabsf((Bz_obs - Bz_ana) / Bz_ana);
         if (rel > max_rel_bz) max_rel_bz = rel;
         printf("    r=%-3d   B_z_obs = %+.4e   B_z_analytic = %+.4e   rel.err = %.3e\n",

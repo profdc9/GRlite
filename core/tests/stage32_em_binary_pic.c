@@ -1,15 +1,13 @@
 /* Stage 32 -- EM analog of Stage 12: two-body mutual EM dynamics via FDTD.
  *
- * Two equal-mass, SAME-SIGN-charge particles (the 2D-log Coulomb mirror
- * of standard EM -- same-sign attracts in this simulator's PIC
- * perturbation channel, see pic_binary_em scenario doc for the sign
- * convention).  Mutual attraction via the FDTD perturbation field, no
- * analytic background.  Full EM Lorentz force on both particles (-q grad
- * phi - q d_t A + q v x B).  Production inductive piece ON.  Stage 27
- * already validated the inductive inspiral for a single test particle
- * around a softened-charge background; Stage 32 promotes both bodies to
- * active sources and checks the early-orbit behavior is consistent with
- * the 2D-log Coulomb prediction.
+ * Two equal-mass, opposite-sign-charge particles -- standard Maxwell
+ * sign convention (opposite charges attract).  Mutual attraction via
+ * the FDTD perturbation field, no analytic background.  Full EM Lorentz
+ * force on both particles (-q grad phi - q d_t A + q v x B).  Production
+ * inductive piece ON.  Stage 27 already validated the inductive inspiral
+ * for a single test particle around a softened-charge background; Stage
+ * 32 promotes both bodies to active sources and checks the early-orbit
+ * behavior is consistent with the 2D-log Coulomb prediction.
  *
  * v_orb prediction in 2D-log Coulomb (analogous to gravity binary):
  *     v_orb = Q * sqrt(k_e / m)        (independent of r)
@@ -49,7 +47,7 @@
 } while (0)
 
 static int test_free_fall(void) {
-    printf("\n[1/3] Free-fall: same-sign 2D-log charges at rest -- mutual attraction.\n");
+    printf("\n[1/3] Free-fall: opposite-sign charges at rest -- mutual attraction.\n");
     const int   W      = 256, H = 256;
     const float dx     = 1.0f;
     const float c_eff  = 1.0f;
@@ -73,11 +71,11 @@ static int test_free_fall(void) {
     const gr_particle_t* p0 = gr_sim_get_particle(sim, 0);
     const float r_init = sqrtf((p0->x - cx) * (p0->x - cx)
                              + (p0->y - cy) * (p0->y - cy));
-    printf("  initial: r = %.4f (separation 2r = %.4f), Q=+%.3f (both)\n",
+    printf("  initial: r = %.4f (separation 2r = %.4f), Q=+/-%.3f\n",
            r_init, 2.0f * r_init, Q);
 
-    /* Expected behavior: same-sign charges attract via 2D-log Coulomb.
-     * Phi_em^{pert} ~ 2 k_e Q log(r) so |F| ~ 2 k_e Q^2 / d.  Mutual
+    /* Expected behavior: opposite-sign charges attract (standard Maxwell).
+     * Phi_em^{pert} ~ -2 k_e Q log(r) so |F| ~ 2 k_e Q^2 / d.  Mutual
      * infall begins once the field has propagated between the particles
      * (~ 2r/c wave-crossing time ~ 16 sim units / 22 dt). */
     const int N_check = 50;

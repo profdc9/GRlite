@@ -118,10 +118,12 @@ int main(void) {
     printf("  after %d + %d steps (avg): all four vector potentials exactly zero (checkpoint 3)\n",
            n_settle, n_avg);
 
-    /* (b) Discrete Poisson on time-averaged phi_g and phi_em separately. */
+    /* (b) Discrete Poisson on time-averaged phi_g and phi_em separately.
+     * Gravity: Lap Phi_g = +4 pi G rho_m (Newton sign).
+     * EM:      Lap phi_em = -4 pi k_e rho_q (standard Maxwell sign, post-v36 fix). */
     const float inv_dx2 = 1.0f / (dx * dx);
-    const float src_g   = 4.0f * (float) M_PI * G_eff;  /* lap phi_g = src_g * rho_matter */
-    const float src_e   = 4.0f * (float) M_PI * k_e;    /* lap phi_em = src_e * rho_q */
+    const float src_g   = +4.0f * (float) M_PI * G_eff;  /* lap phi_g = src_g * rho_matter */
+    const float src_e   = -4.0f * (float) M_PI * k_e;    /* lap phi_em = src_e * rho_q */
 
     /* Convert sums to means. */
     float* phig_mean  = (float*) malloc((size_t) W * H * sizeof(float));
@@ -185,8 +187,11 @@ int main(void) {
         const int cx = W / 2, cy = H / 2;
         const int radii[] = {8, 12, 16, 24, 32};
         const int n_r = sizeof(radii) / sizeof(radii[0]);
+        /* Expected log slopes in 2D box:
+         *   Phi_g  = +2 G m ln(r) + const,  slope = +2 G m  (gravity sign)
+         *   phi_em = -2 k_e Q ln(r) + const, slope = -2 k_e Q (Maxwell sign) */
         printf("  log slopes (expected Phi_g: %.2f, phi_em: %.2f):\n",
-               2.0f * G_eff * mass, 2.0f * k_e * charge);
+               +2.0f * G_eff * mass, -2.0f * k_e * charge);
         for (int s = 0; s + 1 < n_r; s++) {
             const float lr = logf((float) radii[s + 1] / (float) radii[s]);
             const float sg = (phig_mean[cy * W + (cx + radii[s + 1])]

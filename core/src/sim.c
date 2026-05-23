@@ -15,8 +15,23 @@
 void gr_sim_recompute_source_coeffs(struct gr_sim* sim) {
     if (!sim) return;
     const float inv_c2  = 1.0f / (sim->c_eff * sim->c_eff);
+    /* Gravity: leapfrog Lap + sc*src form yields static limit
+     *   Lap Phi_g = -sc * rho_m = +4 pi G * rho_m
+     * which is the standard Newton Poisson equation -- positive masses
+     * attract.  sc = -4 pi G keeps it that way. */
     const float c_grav  = -4.0f * (float) M_PI * sim->G_eff;
-    const float c_em    = -4.0f * (float) M_PI * sim->k_e;
+    /* EM: standard Maxwell (Gaussian) is Lap phi = -4 pi k_e * rho_q, i.e.
+     *   sc = +4 pi k_e   (OPPOSITE sign from gravity)
+     * so that
+     *   like charges REPEL, opposite charges ATTRACT,
+     *   parallel like-currents ATTRACT (Ampere).
+     * v36 fix: previous versions used sc = -4 pi k_e (gravity-like), which
+     * gave the wrong sign in 2D-log PIC perturbations -- only Stage 32
+     * (pure-PIC binary) actually exercised the wrong-sign regime; all
+     * other EM stages (23/24/25/26/27/30) use analytic backgrounds
+     * (hand-coded with standard EM signs) so were unaffected.  See
+     * gr_sandbox_v35.tex sec:em_sign_convention. */
+    const float c_em    = +4.0f * (float) M_PI * sim->k_e;
     sim->fields[GR_FIELD_PHI_GRAV].source_coeff = c_grav;
     sim->fields[GR_FIELD_A_GX    ].source_coeff = c_grav * inv_c2;
     sim->fields[GR_FIELD_A_GY    ].source_coeff = c_grav * inv_c2;
