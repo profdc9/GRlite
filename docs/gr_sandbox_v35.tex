@@ -3388,11 +3388,36 @@ $1/(8\sqrt{2})   \approx 0.088$ & $-4.97\%$ & $-20.47\%$ & $-15.50\%$ \\
 
 EM contribution ratios: $0.171,\ 0.919,\ 0.925$.  Same qualitative
 pattern --- ratio approaches $1.0$, plateau emerges.  The EM
-no-inductive drift is larger and slower-to-converge than gravity's
-because the EM scalar gradient still uses CIC$+$LEGACY (TSC$+$LB
-variants of \texttt{phi\_em\_grad\_at\_total} are not yet ported from
-the gravity side).  The inductive contribution itself is CFL-converging
-on schedule.
+no-inductive drift was larger and slower-to-converge than gravity's
+in this (pre-v36) table, an asymmetry that was tracked down to two
+distinct issues:
+\begin{itemize}
+  \item The EM scalar gradient lacked TSC/LB variants.  v36 ports
+        these from \texttt{grav\_grad\_at} onto
+        \texttt{phi\_em\_grad\_at\_total}; Stage 33 confirms the four
+        (shape $\times$ interp) combinations give consistent drift
+        post-fix.
+  \item More fundamentally, the EM source-coupling sign was inverted
+        relative to standard Maxwell (\texttt{c\_em} was negative,
+        like gravity's $-4\pi G$, instead of $+4\pi k_e$).  v36 fixes
+        this; the EM PDE now reads $\Box \phi = -\rho/\epsilon_0$ and
+        $\Box \vv{A} = -\vv{J}/(\epsilon_0 c^2)$ (standard Maxwell).
+        Stage 34 verifies the full chain end-to-end:
+        Poisson sign, $\vv{J}=\rho\vv{v}$ deposition, $\vv{A}$
+        wave-equation sign, and Lorentz force direction (including
+        like-repel + opposite-attract).
+\end{itemize}
+\paragraph{Open item.}  The post-fix inductive contribution at the
+same CFL sweep reads $+3.5\%,\ +23.4\%,\ +25.4\%,\ +22.3\%$ (drift,
+not contribution-only) --- an \emph{outspiral} that is also
+CFL-converged (ratio approaching $1.0$).  Pre-v36 the same setup
+gave inspiral; the sign flip on the field convention also flips the
+sign of the inductive-piece self-coupling, so the discrete-PDE
+radiation-reaction direction reversed.  The energy-conservation
+argument says outgoing waves must drain orbital energy (inspiral),
+so the outspiral indicates a residual time-staggering mismatch in
+the inductive piece that the v36 sign flip exposed.  Tracking down
+the source of this mismatch is the next priority for the EM channel.
 
 \paragraph{Interpretation.}  The inductive piece's inspiral is a
 genuine physical radiation reaction in the 2D-softened-Newton$+$GEM

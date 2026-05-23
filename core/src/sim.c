@@ -16,21 +16,26 @@ void gr_sim_recompute_source_coeffs(struct gr_sim* sim) {
     if (!sim) return;
     const float inv_c2  = 1.0f / (sim->c_eff * sim->c_eff);
     /* Gravity: leapfrog Lap + sc*src form yields static limit
-     *   Lap Phi_g = -sc * rho_m = +4 pi G * rho_m
-     * which is the standard Newton Poisson equation -- positive masses
-     * attract.  sc = -4 pi G keeps it that way. */
-    const float c_grav  = -4.0f * (float) M_PI * sim->G_eff;
-    /* EM: standard Maxwell (Gaussian) is Lap phi = -4 pi k_e * rho_q, i.e.
-     *   sc = +4 pi k_e   (OPPOSITE sign from gravity)
-     * so that
+     *   Lap Phi_g = -sc * rho_m = +4 pi G * rho_m   (Newton Poisson)
+     * Positive masses attract.  sc_grav = -4 pi G.
+     *
+     * EM (standard Maxwell, post-v36 sign fix):
+     *   Lap phi_em - (1/c^2) d^2phi/dt^2 = -rho_q / epsilon_0
+     *                                   = -4 pi k_e rho_q
+     * which in leapfrog form gives static Lap phi_em = -4 pi k_e rho_q.
+     * Yielding standard-EM behavior:
      *   like charges REPEL, opposite charges ATTRACT,
      *   parallel like-currents ATTRACT (Ampere).
-     * v36 fix: previous versions used sc = -4 pi k_e (gravity-like), which
-     * gave the wrong sign in 2D-log PIC perturbations -- only Stage 32
-     * (pure-PIC binary) actually exercised the wrong-sign regime; all
-     * other EM stages (23/24/25/26/27/30) use analytic backgrounds
-     * (hand-coded with standard EM signs) so were unaffected.  See
-     * gr_sandbox_v35.tex sec:em_sign_convention. */
+     *
+     * sc_em = +4 pi k_e   (OPPOSITE sign from gravity).
+     *
+     * The originally-derived EM code shared the gravity-style negative
+     * sign (matching how the EM scaffolding was lifted from GEM); the
+     * result was an "anti-Maxwell" PIC channel in which same-sign
+     * charges attracted.  v36 corrects this; Stage 34 verifies the
+     * full EM chain (Poisson sign, J=rho*v, A wave-eq sign, Lorentz
+     * force direction). */
+    const float c_grav  = -4.0f * (float) M_PI * sim->G_eff;
     const float c_em    = +4.0f * (float) M_PI * sim->k_e;
     sim->fields[GR_FIELD_PHI_GRAV].source_coeff = c_grav;
     sim->fields[GR_FIELD_A_GX    ].source_coeff = c_grav * inv_c2;

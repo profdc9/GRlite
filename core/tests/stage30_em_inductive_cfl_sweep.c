@@ -73,7 +73,9 @@ static float run(float Q, float q_test, float m_test, float r_orb, float cfl,
     gr_sim_set_particle_source_deposition(sim, 1);
     gr_sim_set_background_point_charge(sim, cx, cy, Q, eps);
     gr_sim_set_bg_mode(sim, GR_BG_MODE_ANALYTIC);
-    /* CIC + LEGACY: EM gradient path doesn't yet have TSC/LB variants.
+    /* CIC + LEGACY: historical EM-side default (Stage 33 verifies TSC/LB
+     * now also available on phi_em_grad_at_total and that all four shape
+     * x interp combos give consistent drift post-v36 sign fix).
      * rho smoothing 4 (mirrors gravity production). */
     gr_sim_set_shape_function(sim, GR_SHAPE_CIC);
     gr_sim_set_force_interp(sim, GR_FORCE_INTERP_LEGACY);

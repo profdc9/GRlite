@@ -562,45 +562,171 @@ static float B_g_z_at_total(const struct gr_sim* sim, float x, float y) {
     return bg + pert;
 }
 
+/* Lewis-Birdsall variant of the EM scalar gradient.  Structurally identical
+ * to grav_grad_at_lb but reads phi_em (and phi_bg for sampled-mode) instead
+ * of Phi_g.  See grav_grad_at_lb's doc-block above for the derivation
+ * details; this is the EM mirror.  Gated by em_lorentz_force_enabled. */
+static void phi_em_grad_at_lb(const struct gr_sim* sim, float x, float y,
+                              float* gx_out, float* gy_out) {
+    *gx_out = 0.0f;
+    *gy_out = 0.0f;
+    if (!sim || !sim->em_lorentz_force_enabled) return;
+    const int   W   = sim->width;
+    const int   H   = sim->height;
+    const float dx  = sim->dx;
+
+    float gx_bg_ana = 0.0f, gy_bg_ana = 0.0f;
+    const float* bg = NULL;
+    if (sim->bg_mode == GR_BG_MODE_ANALYTIC && sim->bg_kind != GR_BG_KIND_NONE) {
+        float phi_a;
+        gr_bg_eval_phi_em(sim, x, y, &phi_a, &gx_bg_ana, &gy_bg_ana);
+    } else if (sim->bg_mode == GR_BG_MODE_SAMPLED) {
+        bg = sim->phi_bg;
+    }
+    const float* pert = sim->field_evolution_enabled
+                            ? sim->fields[GR_FIELD_PHI_EM].prev
+                            : sim->fields[GR_FIELD_PHI_EM].curr;
+
+    if (sim->shape_function == GR_SHAPE_TSC) {
+        const float xn = x / dx;
+        const float yn = y / dx;
+        const int   ic = (int) floorf(xn + 0.5f);
+        const int   jc = (int) floorf(yn + 0.5f);
+        if (ic < 1 || ic > W - 2 || jc < 1 || jc > H - 2) {
+            *gx_out = gx_bg_ana;
+            *gy_out = gy_bg_ana;
+            return;
+        }
+        const float u  = xn - (float) ic;
+        const float v  = yn - (float) jc;
+        const float a  = 0.5f - v, b = 0.5f + v;
+        const float c  = 0.5f - u, d  = 0.5f + u;
+        const float wx[3]  = { 0.5f * c * c,  0.75f - u * u, 0.5f * d * d };
+        const float wy[3]  = { 0.5f * a * a,  0.75f - v * v, 0.5f * b * b };
+        const float dwx[3] = { u - 0.5f, -2.0f * u, u + 0.5f };
+        const float dwy[3] = { v - 0.5f, -2.0f * v, v + 0.5f };
+        const float inv_dx = 1.0f / dx;
+        float gx_sum = 0.0f, gy_sum = 0.0f;
+        for (int dj = -1; dj <= 1; dj++) {
+            const int row = (jc + dj) * W;
+            for (int di = -1; di <= 1; di++) {
+                const int k = row + ic + di;
+                float phi = pert[k];
+                if (bg) phi += bg[k];
+                gx_sum += (dwx[di + 1] * wy[dj + 1]) * phi;
+                gy_sum += (wx[di + 1]  * dwy[dj + 1]) * phi;
+            }
+        }
+        *gx_out = inv_dx * gx_sum + gx_bg_ana;
+        *gy_out = inv_dx * gy_sum + gy_bg_ana;
+        return;
+    }
+
+    /* CIC-LB */
+    const float xn = x / dx;
+    const float yn = y / dx;
+    const int   ic = (int) floorf(xn);
+    const int   jc = (int) floorf(yn);
+    if (ic < 0 || ic >= W - 1 || jc < 0 || jc >= H - 1) {
+        *gx_out = gx_bg_ana;
+        *gy_out = gy_bg_ana;
+        return;
+    }
+    const float fx = xn - (float) ic;
+    const float fy = yn - (float) jc;
+    const float inv_dx = 1.0f / dx;
+    const int k00 =  jc      * W + ic;
+    const int k10 =  jc      * W + ic + 1;
+    const int k01 = (jc + 1) * W + ic;
+    const int k11 = (jc + 1) * W + ic + 1;
+    float p00 = pert[k00], p10 = pert[k10], p01 = pert[k01], p11 = pert[k11];
+    if (bg) { p00 += bg[k00]; p10 += bg[k10]; p01 += bg[k01]; p11 += bg[k11]; }
+    const float gx_lb = inv_dx * (-(1.0f - fy) * p00 + (1.0f - fy) * p10
+                                  -        fy  * p01 +        fy  * p11);
+    const float gy_lb = inv_dx * (-(1.0f - fx) * p00 -        fx  * p10
+                                  +(1.0f - fx) * p01 +        fx  * p11);
+    *gx_out = gx_lb + gx_bg_ana;
+    *gy_out = gy_lb + gy_bg_ana;
+}
+
 /* EM scalar gradient at the particle: grad phi_em^{total} = grad phi^{bg}
  * + grad phi^{pert}.  Returns (gx, gy) such that the electrostatic force
- * piece on charge q is F = -q * (gx, gy).  Mirrors grav_grad_at's CORNER-
- * sublattice centered-FD + CIC-interp scheme — Phi_em lives on the CORNER
- * sublattice, same as Phi_g, so the kernel is structurally identical.
+ * piece on charge q is F = -q * (gx, gy).  Mirrors grav_grad_at structurally.
  *
- * For now this routine implements the basic CIC+FD path (no TSC, no LB).
- * The EM scalar source typically has no PIC-deposition self-consistency
- * concern at our use cases — Stage 24 uses an ANALYTIC linear background;
- * future stages with deposited rho_q will benefit from the TSC/LB upgrades,
- * but those should mirror the GM-side variants when added.  Gated by
- * em_lorentz_force_enabled (zero output disables the q E piece). */
+ * Dispatch:
+ *   force_interp == LEWIS_BIRDSALL -> phi_em_grad_at_lb (CIC-LB or TSC-LB).
+ *   force_interp == LEGACY:
+ *     shape_function == TSC -> TSC corner interp + centered FD.
+ *     shape_function == CIC -> CIC corner interp + centered FD (the basic path).
+ *
+ * Gated by em_lorentz_force_enabled. */
 static void phi_em_grad_at_total(const struct gr_sim* sim, float x, float y,
                                  float* gx_out, float* gy_out) {
     *gx_out = 0.0f;
     *gy_out = 0.0f;
     if (!sim || !sim->em_lorentz_force_enabled) return;
+
+    if (sim->force_interp == GR_FORCE_INTERP_LEWIS_BIRDSALL) {
+        phi_em_grad_at_lb(sim, x, y, gx_out, gy_out);
+        return;
+    }
+
     const int   W  = sim->width;
     const int   H  = sim->height;
     const float dx = sim->dx;
     const float inv_2dx = 1.0f / (2.0f * dx);
 
-    /* Background contribution (analytic or sampled). */
     float gx_bg = 0.0f, gy_bg = 0.0f;
     const float* bg_corner = NULL;
     if (sim->bg_mode == GR_BG_MODE_ANALYTIC && sim->bg_kind != GR_BG_KIND_NONE) {
         float phi_a;
         gr_bg_eval_phi_em(sim, x, y, &phi_a, &gx_bg, &gy_bg);
     } else if (sim->bg_mode == GR_BG_MODE_SAMPLED) {
-        bg_corner = sim->phi_bg;   /* may be NULL */
+        bg_corner = sim->phi_bg;
     }
-
-    /* Perturbation: read prev when field evolution is active (same
-     * read-prev convention as Phi_g). */
     const float* pert = sim->field_evolution_enabled
                             ? sim->fields[GR_FIELD_PHI_EM].prev
                             : sim->fields[GR_FIELD_PHI_EM].curr;
 
-    /* CIC-corner interp at (x, y); centered FD on neighbor stencil. */
+    if (sim->shape_function == GR_SHAPE_TSC) {
+        /* TSC corner interp: 3x3 stencil + centered FD at each neighbor. */
+        const float xn = x / dx;
+        const float yn = y / dx;
+        const int   ic = (int) floorf(xn + 0.5f);
+        const int   jc = (int) floorf(yn + 0.5f);
+        if (ic >= 2 && ic < W - 2 && jc >= 2 && jc < H - 2) {
+            const float u = xn - (float) ic;
+            const float v = yn - (float) jc;
+            const float a = 0.5f - u, b = 0.5f + u;
+            const float c = 0.5f - v, d = 0.5f + v;
+            const float wx[3] = {0.5f * a * a, 0.75f - u * u, 0.5f * b * b};
+            const float wy[3] = {0.5f * c * c, 0.75f - v * v, 0.5f * d * d};
+            float gx_sum = 0.0f, gy_sum = 0.0f;
+            for (int dj = -1; dj <= 1; dj++) {
+                const int row = (jc + dj) * W;
+                for (int di = -1; di <= 1; di++) {
+                    const int k = row + ic + di;
+                    float vgx = (pert[k + 1] - pert[k - 1]) * inv_2dx;
+                    float vgy = (pert[k + W] - pert[k - W]) * inv_2dx;
+                    if (bg_corner) {
+                        vgx += (bg_corner[k + 1] - bg_corner[k - 1]) * inv_2dx;
+                        vgy += (bg_corner[k + W] - bg_corner[k - W]) * inv_2dx;
+                    }
+                    const float w = wx[di + 1] * wy[dj + 1];
+                    gx_sum += w * vgx;
+                    gy_sum += w * vgy;
+                }
+            }
+            *gx_out = gx_sum + gx_bg;
+            *gy_out = gy_sum + gy_bg;
+        } else {
+            *gx_out = gx_bg;
+            *gy_out = gy_bg;
+        }
+        return;
+    }
+
+    /* CIC + centered-FD (original LEGACY path). */
     const float xn = x / dx;
     const float yn = y / dx;
     const int   ic = (int) floorf(xn);

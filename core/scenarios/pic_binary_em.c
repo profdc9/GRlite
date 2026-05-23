@@ -7,19 +7,14 @@
  * phi_em + A_em via the full EM Lorentz force F_em = q(-grad phi - d_t A
  * + v x B).  The inductive piece is production-ON (Stage 27/30 resolution).
  *
- * SIGN CONVENTION (standard Maxwell after the v36 c_em flip):
- *   PDE static limit : Lap phi = -4 pi k_e rho_q
- *   2D log Green's   : phi_pert(r) = -2 k_e Q ln(r) + const
- *   F on q'          : -q' grad phi = +2 k_e q q' / r * r_hat
- *                      => REPULSIVE if q q' > 0 (like charges),
- *                         ATTRACTIVE if q q' < 0 (opposite charges).
- * The optional analytic point-charge background
- * (gr_sim_set_background_point_charge) uses a 3D-1/r SHAPE for
- * pedagogical familiarity (Stages 26/27); its sign convention matches
- * standard Maxwell now that the PIC source coefficient is also
- * standard.  Analytic and PIC paths are sign-consistent (both
- * "opposite attracts"); they differ only in spatial shape (1/r vs
- * 2D-log), so mixing them is meaningful, not contradictory.
+ * SIGN CONVENTION (standard Maxwell, post-v36 fix):
+ *   Wave eq.         : Lap phi - (1/c^2) d^2 phi/dt^2 = -rho_q/epsilon_0
+ *   Static limit     : Lap phi = -4 pi k_e rho_q
+ *   F on test q'     : -q' grad phi
+ *                      => like charges REPEL, opposite charges ATTRACT.
+ * The Stage 34 chain verifies this end-to-end.  The analytic
+ * point-charge background uses a 3D-1/r SHAPE
+ * (phi_bg = +k_e Q/r) -- standard Maxwell as well.
  *
  * Pedagogical purpose: the classical-atom-collapse demo.  Opposite
  * charges attract via the 2D-log perturbation; the inductive back-
@@ -112,10 +107,8 @@ static int build_pic_binary_em(gr_sim_t* sim, const float* params, int n_params)
     /* Two OPPOSITE-SIGN-charge particles counter-orbiting around (cx, cy):
      *   p0 (charge +Q) at (cx - r, cy), velocity (0, +v)
      *   p1 (charge -Q) at (cx + r, cy), velocity (0, -v)
-     * gives an attractive mutual orbit -- standard Maxwell sign
-     * convention (opposite attracts).  Velocities are tangential to the
-     * orbital plane; v_orb's magnitude is the same as for the
-     * gravity binary's centripetal balance (formula above). */
+     * gives an attractive mutual orbit -- standard Maxwell (opposite
+     * charges attract). */
     gr_sim_add_particle(sim, cx - r_orb, cy, mass, /*charge=*/+Q,
                         /*vx=*/0.0f, /*vy=*/+v_orb);
     gr_sim_add_particle(sim, cx + r_orb, cy, mass, /*charge=*/-Q,
