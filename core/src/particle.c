@@ -571,6 +571,7 @@ static void phi_em_grad_at_lb(const struct gr_sim* sim, float x, float y,
     *gx_out = 0.0f;
     *gy_out = 0.0f;
     if (!sim || !sim->em_lorentz_force_enabled) return;
+    if (!sim->em_electrostatic_enabled) return;
     const int   W   = sim->width;
     const int   H   = sim->height;
     const float dx  = sim->dx;
@@ -665,6 +666,7 @@ static void phi_em_grad_at_total(const struct gr_sim* sim, float x, float y,
     *gx_out = 0.0f;
     *gy_out = 0.0f;
     if (!sim || !sim->em_lorentz_force_enabled) return;
+    if (!sim->em_electrostatic_enabled) return;
 
     if (sim->force_interp == GR_FORCE_INTERP_LEWIS_BIRDSALL) {
         phi_em_grad_at_lb(sim, x, y, gx_out, gy_out);

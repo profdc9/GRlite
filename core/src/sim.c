@@ -70,6 +70,7 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
     /* EM Lorentz force on by default (Stage 23+); all sub-pieces on. */
     sim->em_lorentz_force_enabled      = 1;
     sim->em_inductive_enabled          = 1;
+    sim->em_electrostatic_enabled      = 1;
     sim->em_inductive_disc             = GR_INDUCTIVE_CENTERED;
     sim->em_inductive_sign             = +1.0f;
     sim->grav_inductive_sign           = +1.0f;
@@ -499,6 +500,14 @@ void gr_sim_set_em_inductive_enabled(gr_sim_t* sim, int enabled) {
 }
 int gr_sim_get_em_inductive_enabled(const gr_sim_t* sim) {
     return sim ? sim->em_inductive_enabled : 0;
+}
+
+void gr_sim_set_em_electrostatic_enabled(gr_sim_t* sim, int enabled) {
+    if (!sim) return;
+    sim->em_electrostatic_enabled = enabled ? 1 : 0;
+}
+int gr_sim_get_em_electrostatic_enabled(const gr_sim_t* sim) {
+    return sim ? sim->em_electrostatic_enabled : 0;
 }
 
 void gr_sim_set_em_inductive_disc(gr_sim_t* sim, gr_inductive_disc_t kind) {

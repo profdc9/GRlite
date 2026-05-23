@@ -110,6 +110,12 @@ struct gr_sim {
      * contribution but keeps the q v x B and -q grad phi pieces.  Used
      * for diagnostic isolation in closed-loop PIC dynamics (Stage 27). */
     int em_inductive_enabled;
+    /* Fine-grained gate for the electrostatic -q grad phi piece.  Default 1.
+     * When disabled, phi_em_grad_at_total returns zero so the EM Lorentz
+     * force omits the -grad phi contribution but keeps q v x B and the
+     * inductive piece (if its own gate is on).  Used by Stage 35 to
+     * isolate the magnetic (Ampere) force between parallel currents. */
+    int em_electrostatic_enabled;
     /* Discretization for the EM inductive piece. */
     gr_inductive_disc_t em_inductive_disc;
     /* Sign multipliers for diagnostic sign-flip experiments.  Default +1.0

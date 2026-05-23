@@ -324,6 +324,15 @@ int  gr_sim_get_em_lorentz_force_enabled(const gr_sim_t* sim);
 void gr_sim_set_em_inductive_enabled(gr_sim_t* sim, int enabled);
 int  gr_sim_get_em_inductive_enabled(const gr_sim_t* sim);
 
+/* Gate for the -q grad phi (electrostatic) piece of the EM Lorentz force.
+ * Default ON.  When OFF, phi_em_grad_at_total returns zero so the force
+ * law reduces to the v x B + inductive pieces only (or just v x B if the
+ * inductive gate is also OFF).  Stage 35 uses both gates OFF to isolate
+ * the pure magnetic (Ampere) force between parallel currents.  Fields
+ * phi_em and A_em still update via the wave equation as normal. */
+void gr_sim_set_em_electrostatic_enabled(gr_sim_t* sim, int enabled);
+int  gr_sim_get_em_electrostatic_enabled(const gr_sim_t* sim);
+
 /* Discretization for the inductive piece -q d_t A.  Two choices, both
  * exposed for diagnostic comparison:
  *

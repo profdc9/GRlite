@@ -3407,17 +3407,48 @@ distinct issues:
         wave-equation sign, and Lorentz force direction (including
         like-repel + opposite-attract).
 \end{itemize}
-\paragraph{Open item.}  The post-fix inductive contribution at the
-same CFL sweep reads $+3.5\%,\ +23.4\%,\ +25.4\%,\ +22.3\%$ (drift,
-not contribution-only) --- an \emph{outspiral} that is also
-CFL-converged (ratio approaching $1.0$).  Pre-v36 the same setup
-gave inspiral; the sign flip on the field convention also flips the
-sign of the inductive-piece self-coupling, so the discrete-PDE
-radiation-reaction direction reversed.  The energy-conservation
-argument says outgoing waves must drain orbital energy (inspiral),
-so the outspiral indicates a residual time-staggering mismatch in
-the inductive piece that the v36 sign flip exposed.  Tracking down
-the source of this mismatch is the next priority for the EM channel.
+\paragraph{Open item -- inductive-piece sign mismatch.}  The post-fix
+inductive contribution at the same CFL sweep reads
+$+3.5\%,\ +23.4\%,\ +25.4\%,\ +22.3\%$ (drift, not
+contribution-only) --- an \emph{outspiral} that is also CFL-converged
+(ratio approaching $1.0$).  Pre-v36 the same setup gave inspiral.
+The sign flip on the field convention also flips the sign of the
+inductive-piece self-coupling, reversing the discrete-PDE
+radiation-reaction direction.  Energy conservation demands inspiral
+for a bound orbit, so the outspiral indicates a sign error in the
+inductive force-law term relative to the new field convention.
+
+\textbf{Diagnostic chain (Stage 34--36).}  The v36 sign convention
+is verified end-to-end on the static EM machinery: Poisson sign,
+$\vv{J}=\rho\vv{v}$ deposition, $\vv{A}$ wave-equation sign, all
+four Lorentz-force direction tests pass standard Maxwell
+(Section~\ref{sec:stage_em_chain_signs}, Stage~34).  The pure
+$q\vv{v}\times\vv{B}$ piece gives Amp\`ere attraction for parallel
+like-currents (Stage~35) with the expected $(v/c)^2$ scaling.  When
+the inductive piece is OFF, the EM Kepler orbit is essentially
+stable ($\sim +0.3\%$ drift).  Stage~36 confirms that flipping the
+sign on $-q\partial_t\vv{A}$ (via the diagnostic
+\texttt{gr\_sim\_set\_em\_inductive\_sign(-1)}) turns outspiral
+into inspiral:
+
+\begin{center}
+\begin{tabular}{@{}lc@{}}
+\toprule
+inductive\_sign & drift over 4 orbits \\
+\midrule
+$+1$ (default standard Lorentz)  & $+3.73\%$ \,(\emph{outspiral}) \\
+$-1$ (flipped)                    & $-3.45\%$ \,(\emph{inspiral})  \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+So the surgical fix is a one-sign change on the
+$-q\partial_t\vv{A}$ term in \texttt{em\_force\_at}.  The deeper
+question --- why the discrete PIC self-force interaction needs the
+flipped inductive sign in the standard-Maxwell field convention
+(but not in the gravity-style anti-Maxwell convention used pre-v36)
+--- is documented in \texttt{memory/grlite-em-inductive-sign-open.md}
+as the next investigation step.
 
 \paragraph{Interpretation.}  The inductive piece's inspiral is a
 genuine physical radiation reaction in the 2D-softened-Newton$+$GEM
