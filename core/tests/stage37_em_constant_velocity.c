@@ -73,6 +73,16 @@ typedef struct {
     float y_final;
     int   n_steps_run;
     int   bailed_out;          /* nonzero if particle left the safe interior */
+    /* Per-step spurious-force measurement.  After warmup, vy is sampled
+     * over a short window (force_window_steps); accel_per_step is the
+     * mean (vy_after_window - vy_after_warmup) / force_window_steps.
+     * Reported in code units of (cell / dt^2) since dt = cfl*dx/c_eff is
+     * dimensionless in this test.  Acceleration is force/mass.  At
+     * non-zero mass it can be converted to force = mass * accel. */
+    float accel_per_step;       /* dvy / step over post-warmup window */
+    int   force_window_steps;   /* number of steps the window averaged over */
+    float dt_used;              /* dt of this run, for converting to dvy/dt */
+    float mass_used;             /* mass of the particle (for absolute-force conversion) */
 } run_result_t;
 
 static float kinetic_energy(const gr_particle_t* p, float c_eff) {
@@ -87,11 +97,11 @@ static float vy_of(const gr_particle_t* p, float c_eff) {
     return p->py / (gamma * m);
 }
 
-static run_result_t run_config_full_cfl_dx(int electrostatic_on, int inductive_on, int magnetic_on,
+static run_result_t run_config_full_mass(int electrostatic_on, int inductive_on, int magnetic_on,
                                     int lorentz_on, float ind_sign, float v_drift,
                                     float c_eff, float j_shift,
                                     int rho_smooth, int j_smooth,
-                                    float cfl, float dx,
+                                    float cfl, float dx, float mass,
                                     const char* label) {
     /* Physical domain held fixed (128 x 1024 in physical units).  Cells
      * scale as 1/dx so the physical setup is identical at any dx.  This
@@ -102,7 +112,6 @@ static run_result_t run_config_full_cfl_dx(int electrostatic_on, int inductive_o
     const int   H       = (int)(H_phys / dx + 0.5f);
     const int   n_damp  = (int)(16.0f  / dx + 0.5f);
     const float Q       = 0.01f;
-    const float mass    = 0.01f;
     /* y_start in PHYSICAL units = 16 (absorber) + 32 (buffer) = 48. */
     const float y_start = 16.0f + 32.0f;
     const float cx      = ((float) (W - 1) * 0.5f) * dx;
@@ -175,6 +184,20 @@ static run_result_t run_config_full_cfl_dx(int electrostatic_on, int inductive_o
 
     const gr_particle_t* p_after_warmup = gr_sim_get_particle(sim, 0);
     const float KE_post_warmup = kinetic_energy(p_after_warmup, c_eff);
+    const float vy_post_warmup = vy_of(p_after_warmup, c_eff);
+
+    /* Per-step force-measurement window.  Sample dvy over the first
+     * force_window_steps of the main loop, after warmup.  Short
+     * enough that the particle has not yet been captured to the
+     * spurious-force fixed point (at higher mass) and gives a clean
+     * F/m = dvy/dt reading at the initial v.
+     *
+     * Choice: 200 steps.  At dt = 0.7 this is 140 units of light-travel
+     * time, which is many wake-formation times but still tiny compared
+     * to the run length. */
+    const int force_window_steps = 200;
+    float vy_at_window_end = vy_post_warmup;
+    int window_completed = 0;
 
     /* Now run the main trajectory.  Sample KE at intervals and track the
      * max excursion from the post-warmup KE. */
@@ -188,6 +211,10 @@ static run_result_t run_config_full_cfl_dx(int electrostatic_on, int inductive_o
         gr_sim_step(sim);
         actual_steps++;
         const gr_particle_t* p = gr_sim_get_particle(sim, 0);
+        if (s == force_window_steps - 1) {
+            vy_at_window_end = vy_of(p, c_eff);
+            window_completed = 1;
+        }
         if (p->y > y_max_safe) break;
         if (p->y < y_min_safe) break;
         if (!isfinite(p->x) || !isfinite(p->y) || !isfinite(p->px) || !isfinite(p->py)) {
@@ -200,6 +227,19 @@ static run_result_t run_config_full_cfl_dx(int electrostatic_on, int inductive_o
             if (ex > res.KE_max_excursion) res.KE_max_excursion = ex;
         }
     }
+    /* If we exited the loop before completing the force window (e.g.
+     * tiny n_steps or early bail-out), use whatever we have, scaled. */
+    if (!window_completed && actual_steps > 0) {
+        const gr_particle_t* p_now = gr_sim_get_particle(sim, 0);
+        vy_at_window_end = vy_of(p_now, c_eff);
+        res.accel_per_step = (vy_at_window_end - vy_post_warmup) / (float) actual_steps;
+        res.force_window_steps = actual_steps;
+    } else {
+        res.accel_per_step    = (vy_at_window_end - vy_post_warmup) / (float) force_window_steps;
+        res.force_window_steps = force_window_steps;
+    }
+    res.dt_used   = dt;
+    res.mass_used = mass;
 
     const gr_particle_t* pf = gr_sim_get_particle(sim, 0);
     res.KE_final  = kinetic_energy(pf, c_eff);
@@ -212,7 +252,24 @@ static run_result_t run_config_full_cfl_dx(int electrostatic_on, int inductive_o
     return res;
 }
 
-/* Defaults: c_eff = 1.0, j_shift = 0.0, rho_smooth = 4, j_smooth = 0, cfl = 1/sqrt(2), dx = 1.0. */
+/* Wrapper layers.  Defaults moved BARE: rho_smooth = 0, j_smooth = 0,
+ * mass = 0.01, dx = 1.0, cfl = 1/sqrt(2), c_eff = 1.0, j_shift = 0.0.
+ * The early "core configurations" block at the top of main() now runs
+ * at rho_smooth = 0 (the bare-deposit honest baseline), which makes
+ * the section's numbers DIFFERENT from prior runs that used
+ * rho_smooth = 4 implicitly.  See gr_sandbox_v36 sec. "Stage 37" for
+ * what the rho_smooth scan revealed: the +1587% bare phi-only drift
+ * was being hidden by 4-pass smoothing in earlier work. */
+static run_result_t run_config_full_cfl_dx(int electrostatic_on, int inductive_on, int magnetic_on,
+                                    int lorentz_on, float ind_sign, float v_drift,
+                                    float c_eff, float j_shift,
+                                    int rho_smooth, int j_smooth,
+                                    float cfl, float dx,
+                                    const char* label) {
+    return run_config_full_mass(electrostatic_on, inductive_on, magnetic_on, lorentz_on,
+                                ind_sign, v_drift, c_eff, j_shift,
+                                rho_smooth, j_smooth, cfl, dx, 0.01f, label);
+}
 static run_result_t run_config_full_cfl(int electrostatic_on, int inductive_on, int magnetic_on,
                                         int lorentz_on, float ind_sign, float v_drift,
                                         float c_eff, float j_shift,
@@ -236,13 +293,13 @@ static run_result_t run_config_c(int electrostatic_on, int inductive_on, int mag
                                  int lorentz_on, float ind_sign, float v_drift,
                                  float c_eff, const char* label) {
     return run_config_full(electrostatic_on, inductive_on, magnetic_on, lorentz_on,
-                           ind_sign, v_drift, c_eff, 0.0f, 4, 0, label);
+                           ind_sign, v_drift, c_eff, 0.0f, /*rho_smooth*/0, /*j_smooth*/0, label);
 }
 static run_result_t run_config(int electrostatic_on, int inductive_on, int magnetic_on,
                                int lorentz_on, float ind_sign, float v_drift,
                                const char* label) {
     return run_config_full(electrostatic_on, inductive_on, magnetic_on, lorentz_on,
-                           ind_sign, v_drift, 1.0f, 0.0f, 4, 0, label);
+                           ind_sign, v_drift, 1.0f, 0.0f, /*rho_smooth*/0, /*j_smooth*/0, label);
 }
 
 static void print_result(const char* label, const run_result_t* r) {
@@ -547,57 +604,71 @@ int main(void) {
     }  /* end disabled dx scan */
 
     /* v_drift scan: does the artifact persist at non-relativistic speeds?
-     * Low v has tiny initial KE (0.5 m v^2), so % drift explodes for any
-     * small absolute force.  Report drift in multiple forms.
      *
-     * Step count is capped so the runtime stays bounded at low v (where
-     * traversal would otherwise take 1/v as many steps).  At low v the
-     * particle barely moves, but the wake builds up around it and the
-     * self-force acts every step.
+     * Two challenges this scan addresses:
+     *  (a) Low v has tiny initial KE (0.5 m v^2), so % KE drift explodes
+     *      for any small absolute force.  Report dvy/dt in absolute
+     *      units as the primary force-density measure.
+     *  (b) At low v with mass = 0.01, the spurious force quickly
+     *      captures the particle to the fixed point at vy ~ -0.28c,
+     *      so any measurement integrated over the run is dominated by
+     *      the captured dynamics, not the force at v_init.  Solution:
+     *      use a HEAVIER particle (mass = 1.0, 100x current default)
+     *      so the velocity barely changes during the 200-step force
+     *      window.  Absolute force is unchanged (same q, same field
+     *      operator); only velocity response per step shrinks.
      *
-     * Hypothesis being tested: the spurious self-force is a structural
-     * feature of the discrete -grad phi / -d_t A pairing on a moving
-     * deposit.  It should be present at ALL non-zero v -- including
-     * v/c = 0.001.  In absolute units it should scale with v (the only
-     * thing that breaks the v=0 reflection symmetry). */
-    printf("\n--- v_drift scan (full + phi-only + no-inductive) ---\n");
-    printf("Tests whether the artifact persists at non-relativistic v/c.\n");
-    printf("Step count capped at 20000 (lower v -> fewer cells traversed).\n");
-    printf("Reports KE%% drift AND absolute (vy_final - vy_initial) AND\n");
-    printf("the dist traveled.  The vy delta is the cleanest absolute\n");
-    printf("measure of the spurious longitudinal force.\n\n");
-    const float v_vals[] = { 0.001f, 0.01f, 0.1f, 0.3f };
+     * Hypothesis being tested: the spurious self-force is structural
+     * to the discrete -grad phi / -d_t A pairing on a moving deposit.
+     * It should be present at ALL non-zero v including v/c = 0.001. */
+    printf("\n--- v_drift scan (BARE deposit, mass=1.0 for clean window measurement) ---\n");
+    printf("rho_smooth=0, j_smooth=0, q=0.01, m=1.0.  Particle stays near v_init\n");
+    printf("over the 200-step force-measurement window.  accel column reports\n");
+    printf("dvy/dt (per unit time) averaged over that window AT THE INITIAL v.\n");
+    printf("In a working scheme the accel column would be at the no-force\n");
+    printf("integrator-noise floor at every v.\n\n");
+    const float v_vals[] = { 0.001f, 0.01f, 0.05f, 0.1f, 0.2f, 0.3f, 0.5f, 0.7f };
     const int   nv       = (int)(sizeof(v_vals) / sizeof(v_vals[0]));
-    printf("%-7s %-12s %-12s %-12s %-10s %-10s %-10s\n",
-           "v/c", "phi KE%", "noind KE%", "full KE%", "dvy_phi", "dvy_full", "cells");
-    printf("------------------------------------------------------------------------------\n");
+    /* Also a "no force" control at one v for the floor. */
+    run_result_t noforce_floor = run_config_full_mass(0, 0, 0, 0, +1.0f, 0.1f, 1.0f, 0.0f,
+                                                     0, 0, 1.0f/sqrtf(2.0f), 1.0f, 1.0f, "v-noforce");
+    const double a_noforce = (double) noforce_floor.accel_per_step / (double) noforce_floor.dt_used;
+    printf("Integrator-noise floor at v=0.1, no-force control:\n");
+    printf("  accel = %+10.3e  (this is the threshold a fix must beat)\n\n",
+           a_noforce);
+    printf("%-7s %-13s %-13s %-13s %-11s %-11s %-11s\n",
+           "v/c", "accel(phi)", "accel(noind)", "accel(full)", "dvy_phi", "dvy_full", "KE%(phi)");
+    printf("-------------------------------------------------------------------------------------\n");
     for (int i = 0; i < nv; i++) {
-        run_result_t rd = run_config_full_cfl_dx(1, 0, 0, 1, +1.0f, v_vals[i], 1.0f, 0.0f,
-                                                 4, 0, 1.0f/sqrtf(2.0f), 1.0f, "v-phi");
-        run_result_t rb = run_config_full_cfl_dx(1, 0, 1, 1, +1.0f, v_vals[i], 1.0f, 0.0f,
-                                                 4, 0, 1.0f/sqrtf(2.0f), 1.0f, "v-noind");
-        run_result_t ra = run_config_full_cfl_dx(1, 1, 1, 1, +1.0f, v_vals[i], 1.0f, 0.0f,
-                                                 4, 0, 1.0f/sqrtf(2.0f), 1.0f, "v-full");
+        run_result_t rd = run_config_full_mass(1, 0, 0, 1, +1.0f, v_vals[i], 1.0f, 0.0f,
+                                              0, 0, 1.0f/sqrtf(2.0f), 1.0f, 1.0f, "v-phi");
+        run_result_t rb = run_config_full_mass(1, 0, 1, 1, +1.0f, v_vals[i], 1.0f, 0.0f,
+                                              0, 0, 1.0f/sqrtf(2.0f), 1.0f, 1.0f, "v-noind");
+        run_result_t ra = run_config_full_mass(1, 1, 1, 1, +1.0f, v_vals[i], 1.0f, 0.0f,
+                                              0, 0, 1.0f/sqrtf(2.0f), 1.0f, 1.0f, "v-full");
         const double KE0d = (double) rd.KE_initial;
-        const double KE0b = (double) rb.KE_initial;
-        const double KE0a = (double) ra.KE_initial;
         const double pd = (KE0d > 0.0) ? 100.0 * ((double) rd.KE_final - KE0d) / KE0d : 0.0;
-        const double pb = (KE0b > 0.0) ? 100.0 * ((double) rb.KE_final - KE0b) / KE0b : 0.0;
-        const double pa = (KE0a > 0.0) ? 100.0 * ((double) ra.KE_final - KE0a) / KE0a : 0.0;
         const double dvy_phi  = (double) (rd.vy_final - rd.vy_initial);
         const double dvy_full = (double) (ra.vy_final - ra.vy_initial);
-        const double cells    = (double) (ra.y_final - ra.y_initial);
-        printf("%-7.4f %+11.4f%% %+11.4f%% %+11.4f%% %+9.2e %+9.2e %9.1f\n",
-               (double) v_vals[i], pd, pb, pa, dvy_phi, dvy_full, cells);
+        const double accel_d = (double) rd.accel_per_step / (double) rd.dt_used;
+        const double accel_b = (double) rb.accel_per_step / (double) rb.dt_used;
+        const double accel_a = (double) ra.accel_per_step / (double) ra.dt_used;
+        printf("%-7.4f %+12.3e %+12.3e %+12.3e %+10.3e %+10.3e %+11.4f%%\n",
+               (double) v_vals[i], accel_d, accel_b, accel_a,
+               dvy_phi, dvy_full, pd);
     }
     printf("\n");
     printf("Interpretation:\n");
-    printf("  dvy_phi (absolute) is the cleanest measure of the spurious force.\n");
-    printf("  If dvy scales linearly with v: friction-like (a ~ v).\n");
-    printf("  If dvy scales as v^2:           radiation-like (a ~ v^2).\n");
-    printf("  If dvy/v is roughly constant:   constant fractional KE drift rate.\n");
-    printf("  If dvy is nonzero at v=0.001:   artifact present non-relativistically.\n");
+    printf("  accel column: average dvy/dt over a 200-step window after warmup,\n");
+    printf("    at the INITIAL v (particle didn't drift far in those steps because\n");
+    printf("    mass=1.0).  This is the spurious-acceleration-at-v measurement.\n");
+    printf("  A working scheme should have all accel entries at the no-force floor\n");
+    printf("    (~%+9.2e) at every v.\n", a_noforce);
+    printf("  Empirical v-scaling of accel: if accel ~ v^k, then on a log-log\n");
+    printf("    plot the slope is k.  At low v, k=0 means constant force\n");
+    printf("    (independent of v); k=1 friction-like; k=2 radiation-like.\n");
 
-    printf("\nDIAGNOSTIC COMPLETE (no pass/fail on direction).\n");
+    printf("\nBASELINE COMPLETE (current scheme; numbers are the failure pattern\n");
+    printf("GEMPIC must beat per gr_sandbox_v36 sec gempic_benchmark).\n");
     return 0;
 }
