@@ -67,9 +67,38 @@ NATIVE_OBJS = $(patsubst %.c,$(NATIVE_DIR)/%.o,$(CORE_SRCS))
 TEST_BINS = $(patsubst tests/%.c,$(NATIVE_DIR)/%,$(TEST_SRCS))
 
 # --- Default target ------------------------------------------------------
-.PHONY: all native wasm test clean
+.PHONY: all native wasm test clean benchmark-pic
 
 all: native wasm
+
+# --- EM PIC benchmark suite (B-1..B-6 from gr_sandbox_v36 sec gempic_benchmark) -----
+# Runs the four stages that probe the EM PIC self-force structural failure
+# described in gr_sandbox_v36 sec stage37_diagnosis.  Numbers printed here
+# are the BASELINE the GEMPIC canonical-momentum reformulation must beat.
+#
+# Primary gate (necessary): Stage 37 v-sweep accel column at noise floor.
+# Secondary: Stage 38 dvy < 1e-6 at v=0.001; Stage 39 reciprocity < 1e-6.
+# Exploratory (not a gate): Stage 40 -- 2D Larmor analytic not yet built.
+BENCHMARK_PIC_BINS = $(NATIVE_DIR)/stage37_em_constant_velocity \
+                     $(NATIVE_DIR)/stage38_em_neutral_pair \
+                     $(NATIVE_DIR)/stage39_em_reciprocal_force \
+                     $(NATIVE_DIR)/stage40_em_radiation_reaction
+
+benchmark-pic: $(BENCHMARK_PIC_BINS)
+	@echo ""
+	@echo "============================================================"
+	@echo "EM PIC benchmark suite (gr_sandbox_v36 sec gempic_benchmark)"
+	@echo "============================================================"
+	@for t in $(BENCHMARK_PIC_BINS); do \
+	  echo ""; echo "############################################"; \
+	  echo "### $$t"; \
+	  echo "############################################"; \
+	  "$$t" || echo "  (test returned non-zero exit; benchmark continues)"; \
+	done
+	@echo ""
+	@echo "============================================================"
+	@echo "EM PIC benchmark complete.  See above for B-1..B-6 results."
+	@echo "============================================================"
 
 # --- Native compile + link -----------------------------------------------
 $(NATIVE_DIR)/%.o: %.c include/grlite.h src/sim_internal.h
