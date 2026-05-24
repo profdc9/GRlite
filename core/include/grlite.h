@@ -333,6 +333,32 @@ int  gr_sim_get_em_inductive_enabled(const gr_sim_t* sim);
 void gr_sim_set_em_electrostatic_enabled(gr_sim_t* sim, int enabled);
 int  gr_sim_get_em_electrostatic_enabled(const gr_sim_t* sim);
 
+/* Gate for the q v x B (magnetic) piece of the EM Lorentz force.
+ * Default ON.  When OFF, B_em_z_at_total returns zero so the force law
+ * omits the v x B contribution but keeps -q grad phi and -q d_t A.
+ * Stage 37 uses this to isolate the phi self-force on a uniformly-moving
+ * charge from any v x B contribution. */
+void gr_sim_set_em_magnetic_enabled(gr_sim_t* sim, int enabled);
+int  gr_sim_get_em_magnetic_enabled(const gr_sim_t* sim);
+
+/* Diagnostic: shift the Esirkepov J-deposit trajectory by `fraction_of_dt
+ * * v * dt`, while leaving rho deposition at the current particle position.
+ *
+ *   fraction_of_dt = 0.0  (default): J trajectory x^{n-1} -> x^n; midpoint
+ *                                    half a step BEHIND rho.
+ *   fraction_of_dt = +0.5:           J trajectory centered on x^n; midpoint
+ *                                    COLOCATED with rho (predicted optimal
+ *                                    for cancellation of -grad phi against
+ *                                    -d_t A on a uniformly-moving charge).
+ *   fraction_of_dt = +1.0:           J trajectory x^n -> x^{n+1}; midpoint
+ *                                    half a step AHEAD of rho.
+ *
+ * Any nonzero shift BREAKS discrete continuity (Esirkepov's identity holds
+ * only when J connects ρ^n and ρ^{n+1}).  Use for diagnostic exploration
+ * of the rho/J spatial-mismatch hypothesis (Stage 37); not for production. */
+void  gr_sim_set_j_deposit_shift(gr_sim_t* sim, float fraction_of_dt);
+float gr_sim_get_j_deposit_shift(const gr_sim_t* sim);
+
 /* Discretization for the inductive piece -q d_t A.  Two choices, both
  * exposed for diagnostic comparison:
  *
@@ -358,11 +384,23 @@ typedef enum {
 void                gr_sim_set_em_inductive_disc(gr_sim_t* sim, gr_inductive_disc_t kind);
 gr_inductive_disc_t gr_sim_get_em_inductive_disc(const gr_sim_t* sim);
 
-/* Sign of the inductive piece in the force law -- diagnostic.  Default
- * is +1.0 (the variationally-derived sign of -q d_t A).  Setting to -1.0
- * flips the sign as a probe for whether the closed-loop PIC heating
- * observed in Stage 27/28 is consistent with a sign convention error.
- * Symmetric pair for EM (-q d_t A) and gravity (-m d_t A_g). */
+/* Sign of the inductive piece in the force law -- DIAGNOSTIC ONLY,
+ * default is +1.0 (the variationally-derived sign of -q d_t A).
+ *
+ * Setting to -1.0 cosmetically rotates Stage 27/30 orbit drift from
+ * outspiral to inspiral.  This was once interpreted as a candidate fix
+ * (Stage 36) but Stage 37 (uniform-motion KE drift) shows the
+ * underlying problem is a STRUCTURAL failure of the discrete
+ * -grad phi / -d_t A cancellation on a moving deposit, NOT a sign
+ * convention bug.  The sign flip MASKS the orbit-level symptom; it
+ * does not address the cancellation failure (still UV-divergent in
+ * dx, still worst at low v).
+ *
+ * Do not set this to -1 to "fix" orbit drift.  Either accept the
+ * orbit-level artifact pending the principled fix (GEMPIC canonical-
+ * momentum reformulation), or use sim->em_inductive_enabled to gate
+ * the broken term entirely.  Symmetric pair for EM (-q d_t A) and
+ * gravity (-m d_t A_g) -- same caveat applies to both. */
 void  gr_sim_set_em_inductive_sign(gr_sim_t* sim, float sign);
 float gr_sim_get_em_inductive_sign(const gr_sim_t* sim);
 void  gr_sim_set_gravitomagnetic_inductive_sign(gr_sim_t* sim, float sign);
@@ -474,6 +512,13 @@ int  gr_sim_esirkepov_violations(const gr_sim_t* sim);
  * Default 0 (off).  Typical values 1-4. */
 void gr_sim_set_rho_smooth_passes(gr_sim_t* sim, int passes);
 int  gr_sim_get_rho_smooth_passes(const gr_sim_t* sim);
+
+/* Same binomial 3x3 stencil applied to the J deposit arrays (J_mx, J_my,
+ * J_qx, J_qy) on their X_EDGE / Y_EDGE sublattices.  Damps the high-k
+ * content of the J wake, mirroring rho smoothing on the phi channel.
+ * Default 0.  Stage 37 diagnostic. */
+void gr_sim_set_j_smooth_passes(gr_sim_t* sim, int passes);
+int  gr_sim_get_j_smooth_passes(const gr_sim_t* sim);
 
 /* Shape function for rho deposit + force interp (matched pair preserves
  * Hockney-Eastwood adjoint condition).

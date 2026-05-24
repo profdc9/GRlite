@@ -71,6 +71,9 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
     sim->em_lorentz_force_enabled      = 1;
     sim->em_inductive_enabled          = 1;
     sim->em_electrostatic_enabled      = 1;
+    sim->em_magnetic_enabled           = 1;
+    sim->j_deposit_shift               = 0.0f;
+    sim->j_smooth_passes               = 0;
     sim->em_inductive_disc             = GR_INDUCTIVE_CENTERED;
     sim->em_inductive_sign             = +1.0f;
     sim->grav_inductive_sign           = +1.0f;
@@ -184,31 +187,48 @@ void gr_sim_step(gr_sim_t* sim) {
             }
 
             /* Deposit J^{n-1/2} for the trajectory x^{n-1} -> x^n.
-             * x^{n-1} = x^n - v^{n-1/2} * dt is exact under leapfrog drift. */
-            const float x0 = p->x - vx * dt;
-            const float y0 = p->y - vy * dt;
+             * x^{n-1} = x^n - v^{n-1/2} * dt is exact under leapfrog drift.
+             *
+             * Optional diagnostic shift: j_deposit_shift in units of dt
+             * shifts the WHOLE trajectory by shift * v * dt:
+             *   shift = 0:    trajectory x^{n-1} -> x^n            (default)
+             *   shift = +0.5: trajectory (x^n - 0.5 v dt) -> (x^n + 0.5 v dt)
+             *                 (J midpoint COLOCATED with rho^n)
+             *   shift = +1:   trajectory x^n -> x^{n+1}            (J midpoint AHEAD)
+             * Breaks Esirkepov continuity when nonzero; used by Stage 37 to
+             * test the rho/J spatial-colocation hypothesis. */
+            const float jshift = sim->j_deposit_shift;
+            const float jdx    = jshift * vx * dt;
+            const float jdy    = jshift * vy * dt;
+            const float x0     = p->x - vx * dt + jdx;
+            const float y0     = p->y - vy * dt + jdy;
+            const float x1     = p->x + jdx;
+            const float y1     = p->y + jdy;
             int violated = 0;
             if (sim->esirkepov_enabled) {
                 if (p->mass != 0.0f) {
                     if (!gr_esirkepov_deposit_jxy(sim->J_mx, sim->J_my, W, H, dx, dt,
-                                                  x0, y0, p->x, p->y, p->mass)) {
+                                                  x0, y0, x1, y1, p->mass)) {
                         violated = 1;
                     }
                 }
                 if (p->charge != 0.0f) {
                     if (!gr_esirkepov_deposit_jxy(sim->J_qx, sim->J_qy, W, H, dx, dt,
-                                                  x0, y0, p->x, p->y, p->charge)) {
+                                                  x0, y0, x1, y1, p->charge)) {
                         violated = 1;
                     }
                 }
             }
             if (!sim->esirkepov_enabled || violated) {
                 /* Direct CIC fallback (also used when Esirkepov is opted out
-                 * for regression testing). */
-                if (p->mass   != 0.0f && vx != 0.0f) gr_cic_deposit_xedge(sim->J_mx, W, H, dx, p->x, p->y, p->mass   * vx);
-                if (p->mass   != 0.0f && vy != 0.0f) gr_cic_deposit_yedge(sim->J_my, W, H, dx, p->x, p->y, p->mass   * vy);
-                if (p->charge != 0.0f && vx != 0.0f) gr_cic_deposit_xedge(sim->J_qx, W, H, dx, p->x, p->y, p->charge * vx);
-                if (p->charge != 0.0f && vy != 0.0f) gr_cic_deposit_yedge(sim->J_qy, W, H, dx, p->x, p->y, p->charge * vy);
+                 * for regression testing).  Deposit J at the trajectory
+                 * midpoint -- which for nonzero shift is (x^n + jdx/?). */
+                const float xc = 0.5f * (x0 + x1);
+                const float yc = 0.5f * (y0 + y1);
+                if (p->mass   != 0.0f && vx != 0.0f) gr_cic_deposit_xedge(sim->J_mx, W, H, dx, xc, yc, p->mass   * vx);
+                if (p->mass   != 0.0f && vy != 0.0f) gr_cic_deposit_yedge(sim->J_my, W, H, dx, xc, yc, p->mass   * vy);
+                if (p->charge != 0.0f && vx != 0.0f) gr_cic_deposit_xedge(sim->J_qx, W, H, dx, xc, yc, p->charge * vx);
+                if (p->charge != 0.0f && vy != 0.0f) gr_cic_deposit_yedge(sim->J_qy, W, H, dx, xc, yc, p->charge * vy);
                 if (violated) sim->esirkepov_violations++;
             }
         }
@@ -243,6 +263,34 @@ void gr_sim_step(gr_sim_t* sim) {
                                   1.0f * scratch[k - W - 1] + 2.0f * scratch[k - W] + 1.0f * scratch[k - W + 1]
                                 + 2.0f * scratch[k - 1]     + 4.0f * scratch[k]     + 2.0f * scratch[k + 1]
                                 + 1.0f * scratch[k + W - 1] + 2.0f * scratch[k + W] + 1.0f * scratch[k + W + 1]);
+                        }
+                    }
+                }
+                free(scratch);
+            }
+        }
+        /* Optional binomial smoothing on the deposited J arrays (Stage 37
+         * diagnostic).  Same 3x3 [[1,2,1],[2,4,2],[1,2,1]]/16 stencil
+         * applied to the X_EDGE / Y_EDGE arrays in turn.  This damps
+         * high-k content of the J deposit so the A wake propagated by
+         * the wave equation is also damped -- a test of whether the
+         * `-q d_t A` artifact on uniform motion is dispersion-driven. */
+        if (sim->j_smooth_passes > 0) {
+            const size_t n = (size_t) W * (size_t) H;
+            float* scratch = (float*) malloc(n * sizeof(float));
+            if (scratch) {
+                float* targets[4] = { sim->J_mx, sim->J_my, sim->J_qx, sim->J_qy };
+                for (int pass = 0; pass < sim->j_smooth_passes; pass++) {
+                    for (int t = 0; t < 4; t++) {
+                        memcpy(scratch, targets[t], n * sizeof(float));
+                        for (int j = 1; j < H - 1; j++) {
+                            for (int i = 1; i < W - 1; i++) {
+                                const int k = j * W + i;
+                                targets[t][k] = (1.0f / 16.0f) * (
+                                      1.0f * scratch[k - W - 1] + 2.0f * scratch[k - W] + 1.0f * scratch[k - W + 1]
+                                    + 2.0f * scratch[k - 1]     + 4.0f * scratch[k]     + 2.0f * scratch[k + 1]
+                                    + 1.0f * scratch[k + W - 1] + 2.0f * scratch[k + W] + 1.0f * scratch[k + W + 1]);
+                            }
                         }
                     }
                 }
@@ -336,6 +384,14 @@ void gr_sim_set_rho_smooth_passes(gr_sim_t* sim, int passes) {
 }
 int gr_sim_get_rho_smooth_passes(const gr_sim_t* sim) {
     return sim ? sim->rho_smooth_passes : 0;
+}
+
+void gr_sim_set_j_smooth_passes(gr_sim_t* sim, int passes) {
+    if (!sim) return;
+    sim->j_smooth_passes = (passes < 0) ? 0 : passes;
+}
+int gr_sim_get_j_smooth_passes(const gr_sim_t* sim) {
+    return sim ? sim->j_smooth_passes : 0;
 }
 
 void gr_sim_set_shape_function(gr_sim_t* sim, gr_shape_function_t s) {
@@ -508,6 +564,22 @@ void gr_sim_set_em_electrostatic_enabled(gr_sim_t* sim, int enabled) {
 }
 int gr_sim_get_em_electrostatic_enabled(const gr_sim_t* sim) {
     return sim ? sim->em_electrostatic_enabled : 0;
+}
+
+void gr_sim_set_em_magnetic_enabled(gr_sim_t* sim, int enabled) {
+    if (!sim) return;
+    sim->em_magnetic_enabled = enabled ? 1 : 0;
+}
+int gr_sim_get_em_magnetic_enabled(const gr_sim_t* sim) {
+    return sim ? sim->em_magnetic_enabled : 0;
+}
+
+void gr_sim_set_j_deposit_shift(gr_sim_t* sim, float fraction_of_dt) {
+    if (!sim) return;
+    sim->j_deposit_shift = fraction_of_dt;
+}
+float gr_sim_get_j_deposit_shift(const gr_sim_t* sim) {
+    return sim ? sim->j_deposit_shift : 0.0f;
 }
 
 void gr_sim_set_em_inductive_disc(gr_sim_t* sim, gr_inductive_disc_t kind) {

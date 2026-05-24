@@ -116,6 +116,24 @@ struct gr_sim {
      * inductive piece (if its own gate is on).  Used by Stage 35 to
      * isolate the magnetic (Ampere) force between parallel currents. */
     int em_electrostatic_enabled;
+    /* Fine-grained gate for the magnetic q v x B piece.  Default 1.  When
+     * disabled, the B_em_z passed into em_force_at is suppressed so the
+     * Lorentz force omits the v x B contribution but keeps -q grad phi and
+     * the inductive piece.  Stage 37 uses this to isolate the phi
+     * self-force from the v x B channel for a uniformly-moving charge. */
+    int em_magnetic_enabled;
+
+    /* Shift of the Esirkepov J-deposit trajectory relative to the rho
+     * deposit, in units of dt.  Default 0.0: rho at x^n, J for trajectory
+     * x^{n-1} -> x^n (J midpoint half-step BEHIND rho).
+     *   shift = +0.5: J trajectory (x^n - 0.5 v dt) -> (x^n + 0.5 v dt),
+     *                 midpoint COLOCATED with rho.  Predicted optimal.
+     *   shift = +1.0: J trajectory x^n -> x^{n+1} (J midpoint AHEAD).
+     *   shift = -1.0: J trajectory x^{n-2} -> x^{n-1} (J midpoint far behind).
+     * Note: nonzero shift breaks discrete continuity (ρ and J are no longer
+     * connected by Esirkepov's identity), so the Lorenz residual will grow.
+     * Diagnostic for the Stage 37 "uniform-motion heating" hypothesis. */
+    float j_deposit_shift;
     /* Discretization for the EM inductive piece. */
     gr_inductive_disc_t em_inductive_disc;
     /* Sign multipliers for diagnostic sign-flip experiments.  Default +1.0
@@ -147,6 +165,12 @@ struct gr_sim {
      * after deposit, before the field leapfrog reads them.  Each pass is
      * the [[1,2,1],[2,4,2],[1,2,1]]/16 3x3 stencil.  Default 0 (no smoothing). */
     int rho_smooth_passes;
+    /* Same 3x3 binomial stencil applied to the deposited current arrays
+     * (J_mx, J_my, J_qx, J_qy) on their X_EDGE / Y_EDGE sublattices.
+     * Default 0.  Stage 37 diagnostic: tests whether the dispersion/
+     * aliasing of the J-deposit wake is the dominant channel for the
+     * -q d_t A artifact on a uniformly-moving charge. */
+    int j_smooth_passes;
     /* Shape function for rho deposit + force interp.  Default CIC. */
     gr_shape_function_t shape_function;
     /* Force-interpolation scheme.  LEGACY = FD-then-interp; LEWIS_BIRDSALL
@@ -249,6 +273,23 @@ void  gr_tsc_deposit_corner(float* arr, int W, int H, float dx,
                             float x_p, float y_p, float value);
 float gr_tsc_interp_corner (const float* arr, int W, int H, float dx,
                             float x_p, float y_p);
+
+/* TSC interp on the X_EDGE / Y_EDGE sublattices -- the matched-shape
+ * gather counterparts to the Esirkepov J deposits (Stage 37 fix for the
+ * inductive -q d_t A and v x B channels of the EM Lorentz force). */
+float gr_tsc_interp_xedge(const float* arr, int W, int H, float dx,
+                          float x_p, float y_p);
+float gr_tsc_interp_yedge(const float* arr, int W, int H, float dx,
+                          float x_p, float y_p);
+
+/* Lewis-Birdsall-style direct gather of d/dx of an X_EDGE field, and
+ * d/dy of a Y_EDGE field, using the analytic derivative of the W_3
+ * kernel.  Used to construct curl A = d_x A_y - d_y A_x at the particle
+ * with the same adjoint pairing as the LB phi gradient. */
+float gr_tsc_lb_dx_xedge(const float* arr, int W, int H, float dx,
+                         float x_p, float y_p);
+float gr_tsc_lb_dy_yedge(const float* arr, int W, int H, float dx,
+                         float x_p, float y_p);
 
 /* Defined in deposit.c — Esirkepov 2D current deposition for a particle
  * moving from (x0, y0) to (x1, y1) over a timestep of length dt with

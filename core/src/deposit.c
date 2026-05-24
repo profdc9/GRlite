@@ -165,6 +165,127 @@ float gr_tsc_interp_corner(const float* arr, int W, int H, float dx,
     return result;
 }
 
+/* TSC interp on X_EDGE sublattice -- nodes at (i+0.5, j) * dx.
+ * Used to gather edge-staggered fields (A_x, J_x) at a particle position
+ * with the W_3 kernel matched to gr_tsc_deposit_*.  Hockney-Eastwood
+ * adjoint pair to the X_EDGE deposit (which Esirkepov produces). */
+float gr_tsc_interp_xedge(const float* arr, int W, int H, float dx,
+                          float x_p, float y_p) {
+    if (!arr) return 0.0f;
+    const float xn = x_p / dx - 0.5f;     /* node index space for X_EDGE */
+    const float yn = y_p / dx;            /* corner-like in y */
+    const int   ic = (int) floorf(xn + 0.5f);
+    const int   jc = (int) floorf(yn + 0.5f);
+    /* Need ic-1, ic, ic+1 and jc-1, jc, jc+1.  X_EDGE has W-1 valid columns
+     * (column W-1 is the ghost), so ic in [1, W-3].  jc in [1, H-2]. */
+    if (ic < 1 || ic > W - 3 || jc < 1 || jc > H - 2) return 0.0f;
+    const float u = xn - (float) ic;
+    const float v = yn - (float) jc;
+    float wx[3], wy[3];
+    tsc_weights_1d(u, wx);
+    tsc_weights_1d(v, wy);
+    float result = 0.0f;
+    for (int dj = -1; dj <= 1; dj++) {
+        const int row = (jc + dj) * W;
+        for (int di = -1; di <= 1; di++) {
+            result += wx[di + 1] * wy[dj + 1] * arr[row + ic + di];
+        }
+    }
+    return result;
+}
+
+/* TSC interp on Y_EDGE sublattice -- nodes at (i, j+0.5) * dx. */
+float gr_tsc_interp_yedge(const float* arr, int W, int H, float dx,
+                          float x_p, float y_p) {
+    if (!arr) return 0.0f;
+    const float xn = x_p / dx;            /* corner-like in x */
+    const float yn = y_p / dx - 0.5f;     /* node index space for Y_EDGE */
+    const int   ic = (int) floorf(xn + 0.5f);
+    const int   jc = (int) floorf(yn + 0.5f);
+    if (ic < 1 || ic > W - 2 || jc < 1 || jc > H - 3) return 0.0f;
+    const float u = xn - (float) ic;
+    const float v = yn - (float) jc;
+    float wx[3], wy[3];
+    tsc_weights_1d(u, wx);
+    tsc_weights_1d(v, wy);
+    float result = 0.0f;
+    for (int dj = -1; dj <= 1; dj++) {
+        const int row = (jc + dj) * W;
+        for (int di = -1; di <= 1; di++) {
+            result += wx[di + 1] * wy[dj + 1] * arr[row + ic + di];
+        }
+    }
+    return result;
+}
+
+/* Derivative of the 1D W_3 kernel (analytic gradient of the quadratic
+ * B-spline).  For u in [-0.5, 0.5) the 1D weights are
+ *   w0(u) = 0.5 * (0.5 - u)^2,   w1(u) = 0.75 - u^2,   w2(u) = 0.5 * (0.5 + u)^2
+ * which differentiate to
+ *   dw0/du = -(0.5 - u) = u - 0.5
+ *   dw1/du = -2 u
+ *   dw2/du =  (0.5 + u) = u + 0.5
+ * Used by the Lewis-Birdsall-style gather on edge sublattices (e.g. the
+ * direct curl A read for the magnetic force at the particle). */
+static inline void tsc_dw_1d(float u, float dw[3]) {
+    dw[0] = u - 0.5f;
+    dw[1] = -2.0f * u;
+    dw[2] = u + 0.5f;
+}
+
+/* TSC-LB direct gather of d/dx of an X_EDGE field at the particle:
+ *   dA_x/dx (x_p) = sum_{i,j} dW_x(x_p - x_{i+1/2,j}) * W_y(y_p - y_j) * A_{i+1/2,j} / dx
+ * Used by the LB-style v x B path so the magnetic force inherits the same
+ * adjoint pairing as the LB phi gradient. */
+float gr_tsc_lb_dx_xedge(const float* arr, int W, int H, float dx,
+                         float x_p, float y_p) {
+    if (!arr) return 0.0f;
+    const float xn = x_p / dx - 0.5f;
+    const float yn = y_p / dx;
+    const int   ic = (int) floorf(xn + 0.5f);
+    const int   jc = (int) floorf(yn + 0.5f);
+    if (ic < 1 || ic > W - 3 || jc < 1 || jc > H - 2) return 0.0f;
+    const float u = xn - (float) ic;
+    const float v = yn - (float) jc;
+    float dwx[3], wy[3];
+    tsc_dw_1d(u, dwx);
+    tsc_weights_1d(v, wy);
+    const float inv_dx = 1.0f / dx;
+    float result = 0.0f;
+    for (int dj = -1; dj <= 1; dj++) {
+        const int row = (jc + dj) * W;
+        for (int di = -1; di <= 1; di++) {
+            result += dwx[di + 1] * wy[dj + 1] * arr[row + ic + di];
+        }
+    }
+    return result * inv_dx;
+}
+
+/* TSC-LB direct gather of d/dy of a Y_EDGE field at the particle. */
+float gr_tsc_lb_dy_yedge(const float* arr, int W, int H, float dx,
+                         float x_p, float y_p) {
+    if (!arr) return 0.0f;
+    const float xn = x_p / dx;
+    const float yn = y_p / dx - 0.5f;
+    const int   ic = (int) floorf(xn + 0.5f);
+    const int   jc = (int) floorf(yn + 0.5f);
+    if (ic < 1 || ic > W - 2 || jc < 1 || jc > H - 3) return 0.0f;
+    const float u = xn - (float) ic;
+    const float v = yn - (float) jc;
+    float wx[3], dwy[3];
+    tsc_weights_1d(u, wx);
+    tsc_dw_1d(v, dwy);
+    const float inv_dx = 1.0f / dx;
+    float result = 0.0f;
+    for (int dj = -1; dj <= 1; dj++) {
+        const int row = (jc + dj) * W;
+        for (int di = -1; di <= 1; di++) {
+            result += wx[di + 1] * dwy[dj + 1] * arr[row + ic + di];
+        }
+    }
+    return result * inv_dx;
+}
+
 /* 1D CIC (W_2) kernel: w(u) = max(1 - |u|, 0). */
 static inline float cic_w1(float u) {
     const float au = (u < 0.0f) ? -u : u;

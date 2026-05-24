@@ -841,14 +841,22 @@ static void dt_A_em_at_total(const struct gr_sim* sim, float x, float y,
      * retained for API compat (legacy stages that didn't drive A.next).
      * CENTERED (default) reads the natural 1-step diff. */
     const float inv_dt = 1.0f / sim->dt;
-    const float Ax_curr = cic_interp_xedge(sim->fields[GR_FIELD_A_X].curr,
-                                           W, H, dx, x, y);
-    const float Ax_prev = cic_interp_xedge(sim->fields[GR_FIELD_A_X].prev,
-                                           W, H, dx, x, y);
-    const float Ay_curr = cic_interp_yedge(sim->fields[GR_FIELD_A_Y].curr,
-                                           W, H, dx, x, y);
-    const float Ay_prev = cic_interp_yedge(sim->fields[GR_FIELD_A_Y].prev,
-                                           W, H, dx, x, y);
+    /* Shape-matched edge interp: TSC gathers an X_EDGE / Y_EDGE field with
+     * the same W_3 kernel that the Esirkepov J deposit used, restoring the
+     * HE adjoint condition on the inductive channel (Stage 37 fix). */
+    const int use_tsc = (sim->shape_function == GR_SHAPE_TSC);
+    const float Ax_curr = use_tsc
+        ? gr_tsc_interp_xedge(sim->fields[GR_FIELD_A_X].curr, W, H, dx, x, y)
+        : cic_interp_xedge   (sim->fields[GR_FIELD_A_X].curr, W, H, dx, x, y);
+    const float Ax_prev = use_tsc
+        ? gr_tsc_interp_xedge(sim->fields[GR_FIELD_A_X].prev, W, H, dx, x, y)
+        : cic_interp_xedge   (sim->fields[GR_FIELD_A_X].prev, W, H, dx, x, y);
+    const float Ay_curr = use_tsc
+        ? gr_tsc_interp_yedge(sim->fields[GR_FIELD_A_Y].curr, W, H, dx, x, y)
+        : cic_interp_yedge   (sim->fields[GR_FIELD_A_Y].curr, W, H, dx, x, y);
+    const float Ay_prev = use_tsc
+        ? gr_tsc_interp_yedge(sim->fields[GR_FIELD_A_Y].prev, W, H, dx, x, y)
+        : cic_interp_yedge   (sim->fields[GR_FIELD_A_Y].prev, W, H, dx, x, y);
     *dAx_out = s * (Ax_curr - Ax_prev) * inv_dt;
     *dAy_out = s * (Ay_curr - Ay_prev) * inv_dt;
 }
@@ -861,6 +869,7 @@ static void dt_A_em_at_total(const struct gr_sim* sim, float x, float y,
  * pair of edge-staggered components).  Gated by em_lorentz_force_enabled. */
 static float B_em_z_at_total(const struct gr_sim* sim, float x, float y) {
     if (!sim || !sim->em_lorentz_force_enabled) return 0.0f;
+    if (!sim->em_magnetic_enabled) return 0.0f;
     float bg = 0.0f;
     if (sim->bg_mode == GR_BG_MODE_ANALYTIC) {
         gr_bg_eval_B_em(sim, x, y, &bg);
