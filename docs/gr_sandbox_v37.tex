@@ -93,12 +93,18 @@
   \vspace{0.2cm}
   {\small\color{gray}
   \textbf{v37 derives the GEMPIC canonical-momentum push step in
-  detail: Hamilton's equations from the canonical Hamiltonian,
-  identification of the discrete operators needed (and what already
-  exists in the code), a concrete leapfrog-style scheme proposal, and
-  an analytic verification that the proposed discrete force law gives
-  zero net force on a uniformly-moving deposit by construction.}
-  See §\ref{sec:gempic_derivation}.
+  detail, then -- via Fourier analysis and direct empirical comparison
+  (Stage 41) -- reaches the conclusion that GEMPIC is NOT a
+  structural fix for the Stage 37 uniform-motion heating.}  The
+  analytic argument's load-bearing assumption (that HE matched-shape
+  kills the discrete $\nabla\phi$ at a \emph{moving} particle) does
+  not hold; HE only delivers zero gradient at $v=0$.  The structural
+  problem lives in the deposit-and-gather pair, not the pusher.
+  See the addendum §\ref{sec:gempic_addendum}.  GEMPIC is committed
+  as a default-off diagnostic (\texttt{3e0b209}) -- the
+  infrastructure is reusable if a future scheme combines it with a
+  deposit-side construction that does target the actual structural
+  property.
   Inherited from v36:
   \textbf{Stage 37 uniform-motion diagnosis exposes a structural defect
   in the discrete $-\nabla\phi - \partial_t\vv{A}$ cancellation on a
@@ -186,10 +192,26 @@ flagged as "to be locked via literature check" in v36
 \end{enumerate}
 
 All v36 content (Stage 37 diagnosis, benchmark suite scope, GEMPIC
-high-level scope) carries forward unchanged.  No code changes are
-proposed in v37 -- this is the design document that should precede
-the GEMPIC implementation per the v36
-sec.~\ref{sec:gempic_benchmark} ``Implementation order''.
+high-level scope) carries forward unchanged.
+
+\textbf{Important update (2026-05-24, addendum
+§\ref{sec:gempic_addendum}):} after writing the derivation above,
+the load-bearing claim of the analytic argument was checked via
+direct Fourier analysis of the discrete Yee operator and via an
+empirical comparison (Stage 41) of Boris vs GEMPIC pushers on the
+Stage 37 setup.  Both checks agree: \textbf{GEMPIC is not a
+structural fix.}  At every $v$ in the Stage 37 sweep, the GEMPIC
+spurious acceleration is within a few percent of the Boris value.
+The structural problem lives in the discrete deposit's $\nabla^h\phi$
+at the moving particle position (not in the pusher form), and
+neither pusher addresses it.
+
+GEMPIC remains in the tree as a default-off diagnostic (commit
+\texttt{3e0b209}); the next scope item is a deposit-side
+construction that targets the actual structural property at fault.
+The original derivation in §\ref{sec:gempic_derivation} below is
+preserved verbatim for the historical record; the addendum
+§\ref{sec:gempic_addendum} corrects its load-bearing claim.
 
 \newpage
 
@@ -619,6 +641,132 @@ these two discrete operations cancel to the residual order Stage
 
 GEMPIC routes around this by never computing
 $\partial^h_t\vv{A}$ at all.
+
+\subsection{Addendum (2026-05-24): the analytic argument above is incomplete; empirical confirmation that GEMPIC is not a structural fix}
+\label{sec:gempic_addendum}
+
+The ``Analytic verification'' subsection above asserts the discrete
+GEMPIC force on a uniformly-moving deposit vanishes by leveraging the
+HE matched-shape adjoint.  That claim is INCOMPLETE.  This addendum
+corrects it.
+
+\subsubsection*{The corrected Fourier analysis}
+
+The discrete Yee wave operator symbol is the same on every sublattice:
+$$
+\hat L(\vv k, \omega)
+   = \frac{4}{\dd t^2}\sin^2\!\Big(\tfrac{\omega\,\dd t}{2}\Big)
+   - \frac{4 c^2}{\dd x^2}\Big[\sin^2\!\Big(\tfrac{k_x\,\dd x}{2}\Big)
+                                  + \sin^2\!\Big(\tfrac{k_y\,\dd x}{2}\Big)\Big].
+$$
+The sources for a uniformly-moving deposit (TSC $\rho$ on corners,
+Esirkepov-TSC $\vv J$ on edges) satisfy
+$\hat J_j(\vv k, \omega) \approx v_{0,j}\,\hat\rho(\vv k, \omega)$ to
+leading order (sinc corrections appear at $O((k v_0 \dd t)^2)$ from
+the path-integration over the time step).  Passing both through the
+identical discrete wave operator gives the proportionality
+$$
+\hat A_j(\vv k, \omega) = \frac{v_{0,j}}{c^2}\,\hat\phi(\vv k, \omega)
+                          \;[1 + O(k v_0 \dd t)^2].
+$$
+This part of the v37 argument is correct.
+
+Substituting into the GEMPIC force at the particle position gives
+$$
+F_i \;=\; -\,q\Big(1 - \frac{v_0^2}{c^2}\Big)\,\partial^h_i\phi\big|_{\vv x_p}
+       \;=\; -\frac{q}{\gamma^2}\,\partial^h_i\phi\big|_{\vv x_p}.
+$$
+For zero net force this requires
+$\partial^h_i\phi|_{\vv x_p} = 0$.  The original v37 argument claimed
+this followed from the HE matched-shape adjoint.  \textbf{That was
+wrong}: HE matched-shape only guarantees
+$\partial^h_i\phi|_{\vv x_p} = 0$ at $v = 0$ (the stationary case).
+For a moving deposit, $\partial^h_i\phi|_{\vv x_p}$ is precisely the
+quantity Stage 37's ``phi-only'' force measures, and it is non-zero
+on the grid -- in fact UV-divergent in $\dd x$ per the Stage 37 $\dd x$
+convergence scan.
+
+\subsubsection*{Empirical confirmation (Stage 41)}
+
+GEMPIC was implemented behind a default-off flag
+(\texttt{gr\_sim\_set\_pusher(sim, GR\_PUSHER\_GEMPIC)}) and
+\texttt{stage41\_gempic\_check.c} ran the Stage 37 setup with both
+pushers side by side, reporting per-step spurious acceleration:
+
+\begin{center}
+\begin{tabular}{rrrr}
+\toprule
+$v/c$  & accel (Boris)    & accel (GEMPIC)    & ratio (GEMPIC / Boris) \\
+\midrule
+$0.001$ & $+1.04\times10^{-6}$ & $+1.03\times10^{-6}$ & $0.986$ \\
+$0.01$  & $-4.75\times10^{-6}$ & $-4.75\times10^{-6}$ & $0.999$ \\
+$0.05$  & $+4.87\times10^{-8}$ & $+4.93\times10^{-8}$ & $1.012$ \\
+$0.1$   & $+2.31\times10^{-7}$ & $+2.24\times10^{-7}$ & $0.969$ \\
+$0.2$   & $-2.71\times10^{-7}$ & $-2.14\times10^{-7}$ & $0.790$ \\
+$0.3$   & $+4.95\times10^{-8}$ & $-2.66\times10^{-7}$ & $5.4\times$ (sign flip) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+At every $v$ in the sweep, the GEMPIC residual is within a few percent
+of the Boris residual.  At $v = 0.3$ the discrete Boris cancellation
+happens to be unusually clean, so GEMPIC is actually slightly worse
+there.
+
+\subsubsection*{Implication}
+
+The structural problem behind Stage 37 lives in the
+\emph{deposit-and-gather pair geometry}, NOT in the pusher form:
+
+\begin{itemize}
+  \item Both pushers' residuals reduce to a prefactor times
+    $\partial^h_y\phi|_{\vv x_p}$ on the discrete grid.
+  \item The discrete $\partial^h_y\phi|_{\vv x_p}$ for a moving
+    deposit is non-zero, with the magnitude Stage 37 measures, and
+    grows as $\dd x$ shrinks (UV-divergent).
+  \item The HE matched-shape adjoint kills this gradient only at
+    $v = 0$.  At $v \ne 0$ a stronger condition is needed (matched-
+    shape adjoint at non-zero velocity), and we do not have a
+    construction that delivers it on TSC + Esirkepov + Yee.
+\end{itemize}
+
+The empirical paths that DO shrink the artifact, per Stage 37's
+smoothing scan, all act on the effective deposit width:
+\begin{itemize}
+  \item Smoothing the deposit (Stage 37: 16 binomial passes reduces
+    the phi-only artifact $\sim 200\times$).
+  \item A wider macroparticle (equivalent to smoothing in the
+    high-$k$ content).
+  \item Higher-order Yee schemes (better $k$-space isotropy, marginal
+    improvement expected).
+  \item Spectral / pseudo-spectral wave equations (no grid dispersion;
+    much more expensive).
+\end{itemize}
+
+\textbf{GEMPIC is therefore not the principled fix Stage 37 calls for.}
+The pusher is correct (no $-\partial^h_t\vv A$ to break the
+cancellation), but the cancellation that needs to happen is on the
+\emph{field} side at the particle position, not on the \emph{pusher}
+side, and GEMPIC leaves the field-side cancellation unchanged.
+
+\subsubsection*{Status of the implementation}
+
+GEMPIC stays in the tree as a default-off diagnostic
+(\texttt{gr\_sim\_set\_pusher} API, \texttt{gempic\_em\_kick} in
+\texttt{core/src/particle.c}, two new LB gathers in
+\texttt{core/src/deposit.c}, \texttt{stage41\_gempic\_check.c}).
+The infrastructure is reusable if a future scheme combines a
+canonical-momentum push with a different deposit-side construction.
+Commit \texttt{3e0b209} carries all of this.
+
+The ``Implementation order'' section below (and the v36
+``Implementation order'' it refines) is superseded by the new
+direction: \textbf{focus on the deposit-side construction, not the
+pusher.}  The next scope item should be a deposit-and-gather pair
+that satisfies the matched-shape adjoint condition at $v \ne 0$ --
+or, failing a structural construction, a deposit-side mitigation
+(fixed-physical-width macroparticle) with clear accuracy bounds
+documented.
 
 \subsection{Open items before implementation}
 
