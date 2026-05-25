@@ -261,6 +261,60 @@ float gr_tsc_lb_dx_xedge(const float* arr, int W, int H, float dx,
     return result * inv_dx;
 }
 
+/* TSC-LB direct gather of d/dy of an X_EDGE field at the particle.
+ * Needed by GEMPIC for the mixed-component gradient d A_x / d y_p
+ * (see gr_sandbox_v37 sec gempic_derivation). */
+float gr_tsc_lb_dy_xedge(const float* arr, int W, int H, float dx,
+                         float x_p, float y_p) {
+    if (!arr) return 0.0f;
+    const float xn = x_p / dx - 0.5f;
+    const float yn = y_p / dx;
+    const int   ic = (int) floorf(xn + 0.5f);
+    const int   jc = (int) floorf(yn + 0.5f);
+    if (ic < 1 || ic > W - 3 || jc < 1 || jc > H - 2) return 0.0f;
+    const float u = xn - (float) ic;
+    const float v = yn - (float) jc;
+    float wx[3], dwy[3];
+    tsc_weights_1d(u, wx);
+    tsc_dw_1d(v, dwy);
+    const float inv_dx = 1.0f / dx;
+    float result = 0.0f;
+    for (int dj = -1; dj <= 1; dj++) {
+        const int row = (jc + dj) * W;
+        for (int di = -1; di <= 1; di++) {
+            result += wx[di + 1] * dwy[dj + 1] * arr[row + ic + di];
+        }
+    }
+    return result * inv_dx;
+}
+
+/* TSC-LB direct gather of d/dx of a Y_EDGE field at the particle.
+ * Needed by GEMPIC for the mixed-component gradient d A_y / d x_p
+ * (see gr_sandbox_v37 sec gempic_derivation). */
+float gr_tsc_lb_dx_yedge(const float* arr, int W, int H, float dx,
+                         float x_p, float y_p) {
+    if (!arr) return 0.0f;
+    const float xn = x_p / dx;
+    const float yn = y_p / dx - 0.5f;
+    const int   ic = (int) floorf(xn + 0.5f);
+    const int   jc = (int) floorf(yn + 0.5f);
+    if (ic < 1 || ic > W - 2 || jc < 1 || jc > H - 3) return 0.0f;
+    const float u = xn - (float) ic;
+    const float v = yn - (float) jc;
+    float dwx[3], wy[3];
+    tsc_dw_1d(u, dwx);
+    tsc_weights_1d(v, wy);
+    const float inv_dx = 1.0f / dx;
+    float result = 0.0f;
+    for (int dj = -1; dj <= 1; dj++) {
+        const int row = (jc + dj) * W;
+        for (int di = -1; di <= 1; di++) {
+            result += dwx[di + 1] * wy[dj + 1] * arr[row + ic + di];
+        }
+    }
+    return result * inv_dx;
+}
+
 /* TSC-LB direct gather of d/dy of a Y_EDGE field at the particle. */
 float gr_tsc_lb_dy_yedge(const float* arr, int W, int H, float dx,
                          float x_p, float y_p) {

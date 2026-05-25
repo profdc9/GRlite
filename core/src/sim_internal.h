@@ -136,6 +136,7 @@ struct gr_sim {
     float j_deposit_shift;
     /* Discretization for the EM inductive piece. */
     gr_inductive_disc_t em_inductive_disc;
+    gr_pusher_kind_t    pusher;   /* default GR_PUSHER_BORIS; v37 GEMPIC opt-in */
     /* Sign multipliers for diagnostic sign-flip experiments.  Default +1.0
      * (variationally-correct sign of -q d_t A and -m d_t A_g respectively). */
     float em_inductive_sign;
@@ -289,6 +290,13 @@ float gr_tsc_interp_yedge(const float* arr, int W, int H, float dx,
 float gr_tsc_lb_dx_xedge(const float* arr, int W, int H, float dx,
                          float x_p, float y_p);
 float gr_tsc_lb_dy_yedge(const float* arr, int W, int H, float dx,
+                         float x_p, float y_p);
+/* Mixed-axis LB gathers (v37 GEMPIC): y-derivative of X_EDGE field,
+ * x-derivative of Y_EDGE field.  Same TSC kernel structure with the
+ * derivative kernel applied on the "wrong" axis for the sublattice. */
+float gr_tsc_lb_dy_xedge(const float* arr, int W, int H, float dx,
+                         float x_p, float y_p);
+float gr_tsc_lb_dx_yedge(const float* arr, int W, int H, float dx,
                          float x_p, float y_p);
 
 /* Defined in deposit.c — Esirkepov 2D current deposition for a particle

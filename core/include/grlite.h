@@ -384,6 +384,23 @@ typedef enum {
 void                gr_sim_set_em_inductive_disc(gr_sim_t* sim, gr_inductive_disc_t kind);
 gr_inductive_disc_t gr_sim_get_em_inductive_disc(const gr_sim_t* sim);
 
+/* Particle pusher selection (v37 gempic_derivation).  Default
+ * GR_PUSHER_BORIS preserves all existing behaviour; GR_PUSHER_GEMPIC
+ * activates the experimental canonical-momentum push (track
+ * p_c = gamma m v + q A; force = q v_j d_i A_j - q d_i phi; no d_t A,
+ * no explicit v x B for the EM piece).  GEMPIC is a one-off
+ * empirical probe — Fourier analysis indicates the structural
+ * cancellation argument was incomplete and the residual force at
+ * non-relativistic v is essentially the same as the current scheme's
+ * phi-only residual.  This flag is the empirical test of that
+ * prediction.  The Boris path is unchanged. */
+typedef enum {
+    GR_PUSHER_BORIS  = 0,   /* default; existing relativistic Boris-leapfrog */
+    GR_PUSHER_GEMPIC = 1    /* canonical-momentum leapfrog */
+} gr_pusher_kind_t;
+void              gr_sim_set_pusher(gr_sim_t* sim, gr_pusher_kind_t kind);
+gr_pusher_kind_t  gr_sim_get_pusher(const gr_sim_t* sim);
+
 /* Sign of the inductive piece in the force law -- DIAGNOSTIC ONLY,
  * default is +1.0 (the variationally-derived sign of -q d_t A).
  *

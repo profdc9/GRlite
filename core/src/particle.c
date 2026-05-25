@@ -895,6 +895,99 @@ static float B_em_z_at_total(const struct gr_sim* sim, float x, float y) {
     return bg + pert;
 }
 
+/* GEMPIC EM kick (v37 gempic_derivation).
+ *
+ * One-step canonical-momentum update for the EM contribution.  On entry,
+ * p->px and p->py hold the kinetic momentum p_kin^{n-1/2}.  On exit,
+ * they hold p_kin^{n+1/2} after the EM kick.  Position is NOT updated
+ * here -- the drift happens in the caller.  Gravity is NOT included;
+ * the caller is responsible for the gravity contribution via the
+ * existing Boris path.
+ *
+ * The dance:
+ *   1.  Read A at t^{n-1/2} (A.prev) at the particle position; compute
+ *       p_c^{n-1/2} = p_kin^{n-1/2} + q A^{n-1/2}.
+ *   2.  Compute v^{n-1/2} from p_kin^{n-1/2}.
+ *   3.  Read grad phi and the four mixed grad-A components at t^n
+ *       (time-averaged from t^{n-1/2} and t^{n+1/2}).
+ *   4.  Compute the GEMPIC force F_i = q v_j d_i A_j - q d_i phi.
+ *   5.  Kick:  p_c^{n+1/2} = p_c^{n-1/2} + F dt.
+ *   6.  Read A at t^{n+1/2} (A.curr) at the (still-current) particle
+ *       position; compute p_kin^{n+1/2} = p_c^{n+1/2} - q A^{n+1/2}.
+ *
+ * Skips entirely if charge == 0 or em_lorentz_force_enabled == 0.
+ * No-op also if no EM field has been deposited (all A buffers zero --
+ * grad reads will return zero, kick is zero, conversion is identity). */
+static void gempic_em_kick(const struct gr_sim* sim, gr_particle_t* p, float dt) {
+    if (!sim || !sim->em_lorentz_force_enabled) return;
+    if (p->charge == 0.0f) return;
+
+    const int   W   = sim->width;
+    const int   H   = sim->height;
+    const float dx  = sim->dx;
+    const float q   = p->charge;
+    const float m   = p->mass;
+    const float c2  = sim->c_eff * sim->c_eff;
+    const float x_p = p->x;
+    const float y_p = p->y;
+
+    /* A at t^{n-1/2} and t^{n+1/2} at the particle, via TSC edge interp
+     * (matched-shape with the Esirkepov J deposit). */
+    const float* Axp_buf = sim->fields[GR_FIELD_A_X].prev;
+    const float* Axc_buf = sim->fields[GR_FIELD_A_X].curr;
+    const float* Ayp_buf = sim->fields[GR_FIELD_A_Y].prev;
+    const float* Ayc_buf = sim->fields[GR_FIELD_A_Y].curr;
+    const float Ax_prev = gr_tsc_interp_xedge(Axp_buf, W, H, dx, x_p, y_p);
+    const float Ax_curr = gr_tsc_interp_xedge(Axc_buf, W, H, dx, x_p, y_p);
+    const float Ay_prev = gr_tsc_interp_yedge(Ayp_buf, W, H, dx, x_p, y_p);
+    const float Ay_curr = gr_tsc_interp_yedge(Ayc_buf, W, H, dx, x_p, y_p);
+
+    /* p_c^{n-1/2} = p_kin^{n-1/2} + q A^{n-1/2} */
+    const float p_cx_pre = p->px + q * Ax_prev;
+    const float p_cy_pre = p->py + q * Ay_prev;
+
+    /* v at t^{n-1/2} from p_kin (the stored momentum). */
+    const float pmag2 = p->px * p->px + p->py * p->py;
+    const float gamma = sqrtf(1.0f + pmag2 / (m * m * c2));
+    const float vx    = p->px / (gamma * m);
+    const float vy    = p->py / (gamma * m);
+
+    /* grad phi at t^n (existing combined background+perturbation reader). */
+    float dphi_dx, dphi_dy;
+    phi_em_grad_at_total(sim, x_p, y_p, &dphi_dx, &dphi_dy);
+
+    /* Four mixed-component grad-A gathers at t^n (averaged from the
+     * half-step buffers).  Skip averaging when field evolution is off. */
+    float dAx_dx, dAx_dy, dAy_dx, dAy_dy;
+    if (sim->field_evolution_enabled) {
+        dAx_dx = 0.5f * (gr_tsc_lb_dx_xedge(Axp_buf, W, H, dx, x_p, y_p) +
+                         gr_tsc_lb_dx_xedge(Axc_buf, W, H, dx, x_p, y_p));
+        dAx_dy = 0.5f * (gr_tsc_lb_dy_xedge(Axp_buf, W, H, dx, x_p, y_p) +
+                         gr_tsc_lb_dy_xedge(Axc_buf, W, H, dx, x_p, y_p));
+        dAy_dx = 0.5f * (gr_tsc_lb_dx_yedge(Ayp_buf, W, H, dx, x_p, y_p) +
+                         gr_tsc_lb_dx_yedge(Ayc_buf, W, H, dx, x_p, y_p));
+        dAy_dy = 0.5f * (gr_tsc_lb_dy_yedge(Ayp_buf, W, H, dx, x_p, y_p) +
+                         gr_tsc_lb_dy_yedge(Ayc_buf, W, H, dx, x_p, y_p));
+    } else {
+        dAx_dx = gr_tsc_lb_dx_xedge(Axc_buf, W, H, dx, x_p, y_p);
+        dAx_dy = gr_tsc_lb_dy_xedge(Axc_buf, W, H, dx, x_p, y_p);
+        dAy_dx = gr_tsc_lb_dx_yedge(Ayc_buf, W, H, dx, x_p, y_p);
+        dAy_dy = gr_tsc_lb_dy_yedge(Ayc_buf, W, H, dx, x_p, y_p);
+    }
+
+    /* GEMPIC force: F_i = q v_j d_i A_j - q d_i phi. */
+    const float F_x = q * (vx * dAx_dx + vy * dAy_dx) - q * dphi_dx;
+    const float F_y = q * (vx * dAx_dy + vy * dAy_dy) - q * dphi_dy;
+
+    /* Kick on p_c. */
+    const float p_cx_post = p_cx_pre + F_x * dt;
+    const float p_cy_post = p_cy_pre + F_y * dt;
+
+    /* Convert back to p_kin^{n+1/2}. */
+    p->px = p_cx_post - q * Ax_curr;
+    p->py = p_cy_post - q * Ay_curr;
+}
+
 /* Boris-leapfrog kick-drift for one timestep.
  *
  * gr_sandbox_v32.tex §9.2:
@@ -955,11 +1048,16 @@ void gr_particle_push_all(struct gr_sim* sim) {
         const float vx_pre = p->px / (gamma * p->mass);
         const float vy_pre = p->py / (gamma * p->mass);
 
+        const int use_gempic = (sim->pusher == GR_PUSHER_GEMPIC) && (p->charge != 0.0f);
+
         float Fx, Fy;
         grav_force_at(sim, p->mass, vx_pre, vy_pre, phi, grad_x, grad_y, Bg_z, G_dAx, G_dAy, &Fx, &Fy);
         /* Additive EM Lorentz contribution: -q grad phi - q d_t A + q v x B
-         * (Stages 23/24/25; full static-and-dynamic EM Lorentz force). */
-        {
+         * (Stages 23/24/25; full static-and-dynamic EM Lorentz force).
+         * Skipped when the GEMPIC pusher is selected -- in that mode EM is
+         * applied via gempic_em_kick after the gravity kick, using the
+         * canonical-momentum scheme (see v37 gempic_derivation). */
+        if (!use_gempic) {
             float Fx_em, Fy_em;
             em_force_at(p->charge, vx_pre, vy_pre,
                         E_phi_grad_x, E_phi_grad_y,
@@ -975,8 +1073,12 @@ void gr_particle_push_all(struct gr_sim* sim) {
          * whenever the force depends on v — RELATIVISTIC tier always,
          * plus any tier when Bg_z != 0 or B_em_z != 0 (and the particle
          * carries charge for the EM piece).  The -q grad phi piece is
-         * v-independent so it doesn't drive the corrector. */
-        const int em_velocity_dep = (B_em_z != 0.0f) && (p->charge != 0.0f);
+         * v-independent so it doesn't drive the corrector.
+         *
+         * In GEMPIC mode the EM piece is not in (Fx,Fy) here, so the
+         * EM-driven trigger is suppressed.  Gravity-only corrector still
+         * fires when warranted. */
+        const int em_velocity_dep = (!use_gempic) && (B_em_z != 0.0f) && (p->charge != 0.0f);
         if (sim->force_tier == GR_FORCE_RELATIVISTIC
             || Bg_z != 0.0f || em_velocity_dep) {
             const float px_pred = p->px + Fx * dt;
@@ -988,17 +1090,25 @@ void gr_particle_push_all(struct gr_sim* sim) {
             const float vx_mid = 0.5f * (vx_pre + vx_post);
             const float vy_mid = 0.5f * (vy_pre + vy_post);
             grav_force_at(sim, p->mass, vx_mid, vy_mid, phi, grad_x, grad_y, Bg_z, G_dAx, G_dAy, &Fx, &Fy);
-            float Fx_em, Fy_em;
-            em_force_at(p->charge, vx_mid, vy_mid,
-                        E_phi_grad_x, E_phi_grad_y,
-                        E_dAx, E_dAy,
-                        B_em_z, &Fx_em, &Fy_em);
-            Fx += Fx_em;
-            Fy += Fy_em;
+            if (!use_gempic) {
+                float Fx_em, Fy_em;
+                em_force_at(p->charge, vx_mid, vy_mid,
+                            E_phi_grad_x, E_phi_grad_y,
+                            E_dAx, E_dAy,
+                            B_em_z, &Fx_em, &Fy_em);
+                Fx += Fx_em;
+                Fy += Fy_em;
+            }
         }
 
         p->px += Fx * dt;
         p->py += Fy * dt;
+
+        /* GEMPIC EM kick: applies the canonical-momentum EM update via
+         * p_kin -> p_c -> updated -> p_kin conversion (v37). */
+        if (use_gempic) {
+            gempic_em_kick(sim, p, dt);
+        }
         pmag2 = p->px * p->px + p->py * p->py;
         gamma = sqrtf(1.0f + pmag2 / (p->mass * p->mass * c2));
         const float vx = p->px / (gamma * p->mass);
