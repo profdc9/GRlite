@@ -578,6 +578,22 @@ typedef enum {
 void                gr_sim_set_shape_function(gr_sim_t* sim, gr_shape_function_t s);
 gr_shape_function_t gr_sim_get_shape_function(const gr_sim_t* sim);
 
+/* Bump kernel radius (only used when shape_function = GR_SHAPE_BUMP).
+ * In CELL units; the bump function is exp(-1/(1-(d/R)^2)) for |d| < R,
+ * normalized via discrete-sum.  Default 1.5 (same 3-cell support as TSC).
+ *
+ * Larger R = wider effective macroparticle = more suppression of high-k
+ * deposit content (the lever Stage 37's smoothing scan validated
+ * empirically).  Cells touched per axis scales as 2*ceil(R+0.5)+1, so
+ * cost per deposit scales as roughly R^2.  Max R is capped internally
+ * at the half-width limit (currently 8 cells = 17-cell window/axis).
+ *
+ * This is an alternative to the rho_smooth_passes convolution approach
+ * (which is TSC plus a binomial filter): gr_sim_set_kernel_radius gives
+ * a direct wider macroparticle without a separate convolution pass. */
+void  gr_sim_set_kernel_radius(gr_sim_t* sim, float radius_cells);
+float gr_sim_get_kernel_radius(const gr_sim_t* sim);
+
 /* Force-interpolation scheme — selects how the gradient of Phi at the
  * particle is computed from the grid Phi.  Both schemes satisfy the
  * Hockney-Eastwood adjoint condition (F_self = 0 at any stationary

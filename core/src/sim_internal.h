@@ -137,6 +137,9 @@ struct gr_sim {
     /* Discretization for the EM inductive piece. */
     gr_inductive_disc_t em_inductive_disc;
     gr_pusher_kind_t    pusher;   /* default GR_PUSHER_BORIS; v37 GEMPIC opt-in */
+    float               kernel_radius;  /* default 1.5; bump-kernel half-width
+                                         * in cell units.  Only used when
+                                         * shape_function = GR_SHAPE_BUMP. */
     float               phi_gather_lead;  /* DIAGNOSTIC: shift EM gather position
                                            * to (x_p + lead*v*dt, y_p + lead*v*dt).
                                            * Default 0 (current behavior).  Probes
@@ -296,11 +299,11 @@ float gr_tsc_interp_yedge(const float* arr, int W, int H, float dx,
  * compactly-supported deposit + interp + LB gather on 3-cell support.
  * Same footprint as TSC but with sub-exponential Fourier decay. */
 void  gr_bump_deposit_corner(float* arr, int W, int H, float dx,
-                              float x_p, float y_p, float value);
+                              float x_p, float y_p, float value, float R);
 float gr_bump_interp_corner(const float* arr, int W, int H, float dx,
-                             float x_p, float y_p);
+                             float x_p, float y_p, float R);
 void  gr_bump_lb_grad_corner(const float* arr, int W, int H, float dx,
-                              float x_p, float y_p,
+                              float x_p, float y_p, float R,
                               float* gx_out, float* gy_out);
 
 float gr_tsc_lb_dx_xedge(const float* arr, int W, int H, float dx,

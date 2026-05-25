@@ -234,154 +234,165 @@ static inline void tsc_dw_1d(float u, float dw[3]) {
 }
 
 /* ===================================================================
- * Bump (C-infinity compactly-supported) kernel on cell-distance
- * support [-1.5, 1.5].  Sub-exponential Fourier decay; 3-cell
- * footprint matched to TSC.  See gr_sandbox_v38 sec kernel_design.
+ * Bump (C-infinity compactly-supported) kernel.  PARAMETERIZED by
+ * radius R in cell units; cells touched per axis = 2*ceil(R+0.5)+1
+ * (capped at BUMP_MAX_HW).  Default R=1.5 matches TSC's 3-cell support.
+ * Larger R = wider macroparticle, alternative to rho_smooth_passes.
+ * See gr_sandbox_v38 sec kernel_design.
  * ===================================================================
  *
- * Raw form: b_raw(d) = exp(-1/(1 - (d/1.5)^2)) for |d| < 1.5, else 0.
- * Discrete normalization: w_i = b_raw(i - u) / sum_j b_raw(j - u)
- * so cell weights sum to 1 at every sub-cell offset u (charge
- * conservation).  Derivative includes the renormalization correction
- * so the HE-adjoint paring with the deposit is preserved. */
+ * Raw form (R-parameterized):
+ *   b_raw(d, R) = exp(-1/(1 - (d/R)^2)) for |d| < R, else 0
+ * Discrete weights: w_i = b_raw(i - u, R) / sum_j b_raw(j - u, R)
+ * (per-axis renormalization so weights sum to 1 -> charge conservation).
+ * Derivative includes the renormalization correction so the HE-adjoint
+ * pairing with the deposit is preserved. */
 
-static inline float bump_raw(float d) {
-    const float q = d / 1.5f;
+#define BUMP_MAX_HW 8                       /* max half-width in cells */
+#define BUMP_MAX_W  (2 * BUMP_MAX_HW + 1)   /* max cells/axis = 17 */
+
+static inline float bump_raw_R(float d, float R) {
+    const float q = d / R;
     const float one_minus_q2 = 1.0f - q * q;
     if (one_minus_q2 <= 0.0f) return 0.0f;
     return expf(-1.0f / one_minus_q2);
 }
 
-/* d/dd of raw bump function. */
-static inline float bump_raw_dd(float d) {
-    const float q = d / 1.5f;
+/* d/dd of raw bump (used for LB derivative). */
+static inline float bump_raw_dd_R(float d, float R) {
+    const float q = d / R;
     const float one_minus_q2 = 1.0f - q * q;
     if (one_minus_q2 <= 0.0f) return 0.0f;
     const float b = expf(-1.0f / one_minus_q2);
-    return b * (-2.0f * q) / (1.5f * one_minus_q2 * one_minus_q2);
+    return b * (-2.0f * q) / (R * one_minus_q2 * one_minus_q2);
 }
 
-/* Normalized discrete bump weights at cell offsets {-1, 0, +1} from
- * the nearest cell.  u in [-0.5, 0.5).  Sum is 1 by construction. */
-static inline void bump_weights_1d(float u, float w[3]) {
-    const float b0 = bump_raw(-1.0f - u);
-    const float b1 = bump_raw( 0.0f - u);
-    const float b2 = bump_raw( 1.0f - u);
-    const float S = b0 + b1 + b2;
+/* Half-width in cells given R.  Cells in window: 2*hw+1. */
+static inline int bump_half_width(float R) {
+    int hw = (int) ceilf(R + 0.5f);
+    if (hw < 1) hw = 1;
+    if (hw > BUMP_MAX_HW) hw = BUMP_MAX_HW;
+    return hw;
+}
+
+/* Fill weight array w[0..2*hw] for cells at offsets [-hw, hw] from
+ * the nearest cell.  Per-axis renormalized to sum to 1. */
+static inline void bump_weights_1d_R(float u, float R, int hw, float w[BUMP_MAX_W]) {
+    float S = 0.0f;
+    for (int i = -hw; i <= hw; i++) {
+        const float b = bump_raw_R((float) i - u, R);
+        w[i + hw] = b;
+        S += b;
+    }
     if (S > 0.0f) {
         const float invS = 1.0f / S;
-        w[0] = b0 * invS;
-        w[1] = b1 * invS;
-        w[2] = b2 * invS;
+        for (int i = -hw; i <= hw; i++) w[i + hw] *= invS;
     } else {
-        w[0] = w[1] = w[2] = 0.0f;
+        for (int i = -hw; i <= hw; i++) w[i + hw] = 0.0f;
     }
 }
 
-/* d/du of the normalized discrete bump weights, including the
- * renormalization correction.  Used by the LB-style gradient gather
- * so the discrete adjoint of the deposit is exact. */
-static inline void bump_dw_1d(float u, float dw[3]) {
-    const float b0 = bump_raw(-1.0f - u);
-    const float b1 = bump_raw( 0.0f - u);
-    const float b2 = bump_raw( 1.0f - u);
-    /* d/du of b_raw(i - u) = -b_raw'(i - u). */
-    const float db0 = -bump_raw_dd(-1.0f - u);
-    const float db1 = -bump_raw_dd( 0.0f - u);
-    const float db2 = -bump_raw_dd( 1.0f - u);
-    const float S = b0 + b1 + b2;
-    const float dSdu = db0 + db1 + db2;
+/* Fill derivative array dw[0..2*hw] = d/du of normalized weights,
+ * including the renormalization correction. */
+static inline void bump_dw_1d_R(float u, float R, int hw,
+                                  float w[BUMP_MAX_W], float dw[BUMP_MAX_W]) {
+    float b_raw_arr[BUMP_MAX_W], db_raw_arr[BUMP_MAX_W];
+    float S = 0.0f, dSdu = 0.0f;
+    for (int i = -hw; i <= hw; i++) {
+        const float b  =  bump_raw_R   ((float) i - u, R);
+        const float db = -bump_raw_dd_R((float) i - u, R);  /* d/du of b((i-u)) */
+        b_raw_arr [i + hw] = b;
+        db_raw_arr[i + hw] = db;
+        S    += b;
+        dSdu += db;
+    }
     if (S > 0.0f) {
         const float invS = 1.0f / S;
-        const float W0 = b0 * invS, W1 = b1 * invS, W2 = b2 * invS;
-        dw[0] = (db0 - W0 * dSdu) * invS;
-        dw[1] = (db1 - W1 * dSdu) * invS;
-        dw[2] = (db2 - W2 * dSdu) * invS;
+        for (int i = -hw; i <= hw; i++) {
+            const float W = b_raw_arr[i + hw] * invS;
+            w[i + hw]  = W;
+            dw[i + hw] = (db_raw_arr[i + hw] - W * dSdu) * invS;
+        }
     } else {
-        dw[0] = dw[1] = dw[2] = 0.0f;
+        for (int i = -hw; i <= hw; i++) { w[i + hw] = 0.0f; dw[i + hw] = 0.0f; }
     }
 }
 
-/* Bump deposit on the CORNER sublattice.  Mirrors gr_tsc_deposit_corner
- * exactly except for the weight function. */
+/* Bump deposit on the CORNER sublattice. */
 void gr_bump_deposit_corner(float* arr, int W, int H, float dx,
-                             float x_p, float y_p, float value) {
+                             float x_p, float y_p, float value, float R) {
     if (!arr) return;
+    const int   hw = bump_half_width(R);
     const float xn = x_p / dx;
     const float yn = y_p / dx;
     const int   ic = (int) floorf(xn + 0.5f);
     const int   jc = (int) floorf(yn + 0.5f);
-    if (ic < 1 || ic > W - 2 || jc < 1 || jc > H - 2) return;
+    if (ic < hw || ic > W - 1 - hw || jc < hw || jc > H - 1 - hw) return;
     const float u = xn - (float) ic;
     const float v = yn - (float) jc;
-    float wx[3], wy[3];
-    bump_weights_1d(u, wx);
-    bump_weights_1d(v, wy);
+    float wx[BUMP_MAX_W], wy[BUMP_MAX_W];
+    bump_weights_1d_R(u, R, hw, wx);
+    bump_weights_1d_R(v, R, hw, wy);
     const float inv_area = 1.0f / (dx * dx);
-    for (int dj = -1; dj <= 1; dj++) {
+    for (int dj = -hw; dj <= hw; dj++) {
         const int row = (jc + dj) * W;
-        for (int di = -1; di <= 1; di++) {
-            arr[row + ic + di] += value * wx[di + 1] * wy[dj + 1] * inv_area;
+        for (int di = -hw; di <= hw; di++) {
+            arr[row + ic + di] += value * wx[di + hw] * wy[dj + hw] * inv_area;
         }
     }
 }
 
 /* Bump interp on the CORNER sublattice (used for diagnostics). */
 float gr_bump_interp_corner(const float* arr, int W, int H, float dx,
-                             float x_p, float y_p) {
+                             float x_p, float y_p, float R) {
     if (!arr) return 0.0f;
+    const int   hw = bump_half_width(R);
     const float xn = x_p / dx;
     const float yn = y_p / dx;
     const int   ic = (int) floorf(xn + 0.5f);
     const int   jc = (int) floorf(yn + 0.5f);
-    if (ic < 1 || ic > W - 2 || jc < 1 || jc > H - 2) return 0.0f;
+    if (ic < hw || ic > W - 1 - hw || jc < hw || jc > H - 1 - hw) return 0.0f;
     const float u = xn - (float) ic;
     const float v = yn - (float) jc;
-    float wx[3], wy[3];
-    bump_weights_1d(u, wx);
-    bump_weights_1d(v, wy);
+    float wx[BUMP_MAX_W], wy[BUMP_MAX_W];
+    bump_weights_1d_R(u, R, hw, wx);
+    bump_weights_1d_R(v, R, hw, wy);
     float r = 0.0f;
-    for (int dj = -1; dj <= 1; dj++) {
+    for (int dj = -hw; dj <= hw; dj++) {
         const int row = (jc + dj) * W;
-        for (int di = -1; di <= 1; di++) {
-            r += wx[di + 1] * wy[dj + 1] * arr[row + ic + di];
+        for (int di = -hw; di <= hw; di++) {
+            r += wx[di + hw] * wy[dj + hw] * arr[row + ic + di];
         }
     }
     return r;
 }
 
-/* Bump-LB gather of d/dx and d/dy of a CORNER field at the particle
- * position.  Adjoint of gr_bump_deposit_corner -- HE static self-force
- * should be zero at v=0 when both deposit and gather use bump. */
+/* Bump-LB gather of d/dx and d/dy of a CORNER field at the particle. */
 void gr_bump_lb_grad_corner(const float* arr, int W, int H, float dx,
-                             float x_p, float y_p,
+                             float x_p, float y_p, float R,
                              float* gx_out, float* gy_out) {
     *gx_out = 0.0f;
     *gy_out = 0.0f;
     if (!arr) return;
+    const int   hw = bump_half_width(R);
     const float xn = x_p / dx;
     const float yn = y_p / dx;
     const int   ic = (int) floorf(xn + 0.5f);
     const int   jc = (int) floorf(yn + 0.5f);
-    if (ic < 1 || ic > W - 2 || jc < 1 || jc > H - 2) return;
+    if (ic < hw || ic > W - 1 - hw || jc < hw || jc > H - 1 - hw) return;
     const float u = xn - (float) ic;
     const float v = yn - (float) jc;
-    float wx[3], wy[3], dwx[3], dwy[3];
-    bump_weights_1d(u, wx);
-    bump_weights_1d(v, wy);
-    bump_dw_1d(u, dwx);
-    bump_dw_1d(v, dwy);
+    float wx[BUMP_MAX_W], wy[BUMP_MAX_W], dwx[BUMP_MAX_W], dwy[BUMP_MAX_W];
+    bump_dw_1d_R(u, R, hw, wx, dwx);
+    bump_dw_1d_R(v, R, hw, wy, dwy);
     const float inv_dx = 1.0f / dx;
     float gx = 0.0f, gy = 0.0f;
-    for (int dj = -1; dj <= 1; dj++) {
+    for (int dj = -hw; dj <= hw; dj++) {
         const int row = (jc + dj) * W;
-        for (int di = -1; di <= 1; di++) {
+        for (int di = -hw; di <= hw; di++) {
             const float val = arr[row + ic + di];
-            /* LB convention (matches TSC path in particle.c
-             * phi_em_grad_at_lb): bump_dw_1d returns d/du of w_i(u),
-             * and d phi / d x_p = (1/dx) * sum dw_i/du * phi_i. */
-            gx += dwx[di + 1] * wy[dj + 1] * val;
-            gy += wx[di + 1] * dwy[dj + 1] * val;
+            gx += dwx[di + hw] * wy[dj + hw] * val;
+            gy += wx[di + hw] * dwy[dj + hw] * val;
         }
     }
     *gx_out = inv_dx * gx;

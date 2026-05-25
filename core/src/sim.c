@@ -77,6 +77,7 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
     sim->em_inductive_disc             = GR_INDUCTIVE_CENTERED;
     sim->pusher                        = GR_PUSHER_BORIS;
     sim->phi_gather_lead               = 0.0f;
+    sim->kernel_radius                 = 1.5f;
     sim->em_inductive_sign             = +1.0f;
     sim->grav_inductive_sign           = +1.0f;
     /* J time-correction off by default (raw Esirkepov J^{n-1/2}). */
@@ -183,8 +184,9 @@ void gr_sim_step(gr_sim_t* sim) {
              * is v38 Tier-1: same 3x3 footprint as TSC but C-infinity
              * kernel (sub-exponential Fourier decay). */
             if (sim->shape_function == GR_SHAPE_BUMP) {
-                if (p->mass   != 0.0f) gr_bump_deposit_corner(sim->rho_matter, W, H, dx, p->x, p->y, p->mass);
-                if (p->charge != 0.0f) gr_bump_deposit_corner(sim->rho_q,      W, H, dx, p->x, p->y, p->charge);
+                const float Rk = sim->kernel_radius;
+                if (p->mass   != 0.0f) gr_bump_deposit_corner(sim->rho_matter, W, H, dx, p->x, p->y, p->mass,   Rk);
+                if (p->charge != 0.0f) gr_bump_deposit_corner(sim->rho_q,      W, H, dx, p->x, p->y, p->charge, Rk);
             } else if (sim->shape_function == GR_SHAPE_TSC) {
                 if (p->mass   != 0.0f) gr_tsc_deposit_corner(sim->rho_matter, W, H, dx, p->x, p->y, p->mass);
                 if (p->charge != 0.0f) gr_tsc_deposit_corner(sim->rho_q,      W, H, dx, p->x, p->y, p->charge);
@@ -619,6 +621,14 @@ void gr_sim_set_phi_gather_lead(gr_sim_t* sim, float lead) {
 }
 float gr_sim_get_phi_gather_lead(const gr_sim_t* sim) {
     return sim ? sim->phi_gather_lead : 0.0f;
+}
+void gr_sim_set_kernel_radius(gr_sim_t* sim, float r) {
+    if (!sim) return;
+    if (r < 0.5f) r = 0.5f;       /* below 0.5: degenerate / single-cell */
+    sim->kernel_radius = r;
+}
+float gr_sim_get_kernel_radius(const gr_sim_t* sim) {
+    return sim ? sim->kernel_radius : 1.5f;
 }
 void gr_sim_set_gravitomagnetic_inductive_sign(gr_sim_t* sim, float sign) {
     if (!sim) return;

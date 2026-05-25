@@ -345,6 +345,149 @@ and we move to widening (Tier 3) instead of shape-comparison.
 Stage 39 reciprocity ratio still $< 10^{-6}$ at every separation
 (BUMP preserves HE adjoint on the rho/$\phi$-gather pair).
 
+\subsection{Empirical findings (2026-05-25): equal-distance methodology}
+\label{sec:kernel_v38_findings}
+
+The Tier 1 implementation (commit 425ed05) was extended to a
+\emph{parameterized} bump kernel with continuous radius $R$ in cell
+units (commit on this revision).  The radius controls a variable
+cell window: 2*ceil($R$+0.5)+1 cells per axis, capped at 17 (R$=$8).
+API: \texttt{gr\_sim\_set\_kernel\_radius(sim, R)} -- default $1.5$
+matches TSC's 3-cell support.
+
+\subsubsection*{Measurement methodology correction}
+
+Initial measurements (Stage 41, Stage 43 v1) used a fixed 200-step
+force-measurement window regardless of $v$.  This meant at low $v$
+the particle moved $<1$ cell during the window, and the measured
+force reflected the spurious force at a single (nearly fixed)
+sub-cell offset rather than averaging over the full sub-cell
+distribution.  This produced a spurious ``v=0.005 spike'' that was
+purely a methodology artifact.
+
+Stage 43 v2 (equal-distance) fixes this: window steps scale as
+$5/(v\,\dd t)$ so the particle traverses 5 cells at every $v$,
+sampling the full sub-cell-offset distribution.  Heavy particle
+mass ($m=100$) keeps the spurious force from changing $v$
+materially over the longer windows.
+
+\subsubsection*{TSC baseline -- corrected absolute spurious force}
+
+\begin{center}
+\begin{tabular}{rrr}
+\toprule
+$v/c$ & accel (TSC bare, cells/$\dd t^2$) & n\_window \\
+\midrule
+$0.001$ & $-1.12\times10^{-8}$ & $7071$ \\
+$0.005$ & $-7.40\times10^{-9}$ & $1414$ \\
+$0.010$ & $-4.67\times10^{-9}$ & $707$  \\
+$0.050$ & $-2.37\times10^{-9}$ & $200$  \\
+$0.100$ & $+1.42\times10^{-9}$ & $200$  \\
+$0.200$ & $+2.11\times10^{-10}$ & $200$ \\
+$0.300$ & $+4.43\times10^{-9}$ & $200$  \\
+$0.500$ & $+3.20\times10^{-8}$ & $200$  \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The absolute spurious force is $\sim 10^{-9}$ to $10^{-8}$ across
+the whole $v$ range, much smaller than the $\sim 10^{-6}$ to
+$10^{-5}$ numbers reported under the old methodology.  The
+nonrelativistic regime IS stable in absolute terms; previous
+characterisations were contaminated by sub-cell-offset bias in
+the fixed-window measurement.
+
+\subsubsection*{Bump-R vs TSC + smoothing: equivalent effectiveness}
+
+Ratio table ($|$accel$/$accel(TSC)$|$, equal-distance methodology):
+
+\begin{center}
+\begin{tabular}{rrrrrrrr}
+\toprule
+$v/c$ & bump R=2.5 & R=4 & R=6 & R=8 & TSC N=4 & N=16 & N=64 \\
+\midrule
+$0.001$ & $1.02$ & $0.74$ & $0.88$ & $0.91$ & $0.93$ & $0.91$ & $0.91$ \\
+$0.005$ & $0.97$ & $0.98$ & $0.98$ & $0.98$ & $0.98$ & $0.98$ & $0.98$ \\
+$0.010$ & $0.99$ & $1.01$ & $1.02$ & $1.01$ & $1.02$ & $1.02$ & $1.01$ \\
+$0.050$ & $0.33$ & $0.06$ & $0.02$ & $\mathbf{0}$ & $0.04$ & $\mathbf{0}$ & $\mathbf{0}$ \\
+$0.100$ & $2.93$ & $0.37$ & $0.07$ & $\mathbf{0}$ & $0.30$ & $\mathbf{0}$ & $\mathbf{0}$ \\
+$0.200$ & $14.0$ & $8.0 $ & $\mathbf{0}$ & $\mathbf{0}$ & $\mathbf{0}$ & $\mathbf{0}$ & $\mathbf{0}$ \\
+$0.300$ & $0.19$ & $0.33$ & $0.10$ & $\mathbf{0}$ & $\mathbf{0}$ & $\mathbf{0}$ & $\mathbf{0}$ \\
+$0.500$ & $0.24$ & $0.11$ & $\mathbf{0}$ & $\mathbf{0}$ & $\mathbf{0}$ & $\mathbf{0}$ & $\mathbf{0}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+$\mathbf{0}$ entries indicate the spurious force has dropped below
+float32 noise floor.
+
+\subsubsection*{What this tells us}
+
+\begin{enumerate}
+  \item TSC's bare spurious force is already $\sim 10^{-8}$ at
+    typical pedagogical $v$, much smaller than previous methodology
+    suggested.  The artifact is not as severe as we'd been treating
+    it -- it was inflated by measurement noise.
+  \item For $v \geq 0.05$, both bump-$R$ at $R \geq 6$ and TSC +
+    smoothing at $N \geq 16$ suppress the spurious force below
+    float32 noise floor.  Effectively equivalent in result.
+  \item For $v \leq 0.01$, neither approach helps because the TSC
+    artifact is already at the noise floor at low $v$.  Nothing
+    further to suppress.
+  \item Choice between bump-$R$ and smoothing-$N$ is now about
+    \emph{implementation cost}, not effectiveness:
+    \begin{itemize}
+      \item Smoothing: per-step grid convolution, scales with grid
+        size $W \cdot H$, independent of particle count.  At $N=16$,
+        roughly quadruples FDTD step cost.  Affects $\rho$ and $\vec J$
+        consistently.
+      \item Bump-$R$: per-particle deposit only, scales as
+        $N_{\mathrm{particles}} \cdot R^2$, independent of grid size.
+        For pedagogical few-particle sims at $R=6$ ($\sim 169$ cells
+        per particle), cost is negligible.  Currently only affects
+        $\rho$ deposit and $\phi$ gather; full coverage needs Tier 2.
+    \end{itemize}
+  \item For real-time pedagogical demos (few particles, target 60 fps),
+    bump-$R$ is the better choice on cost grounds.  For plasma or
+    high-particle-count regimes, smoothing wins.
+\end{enumerate}
+
+\subsubsection*{Implementation status and Tier 2 decision}
+
+Bump-$R$ implementation in tree (commits 425ed05 + this revision):
+\begin{itemize}
+  \item \texttt{GR\_SHAPE\_BUMP} enum, \texttt{gr\_sim\_set\_kernel\_radius}.
+  \item Variable-width $\rho$ deposit on corners, parameterised by $R$.
+  \item Variable-width $\phi$-gradient LB gather on corners.
+  \item Stage 39 reciprocity passes (ratio $= 0$ to float precision).
+\end{itemize}
+
+NOT yet in tree:
+\begin{itemize}
+  \item Bump Esirkepov for $\vec J$ on edge sublattices.
+  \item Bump interp on X-edge / Y-edge for $\vec A$ reads.
+  \item Bump LB gradient gathers on edge sublattices
+    (\texttt{gr\_bump\_lb\_dx\_xedge} etc.).
+\end{itemize}
+
+For phi-only Stage 37 tests the current implementation is complete
+and sufficient.  For \emph{full-force} EM PIC orbit tests (Stage 27
+type) with the bump kernel, Tier 2 is required to maintain shape
+consistency between $\rho$ and $\vec J$ wakes.
+
+The empirical equivalence with smoothing means Tier 2 is a
+\emph{cost-optimisation choice}, not a correctness one.  Justified
+if (a) pedagogical use cases demand per-step cost lower than
+smoothing affords, or (b) we want to extend the framework to
+plasma-style scenarios where bump's per-particle cost still
+competes with smoothing's per-step cost.
+
+Decision deferred pending the orbital-test downstream verification:
+run Stage 27 with both (bump $R=6$ via current incomplete-Tier-1
+hybrid AND TSC + smoothing $N=16$) and confirm orbital drift is
+acceptably small in both.  If yes, leave Tier 2 as future work.
+If only one works for orbits, do Tier 2 for the winner.
+
 \newpage
 
 %====================================================================
