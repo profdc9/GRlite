@@ -475,18 +475,50 @@ and sufficient.  For \emph{full-force} EM PIC orbit tests (Stage 27
 type) with the bump kernel, Tier 2 is required to maintain shape
 consistency between $\rho$ and $\vec J$ wakes.
 
-The empirical equivalence with smoothing means Tier 2 is a
-\emph{cost-optimisation choice}, not a correctness one.  Justified
-if (a) pedagogical use cases demand per-step cost lower than
-smoothing affords, or (b) we want to extend the framework to
-plasma-style scenarios where bump's per-particle cost still
-competes with smoothing's per-step cost.
+\subsubsection*{Tier 2 LANDED (commit 98b4fe9): bump Esirkepov + edge interp}
 
-Decision deferred pending the orbital-test downstream verification:
-run Stage 27 with both (bump $R=6$ via current incomplete-Tier-1
-hybrid AND TSC + smoothing $N=16$) and confirm orbital drift is
-acceptably small in both.  If yes, leave Tier 2 as future work.
-If only one works for orbits, do Tier 2 for the winner.
+Tier 2 implementation:
+\begin{itemize}
+  \item \texttt{gr\_bump\_interp\_xedge} / \texttt{\_yedge}: variable-
+    window bump interp on edge sublattices.  Used by
+    \texttt{dt\_A\_em\_at\_total} when shape=BUMP.
+  \item \texttt{gr\_bump\_esirkepov\_deposit\_jxy}: variable-window
+    Esirkepov current decomposition with renormalised bump weights.
+    Same separable algebra as existing CIC Esirkepov.
+  \item Dispatch in \texttt{sim.c} (Esirkepov path) and
+    \texttt{particle.c} ($\vec A$ edge interp).
+\end{itemize}
+
+Validation -- new Stage 44:
+\begin{itemize}
+  \item Part A: bump Esirkepov continuity verified at 5 values of
+    $R$ x 5 trajectory shapes = 25 cases.  All max$|$residual$|$
+    $\sim 10^{-8}$ (float32 noise).  Discrete continuity
+    $\partial_t\rho + \nabla\cdot\vec J = 0$ holds at every corner.
+  \item Part B: full force (inductive ON), bump R=8 and TSC + N=16
+    smoothing are EMPIRICALLY EQUIVALENT.  Both drop spurious accel
+    below float32 noise floor at $v \geq 0.05$.  Confirms the
+    deposit-side mitigation works equivalently in either form.
+\end{itemize}
+
+\subsubsection*{Production recommendation (v38, post-Tier-2)}
+
+For real-time pedagogical EM PIC closed-loop demos:
+\begin{eqbox}
+\begin{verbatim}
+  gr_sim_set_shape_function(sim, GR_SHAPE_BUMP);
+  gr_sim_set_kernel_radius (sim, 6.0f);  /* or 8.0f */
+\end{verbatim}
+\end{eqbox}
+
+Cost: O($N_\mathrm{particles} \cdot (2 \mathrm{hw}+1)^2$) per step for
+the deposit; negligible vs FDTD for few-particle pedagogical sims.
+
+For high-particle-count plasma simulations: switch to TSC + smoothing
+\texttt{rho\_smooth\_passes = 16} (or higher), since per-step
+convolution cost is constant in particle count.
+
+Both paths are now production-ready and validated.
 
 \newpage
 
