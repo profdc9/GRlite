@@ -588,6 +588,28 @@ static void phi_em_grad_at_lb(const struct gr_sim* sim, float x, float y,
                             ? sim->fields[GR_FIELD_PHI_EM].prev
                             : sim->fields[GR_FIELD_PHI_EM].curr;
 
+    if (sim->shape_function == GR_SHAPE_BUMP) {
+        /* Bump-LB: dispatch to gr_bump_lb_grad_corner.  Sum perturbation
+         * and (sampled, if any) background fields first, then call once
+         * to get (gx, gy). */
+        float gx_pert = 0.0f, gy_pert = 0.0f;
+        if (bg) {
+            /* Combined: would require summing two arrays; simpler to
+             * call grad on each and add.  bg here is the sampled phi_bg
+             * array; an analytic background contributes via gx_bg_ana. */
+            float gx_b, gy_b;
+            gr_bump_lb_grad_corner(bg,   W, H, dx, x, y, &gx_b,    &gy_b);
+            gr_bump_lb_grad_corner(pert, W, H, dx, x, y, &gx_pert, &gy_pert);
+            *gx_out = gx_pert + gx_b + gx_bg_ana;
+            *gy_out = gy_pert + gy_b + gy_bg_ana;
+        } else {
+            gr_bump_lb_grad_corner(pert, W, H, dx, x, y, &gx_pert, &gy_pert);
+            *gx_out = gx_pert + gx_bg_ana;
+            *gy_out = gy_pert + gy_bg_ana;
+        }
+        return;
+    }
+
     if (sim->shape_function == GR_SHAPE_TSC) {
         const float xn = x / dx;
         const float yn = y / dx;

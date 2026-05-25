@@ -565,7 +565,15 @@ int  gr_sim_get_j_smooth_passes(const gr_sim_t* sim);
  *     smoothing.  Cost: ~2.25x more cells per deposit/interp. */
 typedef enum {
     GR_SHAPE_CIC = 0,
-    GR_SHAPE_TSC = 1
+    GR_SHAPE_TSC = 1,
+    /* Compactly-supported C-infinity bump function exp(-1/(1-(d/1.5)^2))
+     * on cell-distance support [-1.5, 1.5].  Same 3-cell footprint as TSC
+     * but with sub-exponential Fourier decay (vs TSC's 1/k^3).  Tier-1
+     * implementation (v38 gr_sandbox_v38 sec kernel_design): used for
+     * the rho deposit + LB phi-gradient gather; J / Esirkepov stay on
+     * TSC for now.  Empirical probe of whether kernel SHAPE matters at
+     * fixed 3-cell support for the Stage 37 spurious force. */
+    GR_SHAPE_BUMP = 2
 } gr_shape_function_t;
 void                gr_sim_set_shape_function(gr_sim_t* sim, gr_shape_function_t s);
 gr_shape_function_t gr_sim_get_shape_function(const gr_sim_t* sim);

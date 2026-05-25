@@ -179,8 +179,13 @@ void gr_sim_step(gr_sim_t* sim) {
             const float vy    = p->py / (gamma * p->mass);
 
             /* Deposit rho^n at the current particle position.  Use TSC
-             * (3x3, smoother) if selected; otherwise CIC (2x2). */
-            if (sim->shape_function == GR_SHAPE_TSC) {
+             * (3x3, smoother) if selected; otherwise CIC (2x2).  BUMP
+             * is v38 Tier-1: same 3x3 footprint as TSC but C-infinity
+             * kernel (sub-exponential Fourier decay). */
+            if (sim->shape_function == GR_SHAPE_BUMP) {
+                if (p->mass   != 0.0f) gr_bump_deposit_corner(sim->rho_matter, W, H, dx, p->x, p->y, p->mass);
+                if (p->charge != 0.0f) gr_bump_deposit_corner(sim->rho_q,      W, H, dx, p->x, p->y, p->charge);
+            } else if (sim->shape_function == GR_SHAPE_TSC) {
                 if (p->mass   != 0.0f) gr_tsc_deposit_corner(sim->rho_matter, W, H, dx, p->x, p->y, p->mass);
                 if (p->charge != 0.0f) gr_tsc_deposit_corner(sim->rho_q,      W, H, dx, p->x, p->y, p->charge);
             } else {

@@ -292,6 +292,17 @@ float gr_tsc_interp_yedge(const float* arr, int W, int H, float dx,
  * d/dy of a Y_EDGE field, using the analytic derivative of the W_3
  * kernel.  Used to construct curl A = d_x A_y - d_y A_x at the particle
  * with the same adjoint pairing as the LB phi gradient. */
+/* Bump kernel (v38, gr_sandbox_v38 sec kernel_design): C-infinity
+ * compactly-supported deposit + interp + LB gather on 3-cell support.
+ * Same footprint as TSC but with sub-exponential Fourier decay. */
+void  gr_bump_deposit_corner(float* arr, int W, int H, float dx,
+                              float x_p, float y_p, float value);
+float gr_bump_interp_corner(const float* arr, int W, int H, float dx,
+                             float x_p, float y_p);
+void  gr_bump_lb_grad_corner(const float* arr, int W, int H, float dx,
+                              float x_p, float y_p,
+                              float* gx_out, float* gy_out);
+
 float gr_tsc_lb_dx_xedge(const float* arr, int W, int H, float dx,
                          float x_p, float y_p);
 float gr_tsc_lb_dy_yedge(const float* arr, int W, int H, float dx,
