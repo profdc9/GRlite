@@ -918,7 +918,8 @@ static float B_em_z_at_total(const struct gr_sim* sim, float x, float y) {
  * Skips entirely if charge == 0 or em_lorentz_force_enabled == 0.
  * No-op also if no EM field has been deposited (all A buffers zero --
  * grad reads will return zero, kick is zero, conversion is identity). */
-static void gempic_em_kick(const struct gr_sim* sim, gr_particle_t* p, float dt) {
+static void gempic_em_kick(const struct gr_sim* sim, gr_particle_t* p,
+                            float x_gather, float y_gather, float dt) {
     if (!sim || !sim->em_lorentz_force_enabled) return;
     if (p->charge == 0.0f) return;
 
@@ -928,8 +929,8 @@ static void gempic_em_kick(const struct gr_sim* sim, gr_particle_t* p, float dt)
     const float q   = p->charge;
     const float m   = p->mass;
     const float c2  = sim->c_eff * sim->c_eff;
-    const float x_p = p->x;
-    const float y_p = p->y;
+    const float x_p = x_gather;
+    const float y_p = y_gather;
 
     /* A at t^{n-1/2} and t^{n+1/2} at the particle, via TSC edge interp
      * (matched-shape with the Esirkepov J deposit). */
@@ -1022,31 +1023,40 @@ void gr_particle_push_all(struct gr_sim* sim) {
          * B_g_z but pointing at the EM arrays.  Gated by em_lorentz_force_
          * enabled.  When the particle is neutral or no EM A is present
          * this contributes nothing. */
-        const float B_em_z = B_em_z_at_total(sim, p->x, p->y);
+        /* Compute v_pre EARLY so it can be used to shift the EM gather
+         * position (phi_gather_lead diagnostic).  v from lagged
+         * p^{n-1/2}; used both for velocity-dependent force terms below
+         * and to compute the shifted EM read position. */
+        float pmag2 = p->px * p->px + p->py * p->py;
+        float gamma = sqrtf(1.0f + pmag2 / (p->mass * p->mass * c2));
+        const float vx_pre = p->px / (gamma * p->mass);
+        const float vy_pre = p->py / (gamma * p->mass);
+
+        /* EM gather position: shifted ahead of particle by lead * v * dt
+         * (diagnostic knob; default 0 = current behavior).  See v37
+         * gempic_addendum follow-up. */
+        const float em_lead = sim->phi_gather_lead;
+        const float x_em    = p->x + em_lead * vx_pre * dt;
+        const float y_em    = p->y + em_lead * vy_pre * dt;
+
+        const float B_em_z = B_em_z_at_total(sim, x_em, y_em);
         /* EM scalar gradient at the particle for the -q grad phi
          * electrostatic piece (Stage 24+).  Combines bg + perturbation;
          * gated by em_lorentz_force_enabled. */
         float E_phi_grad_x, E_phi_grad_y;
-        phi_em_grad_at_total(sim, p->x, p->y, &E_phi_grad_x, &E_phi_grad_y);
+        phi_em_grad_at_total(sim, x_em, y_em, &E_phi_grad_x, &E_phi_grad_y);
         /* EM vector-potential time derivative at the particle for the
          * -q d_t A inductive piece (Stage 25+).  Centered difference at
          * t^n using fields[A_X/A_Y].curr (=A^{n+1}) and .next (=A^{n-1})
          * after rotation.  Returns 0 when buffers are quiescent. */
         float E_dAx, E_dAy;
-        dt_A_em_at_total(sim, p->x, p->y, &E_dAx, &E_dAy);
+        dt_A_em_at_total(sim, x_em, y_em, &E_dAx, &E_dAy);
         /* GM vector-potential time derivative for the analogous gravity
          * inductive piece -m d_t A_g (Stage 28+).  Default OFF; gated by
-         * gravitomagnetic_inductive_enabled. */
+         * gravitomagnetic_inductive_enabled.  Uses true particle position
+         * (lead diagnostic only affects the EM gathers above). */
         float G_dAx, G_dAy;
         dt_A_g_at_total(sim, p->x, p->y, &G_dAx, &G_dAy);
-
-        /* v from lagged p^{n-1/2} — used to evaluate the velocity-dependent
-         * Tier-2 force terms.  Negligible cost for Newtonian since grav_force_at
-         * ignores v in that mode. */
-        float pmag2 = p->px * p->px + p->py * p->py;
-        float gamma = sqrtf(1.0f + pmag2 / (p->mass * p->mass * c2));
-        const float vx_pre = p->px / (gamma * p->mass);
-        const float vy_pre = p->py / (gamma * p->mass);
 
         const int use_gempic = (sim->pusher == GR_PUSHER_GEMPIC) && (p->charge != 0.0f);
 
@@ -1105,9 +1115,10 @@ void gr_particle_push_all(struct gr_sim* sim) {
         p->py += Fy * dt;
 
         /* GEMPIC EM kick: applies the canonical-momentum EM update via
-         * p_kin -> p_c -> updated -> p_kin conversion (v37). */
+         * p_kin -> p_c -> updated -> p_kin conversion (v37).  Uses the
+         * shifted EM gather position when phi_gather_lead != 0. */
         if (use_gempic) {
-            gempic_em_kick(sim, p, dt);
+            gempic_em_kick(sim, p, x_em, y_em, dt);
         }
         pmag2 = p->px * p->px + p->py * p->py;
         gamma = sqrtf(1.0f + pmag2 / (p->mass * p->mass * c2));

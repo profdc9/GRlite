@@ -137,6 +137,11 @@ struct gr_sim {
     /* Discretization for the EM inductive piece. */
     gr_inductive_disc_t em_inductive_disc;
     gr_pusher_kind_t    pusher;   /* default GR_PUSHER_BORIS; v37 GEMPIC opt-in */
+    float               phi_gather_lead;  /* DIAGNOSTIC: shift EM gather position
+                                           * to (x_p + lead*v*dt, y_p + lead*v*dt).
+                                           * Default 0 (current behavior).  Probes
+                                           * the hypothesis that the discrete wake's
+                                           * center of symmetry is offset from x_p. */
     /* Sign multipliers for diagnostic sign-flip experiments.  Default +1.0
      * (variationally-correct sign of -q d_t A and -m d_t A_g respectively). */
     float em_inductive_sign;
