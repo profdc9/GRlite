@@ -367,6 +367,188 @@ float gr_bump_interp_corner(const float* arr, int W, int H, float dx,
     return r;
 }
 
+/* Bump interp on X_EDGE sublattice -- nodes at (i+0.5, j) * dx.
+ * Used by Boris EM force evaluation: A_x reads for d_t A and curl A. */
+float gr_bump_interp_xedge(const float* arr, int W, int H, float dx,
+                            float x_p, float y_p, float R) {
+    if (!arr) return 0.0f;
+    const int   hw = bump_half_width(R);
+    const float xn = x_p / dx - 0.5f;       /* X_EDGE: half-cell offset in x */
+    const float yn = y_p / dx;
+    const int   ic = (int) floorf(xn + 0.5f);
+    const int   jc = (int) floorf(yn + 0.5f);
+    /* X_EDGE valid range: i in [hw, W-2-hw]; jc in [hw, H-1-hw]. */
+    if (ic < hw || ic > W - 2 - hw || jc < hw || jc > H - 1 - hw) return 0.0f;
+    const float u = xn - (float) ic;
+    const float v = yn - (float) jc;
+    float wx[BUMP_MAX_W], wy[BUMP_MAX_W];
+    bump_weights_1d_R(u, R, hw, wx);
+    bump_weights_1d_R(v, R, hw, wy);
+    float r = 0.0f;
+    for (int dj = -hw; dj <= hw; dj++) {
+        const int row = (jc + dj) * W;
+        for (int di = -hw; di <= hw; di++) {
+            r += wx[di + hw] * wy[dj + hw] * arr[row + ic + di];
+        }
+    }
+    return r;
+}
+
+/* Bump interp on Y_EDGE sublattice -- nodes at (i, j+0.5) * dx. */
+float gr_bump_interp_yedge(const float* arr, int W, int H, float dx,
+                            float x_p, float y_p, float R) {
+    if (!arr) return 0.0f;
+    const int   hw = bump_half_width(R);
+    const float xn = x_p / dx;
+    const float yn = y_p / dx - 0.5f;       /* Y_EDGE: half-cell offset in y */
+    const int   ic = (int) floorf(xn + 0.5f);
+    const int   jc = (int) floorf(yn + 0.5f);
+    if (ic < hw || ic > W - 1 - hw || jc < hw || jc > H - 2 - hw) return 0.0f;
+    const float u = xn - (float) ic;
+    const float v = yn - (float) jc;
+    float wx[BUMP_MAX_W], wy[BUMP_MAX_W];
+    bump_weights_1d_R(u, R, hw, wx);
+    bump_weights_1d_R(v, R, hw, wy);
+    float r = 0.0f;
+    for (int dj = -hw; dj <= hw; dj++) {
+        const int row = (jc + dj) * W;
+        for (int di = -hw; di <= hw; di++) {
+            r += wx[di + hw] * wy[dj + hw] * arr[row + ic + di];
+        }
+    }
+    return r;
+}
+
+/* Bump Esirkepov current deposit on X_EDGE / Y_EDGE.  Variable-window
+ * version of gr_esirkepov_deposit_jxy.  Uses the renormalized bump
+ * weights so that the discrete continuity equation
+ *   (rho^{n+1} - rho^n)/dt + div(J^{n-1/2}) = 0
+ * holds exactly at every corner, provided rho is deposited with the
+ * same bump weights (which it is when GR_SHAPE_BUMP is selected).
+ *
+ * Algebra parallel to gr_esirkepov_deposit_jxy:
+ *   DS_x[i, j] = (S^1_x - S^0_x)[i] * (S^0_y + 0.5 * (S^1_y - S^0_y))[j]
+ *   DS_y[i, j] = (S^1_y - S^0_y)[j] * (S^0_x + 0.5 * (S^1_x - S^0_x))[i]
+ *   J_x at X_edge i, j = -(source/(dt*dx)) * sum_{k<=i} DS_x[k, j]
+ *   J_y at Y_edge i, j = -(source/(dt*dx)) * sum_{l<=j} DS_y[i, l]
+ *
+ * The cell window covers the union of bump support at x^n and x^{n+1}.
+ * For sub-CFL motion (|v*dt| < dx) and bump half-width hw, the union
+ * is at most hw + 1 cells in each direction beyond the central cell. */
+int gr_bump_esirkepov_deposit_jxy(float* Jx, float* Jy,
+                                   int W, int H, float dx, float dt,
+                                   float x0, float y0, float x1, float y1,
+                                   float source, float R) {
+    if (!Jx || !Jy || dx <= 0.0f || dt <= 0.0f) return 0;
+    if (source == 0.0f) return 1;
+    const int hw = bump_half_width(R);
+
+    const float xn0 = x0 / dx;
+    const float yn0 = y0 / dx;
+    const float xn1 = x1 / dx;
+    const float yn1 = y1 / dx;
+
+    /* Reject motion larger than one cell per axis (CFL ought to keep it
+     * sub-cell anyway; this is a safety check matching the CIC version). */
+    const float ax = xn1 - xn0;
+    const float ay = yn1 - yn0;
+    if (ax > 1.0f || ax < -1.0f || ay > 1.0f || ay < -1.0f) return 0;
+
+    /* Window: cover both endpoints' bump support.  Anchor at leftmost
+     * cell touched by either endpoint.  Endpoint 0 touches cells
+     * [floor(xn0) - hw, floor(xn0) + hw]; endpoint 1 similarly.  Union
+     * extends from min(floor(xn0), floor(xn1)) - hw to max(...) + hw.
+     * Total width <= 2*hw + 2 cells (since motion is sub-cell). */
+    const int ic0 = (int) floorf(xn0 + 0.5f);
+    const int ic1 = (int) floorf(xn1 + 0.5f);
+    const int jc0 = (int) floorf(yn0 + 0.5f);
+    const int jc1 = (int) floorf(yn1 + 0.5f);
+    const int ic_min = (ic0 < ic1) ? ic0 : ic1;
+    const int jc_min = (jc0 < jc1) ? jc0 : jc1;
+    const int ic_max = (ic0 > ic1) ? ic0 : ic1;
+    const int jc_max = (jc0 > jc1) ? jc0 : jc1;
+    const int im_lo = ic_min - hw;
+    const int jm_lo = jc_min - hw;
+    const int im_hi = ic_max + hw;
+    const int jm_hi = jc_max + hw;
+    const int N_x = im_hi - im_lo + 1;
+    const int N_y = jm_hi - jm_lo + 1;
+    /* Width upper bound: 2*hw + 2 (one extra column for the +1 cell shift). */
+    if (N_x > 2 * BUMP_MAX_HW + 2 || N_y > 2 * BUMP_MAX_HW + 2) return 0;
+
+    /* Compute renormalized weights at endpoints 0 and 1, for the
+     * uniform cell window [im_lo..im_hi] x [jm_lo..jm_hi]. */
+    float S0x[2 * BUMP_MAX_HW + 2], S1x[2 * BUMP_MAX_HW + 2];
+    float S0y[2 * BUMP_MAX_HW + 2], S1y[2 * BUMP_MAX_HW + 2];
+    /* For endpoint 0: nearest cell is ic0, sub-cell u = xn0 - ic0.  But
+     * here we want weights at the SAME window cells [im_lo..im_hi] for
+     * both endpoints, so we compute raw bump_raw_R values at d = i - xn
+     * for i in window, then renormalize so the sum over the window is 1. */
+    float S0x_raw[2 * BUMP_MAX_HW + 2], S1x_raw[2 * BUMP_MAX_HW + 2];
+    float S0y_raw[2 * BUMP_MAX_HW + 2], S1y_raw[2 * BUMP_MAX_HW + 2];
+    float Sx0_sum = 0.0f, Sx1_sum = 0.0f, Sy0_sum = 0.0f, Sy1_sum = 0.0f;
+    for (int k = 0; k < N_x; k++) {
+        const float ix = (float) (im_lo + k);
+        S0x_raw[k] = bump_raw_R(ix - xn0, R);
+        S1x_raw[k] = bump_raw_R(ix - xn1, R);
+        Sx0_sum += S0x_raw[k];
+        Sx1_sum += S1x_raw[k];
+    }
+    for (int k = 0; k < N_y; k++) {
+        const float jy = (float) (jm_lo + k);
+        S0y_raw[k] = bump_raw_R(jy - yn0, R);
+        S1y_raw[k] = bump_raw_R(jy - yn1, R);
+        Sy0_sum += S0y_raw[k];
+        Sy1_sum += S1y_raw[k];
+    }
+    const float invSx0 = (Sx0_sum > 0.0f) ? 1.0f / Sx0_sum : 0.0f;
+    const float invSx1 = (Sx1_sum > 0.0f) ? 1.0f / Sx1_sum : 0.0f;
+    const float invSy0 = (Sy0_sum > 0.0f) ? 1.0f / Sy0_sum : 0.0f;
+    const float invSy1 = (Sy1_sum > 0.0f) ? 1.0f / Sy1_sum : 0.0f;
+    for (int k = 0; k < N_x; k++) {
+        S0x[k] = S0x_raw[k] * invSx0;
+        S1x[k] = S1x_raw[k] * invSx1;
+    }
+    for (int k = 0; k < N_y; k++) {
+        S0y[k] = S0y_raw[k] * invSy0;
+        S1y[k] = S1y_raw[k] * invSy1;
+    }
+
+    const float prefactor = -source / (dt * dx);
+
+    /* J_x on X_EDGE: cumulative sum along i for each j-corner row. */
+    for (int kj = 0; kj < N_y; kj++) {
+        const int jc = jm_lo + kj;
+        if (jc < 0 || jc >= H) continue;
+        const float Wy = S0y[kj] + 0.5f * (S1y[kj] - S0y[kj]);
+        float cumsum = 0.0f;
+        for (int ki = 0; ki < N_x; ki++) {
+            const float DSx = (S1x[ki] - S0x[ki]) * Wy;
+            cumsum += DSx;
+            const int ie = im_lo + ki;
+            if (ie >= 0 && ie < W - 1) {
+                Jx[jc * W + ie] += prefactor * cumsum;
+            }
+        }
+    }
+    /* J_y on Y_EDGE: cumulative sum along j for each i-corner column. */
+    for (int ki = 0; ki < N_x; ki++) {
+        const int ic = im_lo + ki;
+        if (ic < 0 || ic >= W) continue;
+        const float Wx = S0x[ki] + 0.5f * (S1x[ki] - S0x[ki]);
+        float cumsum = 0.0f;
+        for (int kj = 0; kj < N_y; kj++) {
+            const float DSy = (S1y[kj] - S0y[kj]) * Wx;
+            cumsum += DSy;
+            const int je = jm_lo + kj;
+            if (je >= 0 && je < H - 1) {
+                Jy[je * W + ic] += prefactor * cumsum;
+            }
+        }
+    }
+    return 1;
+}
+
 /* Bump-LB gather of d/dx and d/dy of a CORNER field at the particle. */
 void gr_bump_lb_grad_corner(const float* arr, int W, int H, float dx,
                              float x_p, float y_p, float R,

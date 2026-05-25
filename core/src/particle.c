@@ -858,22 +858,27 @@ static void dt_A_em_at_total(const struct gr_sim* sim, float x, float y,
      * retained for API compat (legacy stages that didn't drive A.next).
      * CENTERED (default) reads the natural 1-step diff. */
     const float inv_dt = 1.0f / sim->dt;
-    /* Shape-matched edge interp: TSC gathers an X_EDGE / Y_EDGE field with
-     * the same W_3 kernel that the Esirkepov J deposit used, restoring the
-     * HE adjoint condition on the inductive channel (Stage 37 fix). */
-    const int use_tsc = (sim->shape_function == GR_SHAPE_TSC);
-    const float Ax_curr = use_tsc
-        ? gr_tsc_interp_xedge(sim->fields[GR_FIELD_A_X].curr, W, H, dx, x, y)
-        : cic_interp_xedge   (sim->fields[GR_FIELD_A_X].curr, W, H, dx, x, y);
-    const float Ax_prev = use_tsc
-        ? gr_tsc_interp_xedge(sim->fields[GR_FIELD_A_X].prev, W, H, dx, x, y)
-        : cic_interp_xedge   (sim->fields[GR_FIELD_A_X].prev, W, H, dx, x, y);
-    const float Ay_curr = use_tsc
-        ? gr_tsc_interp_yedge(sim->fields[GR_FIELD_A_Y].curr, W, H, dx, x, y)
-        : cic_interp_yedge   (sim->fields[GR_FIELD_A_Y].curr, W, H, dx, x, y);
-    const float Ay_prev = use_tsc
-        ? gr_tsc_interp_yedge(sim->fields[GR_FIELD_A_Y].prev, W, H, dx, x, y)
-        : cic_interp_yedge   (sim->fields[GR_FIELD_A_Y].prev, W, H, dx, x, y);
+    /* Shape-matched edge interp: bump (when GR_SHAPE_BUMP) / TSC / CIC,
+     * matched to the J-deposit shape so the HE adjoint condition on the
+     * inductive channel holds end-to-end. */
+    const gr_shape_function_t shape = sim->shape_function;
+    const float Rk = sim->kernel_radius;
+    const float Ax_curr =
+        (shape == GR_SHAPE_BUMP) ? gr_bump_interp_xedge(sim->fields[GR_FIELD_A_X].curr, W, H, dx, x, y, Rk) :
+        (shape == GR_SHAPE_TSC)  ? gr_tsc_interp_xedge (sim->fields[GR_FIELD_A_X].curr, W, H, dx, x, y) :
+                                   cic_interp_xedge    (sim->fields[GR_FIELD_A_X].curr, W, H, dx, x, y);
+    const float Ax_prev =
+        (shape == GR_SHAPE_BUMP) ? gr_bump_interp_xedge(sim->fields[GR_FIELD_A_X].prev, W, H, dx, x, y, Rk) :
+        (shape == GR_SHAPE_TSC)  ? gr_tsc_interp_xedge (sim->fields[GR_FIELD_A_X].prev, W, H, dx, x, y) :
+                                   cic_interp_xedge    (sim->fields[GR_FIELD_A_X].prev, W, H, dx, x, y);
+    const float Ay_curr =
+        (shape == GR_SHAPE_BUMP) ? gr_bump_interp_yedge(sim->fields[GR_FIELD_A_Y].curr, W, H, dx, x, y, Rk) :
+        (shape == GR_SHAPE_TSC)  ? gr_tsc_interp_yedge (sim->fields[GR_FIELD_A_Y].curr, W, H, dx, x, y) :
+                                   cic_interp_yedge    (sim->fields[GR_FIELD_A_Y].curr, W, H, dx, x, y);
+    const float Ay_prev =
+        (shape == GR_SHAPE_BUMP) ? gr_bump_interp_yedge(sim->fields[GR_FIELD_A_Y].prev, W, H, dx, x, y, Rk) :
+        (shape == GR_SHAPE_TSC)  ? gr_tsc_interp_yedge (sim->fields[GR_FIELD_A_Y].prev, W, H, dx, x, y) :
+                                   cic_interp_yedge    (sim->fields[GR_FIELD_A_Y].prev, W, H, dx, x, y);
     *dAx_out = s * (Ax_curr - Ax_prev) * inv_dt;
     *dAy_out = s * (Ay_curr - Ay_prev) * inv_dt;
 }

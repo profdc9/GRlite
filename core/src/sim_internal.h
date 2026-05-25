@@ -305,6 +305,14 @@ float gr_bump_interp_corner(const float* arr, int W, int H, float dx,
 void  gr_bump_lb_grad_corner(const float* arr, int W, int H, float dx,
                               float x_p, float y_p, float R,
                               float* gx_out, float* gy_out);
+float gr_bump_interp_xedge(const float* arr, int W, int H, float dx,
+                            float x_p, float y_p, float R);
+float gr_bump_interp_yedge(const float* arr, int W, int H, float dx,
+                            float x_p, float y_p, float R);
+int   gr_bump_esirkepov_deposit_jxy(float* Jx, float* Jy,
+                                    int W, int H, float dx, float dt,
+                                    float x0, float y0, float x1, float y1,
+                                    float source, float R);
 
 float gr_tsc_lb_dx_xedge(const float* arr, int W, int H, float dx,
                          float x_p, float y_p);

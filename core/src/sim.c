@@ -215,17 +215,23 @@ void gr_sim_step(gr_sim_t* sim) {
             const float y1     = p->y + jdy;
             int violated = 0;
             if (sim->esirkepov_enabled) {
+                const int use_bump = (sim->shape_function == GR_SHAPE_BUMP);
+                const float Rk_j  = sim->kernel_radius;
                 if (p->mass != 0.0f) {
-                    if (!gr_esirkepov_deposit_jxy(sim->J_mx, sim->J_my, W, H, dx, dt,
-                                                  x0, y0, x1, y1, p->mass)) {
-                        violated = 1;
-                    }
+                    const int ok = use_bump
+                        ? gr_bump_esirkepov_deposit_jxy(sim->J_mx, sim->J_my, W, H, dx, dt,
+                                                        x0, y0, x1, y1, p->mass, Rk_j)
+                        : gr_esirkepov_deposit_jxy     (sim->J_mx, sim->J_my, W, H, dx, dt,
+                                                        x0, y0, x1, y1, p->mass);
+                    if (!ok) violated = 1;
                 }
                 if (p->charge != 0.0f) {
-                    if (!gr_esirkepov_deposit_jxy(sim->J_qx, sim->J_qy, W, H, dx, dt,
-                                                  x0, y0, x1, y1, p->charge)) {
-                        violated = 1;
-                    }
+                    const int ok = use_bump
+                        ? gr_bump_esirkepov_deposit_jxy(sim->J_qx, sim->J_qy, W, H, dx, dt,
+                                                        x0, y0, x1, y1, p->charge, Rk_j)
+                        : gr_esirkepov_deposit_jxy     (sim->J_qx, sim->J_qy, W, H, dx, dt,
+                                                        x0, y0, x1, y1, p->charge);
+                    if (!ok) violated = 1;
                 }
             }
             if (!sim->esirkepov_enabled || violated) {
