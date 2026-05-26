@@ -536,6 +536,24 @@ int gr_sim_get_em_magnetic_enabled(const gr_sim_t* sim) {
     return sim ? sim->em_magnetic_enabled : 0;
 }
 
+/* Apply the recommended pedagogical defaults bundle.
+ * See gr_sandbox_v38 sec kernel_design for empirical justification:
+ *   - GR_SHAPE_BUMP at R=6 gives ~5-15x better self-force suppression
+ *     than the bare CIC/TSC defaults across orbital v.
+ *   - LEWIS_BIRDSALL force interp is uniformly better than LEGACY
+ *     (Stage 18 result).
+ *   - PML width 16 cells absorbs outgoing waves with O(0.1%) reflection.
+ *   - particle_source_deposition = 1 is what closed-loop PIC needs;
+ *     leaving it 0 is a footgun (particles wouldn't deposit at all). */
+void gr_sim_use_pedagogical_defaults(gr_sim_t* sim) {
+    if (!sim) return;
+    gr_sim_set_shape_function(sim, GR_SHAPE_BUMP);
+    gr_sim_set_kernel_radius(sim, 6.0f);
+    gr_sim_set_force_interp(sim, GR_FORCE_INTERP_LEWIS_BIRDSALL);
+    gr_sim_set_particle_source_deposition(sim, 1);
+    gr_sim_set_damping(sim, 16);
+}
+
 void gr_sim_set_kernel_radius(gr_sim_t* sim, float r) {
     if (!sim) return;
     if (r < 0.5f) r = 0.5f;       /* below 0.5: degenerate / single-cell */

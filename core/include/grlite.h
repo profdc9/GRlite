@@ -130,6 +130,20 @@ float gr_sim_get_G_eff(const gr_sim_t* sim);
 void  gr_sim_set_k_e(gr_sim_t* sim, float k_e);
 float gr_sim_get_k_e(const gr_sim_t* sim);
 
+/* Apply the recommended pedagogical defaults: bump kernel with
+ * radius R=6, Lewis-Birdsall force interpolation, particle source
+ * deposition enabled, PML width 16, half-step A potentials.  These
+ * are the settings that "generally work" for closed-loop PIC and
+ * orbital demonstrations across both EM and GR sectors (v38).
+ *
+ * Use this RIGHT AFTER gr_sim_create.  Particle insertions, background
+ * generators, and any test-specific overrides should come AFTER this
+ * call.  Tests that need to exercise a specific non-default knob
+ * (CIC for Esirkepov continuity test, LEGACY force interp for
+ * regression, etc.) should NOT call this and instead set their
+ * required knobs explicitly. */
+void gr_sim_use_pedagogical_defaults(gr_sim_t* sim);
+
 /* Free the simulation. Safe to pass NULL. */
 void gr_sim_destroy(gr_sim_t* sim);
 
