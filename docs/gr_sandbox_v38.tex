@@ -520,6 +520,54 @@ convolution cost is constant in particle count.
 
 Both paths are now production-ready and validated.
 
+\subsubsection*{Tier-2 gap closure (commit e571c54)}
+
+After the initial Tier-2 commit, an audit revealed three partial-
+coverage gaps:
+
+\begin{enumerate}
+  \item \texttt{B\_em\_z\_at\_total} and \texttt{B\_g\_z\_at\_total}
+    (curl $\vv A$ for the $v\times \vv B$ Lorentz force) used a
+    centered-difference + CIC interp gather (\texttt{curl\_Agz\_sampled\_at})
+    with no shape dispatch.
+  \item \texttt{grav\_grad\_at\_lb} (gravity-side $\nabla\Phi_g$
+    gather) had TSC and CIC branches but no BUMP.
+  \item \texttt{dt\_A\_g\_at\_total} (gravity-side $\partial_t\vv A_g$
+    edge interp) had only CIC.
+\end{enumerate}
+
+All three closed by:
+\begin{itemize}
+  \item Four new bump-LB mixed-axis edge gathers in deposit.c:
+    \texttt{gr\_bump\_lb\_dx\_xedge}, \texttt{\_dy\_xedge},
+    \texttt{\_dx\_yedge}, \texttt{\_dy\_yedge}.
+  \item New \texttt{bump\_curl\_Az\_at} helper in particle.c that
+    computes $B_z = \partial_x A_y - \partial_y A_x$ via the bump-LB
+    mixed gathers.  Used by both \texttt{B\_em\_z\_at\_total} and
+    \texttt{B\_g\_z\_at\_total} when shape=BUMP.
+  \item BUMP branches added to \texttt{grav\_grad\_at\_lb} and
+    \texttt{dt\_A\_g\_at\_total}, parallel to the existing EM-side
+    BUMP branches.
+\end{itemize}
+
+After gap closure (Stage 45 EM, Stage 46 GR Kepler):
+\begin{center}
+\begin{tabular}{lrrrr}
+\toprule
+config & EM (before) & EM (after) & GR (before) & GR (after) \\
+\midrule
+TSC bare       & $-5.60\%$ & $-5.60\%$ & $-8.78\%$ & $-8.78\%$ \\
+TSC $+$ $N=16$ & $-2.46\%$ & $-2.46\%$ & $-2.32\%$ & $-2.32\%$ \\
+BUMP $R=6$     & $-3.24\%$ & $-2.43\%$ & $-3.00\%$ & $-2.11\%$ \\
+BUMP $R=8$     & $-2.80\%$ & $-2.34\%$ & $-2.30\%$ & $-2.05\%$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Bump $R=8$ now slightly beats TSC $+$ $N=16$ on both sectors -- the
+HE adjoint pair is matched end-to-end and the bump approach is the
+better choice in addition to being cheaper per step.
+
 \newpage
 
 %====================================================================
