@@ -384,42 +384,7 @@ typedef enum {
 void                gr_sim_set_em_inductive_disc(gr_sim_t* sim, gr_inductive_disc_t kind);
 gr_inductive_disc_t gr_sim_get_em_inductive_disc(const gr_sim_t* sim);
 
-/* Particle pusher selection (v37 gempic_derivation).  Default
- * GR_PUSHER_BORIS preserves all existing behaviour; GR_PUSHER_GEMPIC
- * activates the experimental canonical-momentum push (track
- * p_c = gamma m v + q A; force = q v_j d_i A_j - q d_i phi; no d_t A,
- * no explicit v x B for the EM piece).  GEMPIC is a one-off
- * empirical probe — Fourier analysis indicates the structural
- * cancellation argument was incomplete and the residual force at
- * non-relativistic v is essentially the same as the current scheme's
- * phi-only residual.  This flag is the empirical test of that
- * prediction.  The Boris path is unchanged. */
-typedef enum {
-    GR_PUSHER_BORIS  = 0,   /* default; existing relativistic Boris-leapfrog */
-    GR_PUSHER_GEMPIC = 1    /* canonical-momentum leapfrog */
-} gr_pusher_kind_t;
-void              gr_sim_set_pusher(gr_sim_t* sim, gr_pusher_kind_t kind);
-gr_pusher_kind_t  gr_sim_get_pusher(const gr_sim_t* sim);
 
-/* DIAGNOSTIC: shift the EM field-gather position relative to the
- * particle deposit position by `lead * v * dt` in the direction of
- * motion.  Default 0 (gather at the particle's actual position,
- * current behavior).
- *
- * Probes the hypothesis (from the Fourier analysis in v37
- * gempic_addendum) that the discrete wake's center of symmetry is
- * offset from the particle position by some fraction of a step.  If
- * there is an optimal `lead` value that makes the spurious force on
- * a uniformly-moving charge vanish, that value tells us where the
- * discrete wake actually sits relative to the particle, and offers
- * a deposit-side mitigation for Stage 37's structural failure.
- *
- * Affects only the EM Lorentz force gathers (phi gradient, B = curl A,
- * d_t A in Boris mode, all grad-A in GEMPIC mode).  Does NOT affect
- * the deposit (charge / current are deposited at the actual particle
- * position) or the gravity gathers.  No effect when lead = 0. */
-void  gr_sim_set_phi_gather_lead(gr_sim_t* sim, float lead);
-float gr_sim_get_phi_gather_lead(const gr_sim_t* sim);
 
 /* Sign of the inductive piece in the force law -- DIAGNOSTIC ONLY,
  * default is +1.0 (the variationally-derived sign of -q d_t A).

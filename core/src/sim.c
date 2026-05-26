@@ -75,8 +75,6 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
     sim->j_deposit_shift               = 0.0f;
     sim->j_smooth_passes               = 0;
     sim->em_inductive_disc             = GR_INDUCTIVE_CENTERED;
-    sim->pusher                        = GR_PUSHER_BORIS;
-    sim->phi_gather_lead               = 0.0f;
     sim->kernel_radius                 = 1.5f;
     sim->em_inductive_sign             = +1.0f;
     sim->grav_inductive_sign           = +1.0f;
@@ -613,20 +611,6 @@ void gr_sim_set_em_inductive_sign(gr_sim_t* sim, float sign) {
 }
 float gr_sim_get_em_inductive_sign(const gr_sim_t* sim) {
     return sim ? sim->em_inductive_sign : 1.0f;
-}
-void gr_sim_set_pusher(gr_sim_t* sim, gr_pusher_kind_t kind) {
-    if (!sim) return;
-    sim->pusher = kind;
-}
-gr_pusher_kind_t gr_sim_get_pusher(const gr_sim_t* sim) {
-    return sim ? sim->pusher : GR_PUSHER_BORIS;
-}
-void gr_sim_set_phi_gather_lead(gr_sim_t* sim, float lead) {
-    if (!sim) return;
-    sim->phi_gather_lead = lead;
-}
-float gr_sim_get_phi_gather_lead(const gr_sim_t* sim) {
-    return sim ? sim->phi_gather_lead : 0.0f;
 }
 void gr_sim_set_kernel_radius(gr_sim_t* sim, float r) {
     if (!sim) return;
