@@ -568,6 +568,31 @@ Bump $R=8$ now slightly beats TSC $+$ $N=16$ on both sectors -- the
 HE adjoint pair is matched end-to-end and the bump approach is the
 better choice in addition to being cheaper per step.
 
+\subsubsection*{Convenience API: \texttt{gr\_sim\_use\_pedagogical\_defaults}}
+
+After the cleanup of debugging knobs (commits 5735ef7, d4f1f5a), a
+single convenience function applies the recommended pedagogical
+configuration in one call:
+
+\begin{eqbox}
+\begin{verbatim}
+gr_sim_t* sim = gr_sim_create(W, H, dx, c_eff, cfl);
+gr_sim_use_pedagogical_defaults(sim);
+// ... add particles, background, etc.
+\end{verbatim}
+\end{eqbox}
+
+The bundle sets: \texttt{shape\_function = GR\_SHAPE\_BUMP},
+\texttt{kernel\_radius = 6.0}, \texttt{force\_interp = LEWIS\_BIRDSALL},
+\texttt{particle\_source\_deposition = 1}, \texttt{damping = 16}.
+Tests that need to exercise a specific non-default knob (Stage 11
+for CIC Esirkepov continuity, Stage 18 for LB regression, etc.)
+should NOT call this and instead set required knobs explicitly.
+
+\texttt{gr\_sim\_create} defaults are NOT changed; this is a
+strictly additive convenience.  Existing tests' calibrations hold.
+Migration to the bundle is incremental and per-test as appropriate.
+
 \newpage
 
 %====================================================================
