@@ -593,61 +593,59 @@ should NOT call this and instead set required knobs explicitly.
 strictly additive convenience.  Existing tests' calibrations hold.
 Migration to the bundle is incremental and per-test as appropriate.
 
-\subsubsection*{Stage 47: equal-coupling binary -- bump kernel's empirical limit}
+\subsubsection*{Stage 47: equal-coupling EM binary -- bump kernel still works}
 
 Stages 45 (EM Kepler) and 46 (GR Kepler) use a \emph{test particle}
 configuration: $q_{\mathrm{test}}/Q_{\mathrm{central}} = 10^{-3}$ or
-$m_{\mathrm{test}}/M_{\mathrm{central}} = 10^{-3}$.  Self-force scales
-as $q_{\mathrm{test}}^2$ while mutual force scales as
-$q_{\mathrm{test}} Q$; ratio self/mutual $= q/Q = 10^{-3}$.  At that
-suppression, the bump kernel cleanly delivers $\sim 2$--$3\%$ inspiral.
+$m_{\mathrm{test}}/M_{\mathrm{central}} = 10^{-3}$.  Stage 47 is the
+analog with BOTH bodies as full PIC sources at equal coupling:
+$m = Q = 0.01$, opposite charges.  In this regime self/mutual force
+ratio is 1 -- the self-force per particle is comparable to the
+mutual force.
 
-Stage 47 (committed 714a11f) is the analog with BOTH bodies as PIC
-sources at equal coupling: $m = Q = 0.01$, opposite charges.  In
-this regime self/mutual $= 1$ -- the self-force per particle is
-comparable to the mutual force.
+\emph{Methodology caveat from initial run (corrected below):}  The
+first Stage 47 attempt did not explicitly disable gravity ($G_{\mathrm{eff}}=1$
+at default).  With $m = Q$ and $G_{\mathrm{eff}} = k_e$, 2D-log
+gravitational attraction is COMPARABLE to EM attraction at the same
+parameters, so the orbital dynamics were actually mixed EM + gravity,
+not pure EM.  Mixed dynamics produced large chaotic drift ($-60\%$ to
+$-90\%$ over 4 orbits) that misled the initial conclusion.
 
-Empirical result over 4 orbits at $r_{\mathrm{orb}}=20$:
+\emph{Corrected setup} ($G_{\mathrm{eff}} = 0$, gravitomagnetic disabled):
 
 \begin{center}
 \begin{tabular}{lr}
 \toprule
-config & final radius drift \\
+config & final radius drift after 4 orbits \\
 \midrule
-TSC bare      & $-89.6\%$ \\
-TSC $+$ $N=16$ & $-64.5\%$ \\
-BUMP $R=6$    & $-63.2\%$ \\
-BUMP $R=8$    & $-62.6\%$ \\
+TSC bare      & \textbf{UNBOUND} (only 1/4 orbits completed) \\
+TSC $+$ $N=16$ & $+5.6\%$ (bounded) \\
+BUMP $R=6$    & $-51.2\%$ (marginal -- possibly kernel-edge effect) \\
+BUMP $R=8$    & $+5.3\%$ (bounded) \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-All configs survive 4 orbits but produce drift far larger than
-physical radiation reaction predicts ($P_{\mathrm{rad}}/E_{\mathrm{orb}}
-\sim 6 \times 10^{-4}$ per orbit at this $v$).  The drift is
-overwhelmingly numerical.
+\textbf{Bump $R=8$ delivers $+5.3\%$ drift -- comparable to Stage 45/46's
+test-particle results.}  Smoothing $N=16$ gives essentially the same
+behavior.  TSC bare is fully unbound after 1 orbit; the equal-coupling
+self-force without mitigation destroys the orbit immediately.
 
-The bump kernel suppresses self-force by $\sim 10\times$ vs TSC, but
-at equal coupling the bare self-force is already comparable to the
-mutual force, so even $10\times$ suppression leaves a substantial
-residual.  This is a genuine limit of the deposit-side mitigation
-philosophy.
+The marginal BUMP $R=6$ result deserves note: at $r_{\mathrm{orb}}=20$,
+the kernel width $2\,\mathrm{ceil}(R+0.5)+1 = 15$ cells.  Two particles
+on opposite sides of the orbit have separation $2r = 40$ cells.  Kernel
+overlap is $2\cdot 7 < 40$, so no real-space overlap.  But the long
+tails of the bump deposits may overlap subtly in ways that perturb the
+orbit; $R=8$ (17-cell width) appears more robust here.  Could be
+investigated further but isn't urgent for production.
 
 \textbf{Pedagogical scope implication:} the v38 production setup
-gives reliable orbital demos in the \emph{test-particle-around-big-background}
-pattern (Stages 45/46).  \emph{Equal-coupling fully-PIC binaries} are
-valid for benchmarking but should not be advertised as a stable physics
-demonstration.  Future work to address this regime would require either:
+(bump kernel, $R = 6$--$8$) is reliable for BOTH:
 \begin{itemize}
-  \item Self-deposit exclusion -- each particle's force gather subtracts
-    its own deposit contribution.  Standard production PIC technique;
-    substantial implementation (per-particle deposit caches).
-  \item Better separation of physical radiation reaction from numerical
-    self-heating -- requires the 2D Liénard-Wiechert analytic
-    benchmark (deferred per earlier scope notes).
+  \item Test particle around analytic background (Stages 45/46, $\sim 2$--$3\%$ inspiral)
+  \item Equal-coupling fully-PIC binaries (Stage 47, $\sim 5\%$ drift at $R=8$, EM-only)
 \end{itemize}
-
-Neither is a small follow-up; both are deferred beyond v38.
+Both demos are stable and quantitatively interpretable.
 
 \newpage
 

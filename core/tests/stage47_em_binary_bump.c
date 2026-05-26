@@ -66,6 +66,11 @@ static void run_binary_orbit(int n_orbits,
     gr_sim_set_force_interp(sim, GR_FORCE_INTERP_LEWIS_BIRDSALL);
     gr_sim_set_rho_smooth_passes(sim, rho_smooth);
     gr_sim_set_j_smooth_passes(sim, rho_smooth);
+    /* PURE-EM test: disable gravity (default G_eff=1 would otherwise
+     * give 2D-log gravitational attraction comparable to EM at m=Q). */
+    gr_sim_set_G_eff(sim, 0.0f);
+    gr_sim_set_gravitomagnetic_force_enabled(sim, 0);
+    gr_sim_set_gravitomagnetic_inductive_enabled(sim, 0);
 
     for (int k = 0; k <= n_orbits; k++) out->r_at_orbit[k] = 0.0f;
     {
