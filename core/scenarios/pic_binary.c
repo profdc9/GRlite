@@ -74,6 +74,14 @@ static int build_pic_binary(gr_sim_t* sim, const float* params, int n_params) {
      * difference matters most. */
     gr_sim_set_shape_function(sim, GR_SHAPE_TSC);
     gr_sim_set_force_interp(sim, GR_FORCE_INTERP_LEWIS_BIRDSALL);
+    /* Enable ALL gravity force pieces: -m grad Phi_g, +4 m v x B_g, and
+     * -m d_t A_g.  This mirrors pic_binary_em's setup, where -q grad phi,
+     * +q v x B, and -q d_t A are all on.  The first two are on by default
+     * via gravitomagnetic_force_enabled = 1; the d_t A_g piece defaults
+     * OFF (since most pre-v37 tests didn't want it), so we enable it
+     * explicitly here.  Stage 28 verified that d_t A_g works correctly. */
+    gr_sim_set_gravitomagnetic_force_enabled(sim, 1);
+    gr_sim_set_gravitomagnetic_inductive_enabled(sim, 1);
 
     /* Two particles counter-orbiting around (cx, cy).
      *   p0 at (cx - r, cy), velocity (0, +v)

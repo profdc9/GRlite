@@ -86,6 +86,10 @@ static int test_free_fall(void) {
     TEST_ASSERT(gr_sim_load_scenario(sim, "pic_binary", params, 3) == 0,
                 "pic_binary load failed");
     TEST_ASSERT(gr_sim_particle_count(sim) == 2, "expected 2 particles");
+    /* Stage 12 predates the gravitomagnetic d_t A_g piece; scenario now
+     * enables it by default (to mirror EM), so disable here to preserve
+     * the original pre-mitigation diagnostic behavior. */
+    gr_sim_set_gravitomagnetic_inductive_enabled(sim, 0);
 
     const float cx = (float) (W / 2) * dx;
     const float cy = (float) (H / 2) * dx;
@@ -158,6 +162,7 @@ static int test_short_orbit(void) {
     const float params[2] = {mass, r_orb};
     TEST_ASSERT(gr_sim_load_scenario(sim, "pic_binary", params, 2) == 0,
                 "pic_binary load failed");
+    gr_sim_set_gravitomagnetic_inductive_enabled(sim, 0);
 
     const float cx = (float) (W / 2) * dx;
     const float cy = (float) (H / 2) * dx;
@@ -276,6 +281,7 @@ static int test_v_orb_independent_of_r(void) {
         const float params[2] = {mass, r_orb};
         TEST_ASSERT(gr_sim_load_scenario(sim, "pic_binary", params, 2) == 0,
                     "scenario load failed at r=%g", r_orb);
+        gr_sim_set_gravitomagnetic_inductive_enabled(sim, 0);
 
         const float cx = (float) (W / 2) * dx;
         const float cy = (float) (H / 2) * dx;
@@ -369,6 +375,7 @@ static int test_long_orbit_weak_coupling(void) {
     const float params[2] = {mass, r_orb};
     TEST_ASSERT(gr_sim_load_scenario(sim, "pic_binary", params, 2) == 0,
                 "scenario load failed");
+    gr_sim_set_gravitomagnetic_inductive_enabled(sim, 0);
 
     const float cx = (float) (W / 2) * dx;
     const float cy = (float) (H / 2) * dx;

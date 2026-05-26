@@ -26,8 +26,7 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-static void run(const char* tag, gr_shape_function_t shape, float Rk, int smooth,
-                 int gravitomag_inductive) {
+static void run(const char* tag, gr_shape_function_t shape, float Rk, int smooth) {
     const int   W = 256, H = 256;
     const float dx = 1.0f, c_eff = 1.0f, cfl = 1.0f / sqrtf(2.0f);
     const float mass = 1.0f, r_orb = 20.0f * dx;
@@ -50,11 +49,9 @@ static void run(const char* tag, gr_shape_function_t shape, float Rk, int smooth
     gr_sim_set_force_interp(sim, GR_FORCE_INTERP_LEWIS_BIRDSALL);
     gr_sim_set_rho_smooth_passes(sim, smooth);
     gr_sim_set_j_smooth_passes(sim, smooth);
-    /* Per-call: toggle gravitomagnetic inductive (-m d_t A_g) and force
-     * (-4 m v x B_g).  Both default OFF in pic_binary; turning them on
-     * adds the gravity analog of EM's inductive piece. */
-    gr_sim_set_gravitomagnetic_inductive_enabled(sim, gravitomag_inductive);
-    gr_sim_set_gravitomagnetic_force_enabled(sim, gravitomag_inductive);
+    /* pic_binary now enables ALL gravity force pieces (grad Phi_g,
+     * 4 m v x B_g, d_t A_g) to mirror pic_binary_em's setup.  Nothing
+     * to toggle here. */
 
     const float dt = gr_sim_dt(sim);
     const int n_steps = (int)((float)n_orbits * T_ana / dt);
@@ -113,16 +110,11 @@ static void run(const char* tag, gr_shape_function_t shape, float Rk, int smooth
 
 int main(void) {
     printf("=== stage49_gr_binary_conservation (parallel of Stage 48 Case C) ===\n");
-    printf("m=1.0, G_eff=1e-4, v_orb=0.01, r=20.  4 orbits.  PURE GRAVITY.\n\n");
-    printf("--- (1) static gravity only (gravitomagnetic inductive OFF) ---\n");
-    run("TSC bare",     GR_SHAPE_TSC,  0.0f, 0,  0);
-    run("TSC + N=16",   GR_SHAPE_TSC,  0.0f, 16, 0);
-    run("BUMP R=6",     GR_SHAPE_BUMP, 6.0f, 0,  0);
-    run("BUMP R=8",     GR_SHAPE_BUMP, 8.0f, 0,  0);
-    printf("\n--- (2) gravitomagnetic inductive ON (gravity analog of EM's d_t A) ---\n");
-    run("TSC bare",     GR_SHAPE_TSC,  0.0f, 0,  1);
-    run("TSC + N=16",   GR_SHAPE_TSC,  0.0f, 16, 1);
-    run("BUMP R=6",     GR_SHAPE_BUMP, 6.0f, 0,  1);
-    run("BUMP R=8",     GR_SHAPE_BUMP, 8.0f, 0,  1);
+    printf("m=1.0, G_eff=1e-4, v_orb=0.01, r=20.  4 orbits.  PURE GRAVITY.\n");
+    printf("All gravity force terms ON (grad Phi_g, 4 m v x B_g, d_t A_g).\n\n");
+    run("TSC bare",     GR_SHAPE_TSC,  0.0f, 0);
+    run("TSC + N=16",   GR_SHAPE_TSC,  0.0f, 16);
+    run("BUMP R=6",     GR_SHAPE_BUMP, 6.0f, 0);
+    run("BUMP R=8",     GR_SHAPE_BUMP, 8.0f, 0);
     return 0;
 }
