@@ -593,6 +593,62 @@ should NOT call this and instead set required knobs explicitly.
 strictly additive convenience.  Existing tests' calibrations hold.
 Migration to the bundle is incremental and per-test as appropriate.
 
+\subsubsection*{Stage 47: equal-coupling binary -- bump kernel's empirical limit}
+
+Stages 45 (EM Kepler) and 46 (GR Kepler) use a \emph{test particle}
+configuration: $q_{\mathrm{test}}/Q_{\mathrm{central}} = 10^{-3}$ or
+$m_{\mathrm{test}}/M_{\mathrm{central}} = 10^{-3}$.  Self-force scales
+as $q_{\mathrm{test}}^2$ while mutual force scales as
+$q_{\mathrm{test}} Q$; ratio self/mutual $= q/Q = 10^{-3}$.  At that
+suppression, the bump kernel cleanly delivers $\sim 2$--$3\%$ inspiral.
+
+Stage 47 (committed 714a11f) is the analog with BOTH bodies as PIC
+sources at equal coupling: $m = Q = 0.01$, opposite charges.  In
+this regime self/mutual $= 1$ -- the self-force per particle is
+comparable to the mutual force.
+
+Empirical result over 4 orbits at $r_{\mathrm{orb}}=20$:
+
+\begin{center}
+\begin{tabular}{lr}
+\toprule
+config & final radius drift \\
+\midrule
+TSC bare      & $-89.6\%$ \\
+TSC $+$ $N=16$ & $-64.5\%$ \\
+BUMP $R=6$    & $-63.2\%$ \\
+BUMP $R=8$    & $-62.6\%$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+All configs survive 4 orbits but produce drift far larger than
+physical radiation reaction predicts ($P_{\mathrm{rad}}/E_{\mathrm{orb}}
+\sim 6 \times 10^{-4}$ per orbit at this $v$).  The drift is
+overwhelmingly numerical.
+
+The bump kernel suppresses self-force by $\sim 10\times$ vs TSC, but
+at equal coupling the bare self-force is already comparable to the
+mutual force, so even $10\times$ suppression leaves a substantial
+residual.  This is a genuine limit of the deposit-side mitigation
+philosophy.
+
+\textbf{Pedagogical scope implication:} the v38 production setup
+gives reliable orbital demos in the \emph{test-particle-around-big-background}
+pattern (Stages 45/46).  \emph{Equal-coupling fully-PIC binaries} are
+valid for benchmarking but should not be advertised as a stable physics
+demonstration.  Future work to address this regime would require either:
+\begin{itemize}
+  \item Self-deposit exclusion -- each particle's force gather subtracts
+    its own deposit contribution.  Standard production PIC technique;
+    substantial implementation (per-particle deposit caches).
+  \item Better separation of physical radiation reaction from numerical
+    self-heating -- requires the 2D Liénard-Wiechert analytic
+    benchmark (deferred per earlier scope notes).
+\end{itemize}
+
+Neither is a small follow-up; both are deferred beyond v38.
+
 \newpage
 
 %====================================================================
