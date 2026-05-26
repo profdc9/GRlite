@@ -147,6 +147,26 @@ static void grav_grad_at_lb(const struct gr_sim* sim, float x, float y,
                             ? sim->fields[GR_FIELD_PHI_GRAV].prev
                             : sim->fields[GR_FIELD_PHI_GRAV].curr;
 
+    if (sim->shape_function == GR_SHAPE_BUMP) {
+        /* Bump LB grad on CORNER -- gravity Phi_g.  Identical structure
+         * to the EM-side bump LB grad; just summing perturbation +
+         * (sampled) background separately. */
+        const float Rk = sim->kernel_radius;
+        float gx_pert = 0.0f, gy_pert = 0.0f;
+        if (bg) {
+            float gx_b, gy_b;
+            gr_bump_lb_grad_corner(bg,   W, H, dx, x, y, Rk, &gx_b,    &gy_b);
+            gr_bump_lb_grad_corner(pert, W, H, dx, x, y, Rk, &gx_pert, &gy_pert);
+            *gx_out = gx_pert + gx_b + gx_bg_ana;
+            *gy_out = gy_pert + gy_b + gy_bg_ana;
+        } else {
+            gr_bump_lb_grad_corner(pert, W, H, dx, x, y, Rk, &gx_pert, &gy_pert);
+            *gx_out = gx_pert + gx_bg_ana;
+            *gy_out = gy_pert + gy_bg_ana;
+        }
+        return;
+    }
+
     if (sim->shape_function == GR_SHAPE_TSC) {
         /* TSC anchor: nearest corner.  u, v in [-1/2, 1/2]. */
         const float xn = x / dx;
@@ -528,6 +548,17 @@ static float curl_Agz_sampled_at(const float* Agx, const float* Agy,
  * falls back to .curr when field evolution is off (static fields).  When
  * the perturbation A_g potentials are unsourced and zero this contributes
  * nothing, preserving Stage 7-21 behavior bit-exactly. */
+/* Bump-shaped curl A at the particle position.  Uses the bump-LB
+ * mixed-axis gathers on edge sublattices to compute
+ *   B_z(x_p) = dA_y/dx (at x_p) - dA_x/dy (at x_p)
+ * with matched-shape adjoint to the bump deposit. */
+static float bump_curl_Az_at(const float* Ax, const float* Ay,
+                              int W, int H, float dx, float x, float y, float R) {
+    const float dAy_dx = gr_bump_lb_dx_yedge(Ay, W, H, dx, x, y, R);
+    const float dAx_dy = gr_bump_lb_dy_xedge(Ax, W, H, dx, x, y, R);
+    return dAy_dx - dAx_dy;
+}
+
 static float B_g_z_at_total(const struct gr_sim* sim, float x, float y) {
     if (!sim || !sim->gravitomagnetic_force_enabled) return 0.0f;
     float bg = 0.0f;
@@ -546,18 +577,35 @@ static float B_g_z_at_total(const struct gr_sim* sim, float x, float y) {
      * values (no rotation, both buffers untouched), so the average reduces
      * to a single-slice read. */
     float pert = 0.0f;
+    const int   bumpW = sim->width;
+    const int   bumpH = sim->height;
+    const float bumpDx = sim->dx;
+    const float bumpR = sim->kernel_radius;
+    const int use_bump = (sim->shape_function == GR_SHAPE_BUMP);
     if (sim->field_evolution_enabled) {
-        const float c1 = curl_Agz_sampled_at(sim->fields[GR_FIELD_A_GX].prev,
-                                             sim->fields[GR_FIELD_A_GY].prev,
-                                             sim->width, sim->height, sim->dx, x, y);
-        const float c2 = curl_Agz_sampled_at(sim->fields[GR_FIELD_A_GX].curr,
-                                             sim->fields[GR_FIELD_A_GY].curr,
-                                             sim->width, sim->height, sim->dx, x, y);
+        const float c1 = use_bump
+            ? bump_curl_Az_at(sim->fields[GR_FIELD_A_GX].prev,
+                              sim->fields[GR_FIELD_A_GY].prev,
+                              bumpW, bumpH, bumpDx, x, y, bumpR)
+            : curl_Agz_sampled_at(sim->fields[GR_FIELD_A_GX].prev,
+                                  sim->fields[GR_FIELD_A_GY].prev,
+                                  sim->width, sim->height, sim->dx, x, y);
+        const float c2 = use_bump
+            ? bump_curl_Az_at(sim->fields[GR_FIELD_A_GX].curr,
+                              sim->fields[GR_FIELD_A_GY].curr,
+                              bumpW, bumpH, bumpDx, x, y, bumpR)
+            : curl_Agz_sampled_at(sim->fields[GR_FIELD_A_GX].curr,
+                                  sim->fields[GR_FIELD_A_GY].curr,
+                                  sim->width, sim->height, sim->dx, x, y);
         pert = 0.5f * (c1 + c2);
     } else {
-        pert = curl_Agz_sampled_at(sim->fields[GR_FIELD_A_GX].curr,
-                                   sim->fields[GR_FIELD_A_GY].curr,
-                                   sim->width, sim->height, sim->dx, x, y);
+        pert = use_bump
+            ? bump_curl_Az_at(sim->fields[GR_FIELD_A_GX].curr,
+                              sim->fields[GR_FIELD_A_GY].curr,
+                              bumpW, bumpH, bumpDx, x, y, bumpR)
+            : curl_Agz_sampled_at(sim->fields[GR_FIELD_A_GX].curr,
+                                  sim->fields[GR_FIELD_A_GY].curr,
+                                  sim->width, sim->height, sim->dx, x, y);
     }
     return bg + pert;
 }
@@ -801,14 +849,25 @@ static void dt_A_g_at_total(const struct gr_sim* sim, float x, float y,
     const float dx = sim->dx;
     const float inv_dt = 1.0f / sim->dt;
 
-    const float Ax_curr = cic_interp_xedge(sim->fields[GR_FIELD_A_GX].curr,
-                                           W, H, dx, x, y);
-    const float Ax_prev = cic_interp_xedge(sim->fields[GR_FIELD_A_GX].prev,
-                                           W, H, dx, x, y);
-    const float Ay_curr = cic_interp_yedge(sim->fields[GR_FIELD_A_GY].curr,
-                                           W, H, dx, x, y);
-    const float Ay_prev = cic_interp_yedge(sim->fields[GR_FIELD_A_GY].prev,
-                                           W, H, dx, x, y);
+    /* Shape-matched edge interp -- gravity-side parallel of dt_A_em. */
+    const gr_shape_function_t shape = sim->shape_function;
+    const float Rk = sim->kernel_radius;
+    const float Ax_curr =
+        (shape == GR_SHAPE_BUMP) ? gr_bump_interp_xedge(sim->fields[GR_FIELD_A_GX].curr, W, H, dx, x, y, Rk) :
+        (shape == GR_SHAPE_TSC)  ? gr_tsc_interp_xedge (sim->fields[GR_FIELD_A_GX].curr, W, H, dx, x, y) :
+                                   cic_interp_xedge    (sim->fields[GR_FIELD_A_GX].curr, W, H, dx, x, y);
+    const float Ax_prev =
+        (shape == GR_SHAPE_BUMP) ? gr_bump_interp_xedge(sim->fields[GR_FIELD_A_GX].prev, W, H, dx, x, y, Rk) :
+        (shape == GR_SHAPE_TSC)  ? gr_tsc_interp_xedge (sim->fields[GR_FIELD_A_GX].prev, W, H, dx, x, y) :
+                                   cic_interp_xedge    (sim->fields[GR_FIELD_A_GX].prev, W, H, dx, x, y);
+    const float Ay_curr =
+        (shape == GR_SHAPE_BUMP) ? gr_bump_interp_yedge(sim->fields[GR_FIELD_A_GY].curr, W, H, dx, x, y, Rk) :
+        (shape == GR_SHAPE_TSC)  ? gr_tsc_interp_yedge (sim->fields[GR_FIELD_A_GY].curr, W, H, dx, x, y) :
+                                   cic_interp_yedge    (sim->fields[GR_FIELD_A_GY].curr, W, H, dx, x, y);
+    const float Ay_prev =
+        (shape == GR_SHAPE_BUMP) ? gr_bump_interp_yedge(sim->fields[GR_FIELD_A_GY].prev, W, H, dx, x, y, Rk) :
+        (shape == GR_SHAPE_TSC)  ? gr_tsc_interp_yedge (sim->fields[GR_FIELD_A_GY].prev, W, H, dx, x, y) :
+                                   cic_interp_yedge    (sim->fields[GR_FIELD_A_GY].prev, W, H, dx, x, y);
     const float s = sim->grav_inductive_sign;
     *dAx_out = s * (Ax_curr - Ax_prev) * inv_dt;
     *dAy_out = s * (Ay_curr - Ay_prev) * inv_dt;
@@ -901,17 +960,31 @@ static float B_em_z_at_total(const struct gr_sim* sim, float x, float y) {
     }
     /* Half-step A convention: same averaging as B_g_z_at_total. */
     float pert = 0.0f;
+    const int use_bump_em = (sim->shape_function == GR_SHAPE_BUMP);
+    const float Rk_em = sim->kernel_radius;
     if (sim->field_evolution_enabled) {
-        const float c1 = curl_Agz_sampled_at(sim->fields[GR_FIELD_A_X].prev,
-                                             sim->fields[GR_FIELD_A_Y].prev,
-                                             sim->width, sim->height, sim->dx, x, y);
-        const float c2 = curl_Agz_sampled_at(sim->fields[GR_FIELD_A_X].curr,
-                                             sim->fields[GR_FIELD_A_Y].curr,
-                                             sim->width, sim->height, sim->dx, x, y);
+        const float c1 = use_bump_em
+            ? bump_curl_Az_at(sim->fields[GR_FIELD_A_X].prev,
+                              sim->fields[GR_FIELD_A_Y].prev,
+                              sim->width, sim->height, sim->dx, x, y, Rk_em)
+            : curl_Agz_sampled_at(sim->fields[GR_FIELD_A_X].prev,
+                                  sim->fields[GR_FIELD_A_Y].prev,
+                                  sim->width, sim->height, sim->dx, x, y);
+        const float c2 = use_bump_em
+            ? bump_curl_Az_at(sim->fields[GR_FIELD_A_X].curr,
+                              sim->fields[GR_FIELD_A_Y].curr,
+                              sim->width, sim->height, sim->dx, x, y, Rk_em)
+            : curl_Agz_sampled_at(sim->fields[GR_FIELD_A_X].curr,
+                                  sim->fields[GR_FIELD_A_Y].curr,
+                                  sim->width, sim->height, sim->dx, x, y);
         pert = 0.5f * (c1 + c2);
     } else {
-        pert = curl_Agz_sampled_at(sim->fields[GR_FIELD_A_X].curr,
-                                   sim->fields[GR_FIELD_A_Y].curr,
+        pert = use_bump_em
+            ? bump_curl_Az_at(sim->fields[GR_FIELD_A_X].curr,
+                              sim->fields[GR_FIELD_A_Y].curr,
+                              sim->width, sim->height, sim->dx, x, y, Rk_em)
+            : curl_Agz_sampled_at(sim->fields[GR_FIELD_A_X].curr,
+                                  sim->fields[GR_FIELD_A_Y].curr,
                                    sim->width, sim->height, sim->dx, x, y);
     }
     return bg + pert;

@@ -688,6 +688,116 @@ float gr_tsc_lb_dy_yedge(const float* arr, int W, int H, float dx,
     return result * inv_dx;
 }
 
+/* Bump-LB mixed-axis gathers on edge sublattices.  Four functions for the
+ * full Tier-2 coverage: d/dx and d/dy of X_EDGE and Y_EDGE fields at the
+ * particle.  Used for the bump-shaped curl A and (in case of future
+ * use) GEMPIC-style force evaluation.  All use the renormalized bump
+ * weights with the corresponding derivative kernel. */
+
+float gr_bump_lb_dx_xedge(const float* arr, int W, int H, float dx,
+                           float x_p, float y_p, float R) {
+    if (!arr) return 0.0f;
+    const int   hw = bump_half_width(R);
+    const float xn = x_p / dx - 0.5f;       /* X_EDGE */
+    const float yn = y_p / dx;
+    const int   ic = (int) floorf(xn + 0.5f);
+    const int   jc = (int) floorf(yn + 0.5f);
+    if (ic < hw || ic > W - 2 - hw || jc < hw || jc > H - 1 - hw) return 0.0f;
+    const float u = xn - (float) ic;
+    const float v = yn - (float) jc;
+    float wx[BUMP_MAX_W], wy[BUMP_MAX_W], dwx[BUMP_MAX_W], dwy_unused[BUMP_MAX_W];
+    bump_dw_1d_R(u, R, hw, wx, dwx);
+    bump_weights_1d_R(v, R, hw, wy);
+    (void) dwy_unused;
+    const float inv_dx = 1.0f / dx;
+    float result = 0.0f;
+    for (int dj = -hw; dj <= hw; dj++) {
+        const int row = (jc + dj) * W;
+        for (int di = -hw; di <= hw; di++) {
+            result += dwx[di + hw] * wy[dj + hw] * arr[row + ic + di];
+        }
+    }
+    return result * inv_dx;
+}
+
+float gr_bump_lb_dy_xedge(const float* arr, int W, int H, float dx,
+                           float x_p, float y_p, float R) {
+    if (!arr) return 0.0f;
+    const int   hw = bump_half_width(R);
+    const float xn = x_p / dx - 0.5f;
+    const float yn = y_p / dx;
+    const int   ic = (int) floorf(xn + 0.5f);
+    const int   jc = (int) floorf(yn + 0.5f);
+    if (ic < hw || ic > W - 2 - hw || jc < hw || jc > H - 1 - hw) return 0.0f;
+    const float u = xn - (float) ic;
+    const float v = yn - (float) jc;
+    float wx[BUMP_MAX_W], wy[BUMP_MAX_W], dwx_unused[BUMP_MAX_W], dwy[BUMP_MAX_W];
+    bump_weights_1d_R(u, R, hw, wx);
+    bump_dw_1d_R(v, R, hw, wy, dwy);
+    (void) dwx_unused;
+    const float inv_dx = 1.0f / dx;
+    float result = 0.0f;
+    for (int dj = -hw; dj <= hw; dj++) {
+        const int row = (jc + dj) * W;
+        for (int di = -hw; di <= hw; di++) {
+            result += wx[di + hw] * dwy[dj + hw] * arr[row + ic + di];
+        }
+    }
+    return result * inv_dx;
+}
+
+float gr_bump_lb_dx_yedge(const float* arr, int W, int H, float dx,
+                           float x_p, float y_p, float R) {
+    if (!arr) return 0.0f;
+    const int   hw = bump_half_width(R);
+    const float xn = x_p / dx;
+    const float yn = y_p / dx - 0.5f;       /* Y_EDGE */
+    const int   ic = (int) floorf(xn + 0.5f);
+    const int   jc = (int) floorf(yn + 0.5f);
+    if (ic < hw || ic > W - 1 - hw || jc < hw || jc > H - 2 - hw) return 0.0f;
+    const float u = xn - (float) ic;
+    const float v = yn - (float) jc;
+    float wx[BUMP_MAX_W], wy[BUMP_MAX_W], dwx[BUMP_MAX_W], dwy_unused[BUMP_MAX_W];
+    bump_dw_1d_R(u, R, hw, wx, dwx);
+    bump_weights_1d_R(v, R, hw, wy);
+    (void) dwy_unused;
+    const float inv_dx = 1.0f / dx;
+    float result = 0.0f;
+    for (int dj = -hw; dj <= hw; dj++) {
+        const int row = (jc + dj) * W;
+        for (int di = -hw; di <= hw; di++) {
+            result += dwx[di + hw] * wy[dj + hw] * arr[row + ic + di];
+        }
+    }
+    return result * inv_dx;
+}
+
+float gr_bump_lb_dy_yedge(const float* arr, int W, int H, float dx,
+                           float x_p, float y_p, float R) {
+    if (!arr) return 0.0f;
+    const int   hw = bump_half_width(R);
+    const float xn = x_p / dx;
+    const float yn = y_p / dx - 0.5f;
+    const int   ic = (int) floorf(xn + 0.5f);
+    const int   jc = (int) floorf(yn + 0.5f);
+    if (ic < hw || ic > W - 1 - hw || jc < hw || jc > H - 2 - hw) return 0.0f;
+    const float u = xn - (float) ic;
+    const float v = yn - (float) jc;
+    float wx[BUMP_MAX_W], wy[BUMP_MAX_W], dwx_unused[BUMP_MAX_W], dwy[BUMP_MAX_W];
+    bump_weights_1d_R(u, R, hw, wx);
+    bump_dw_1d_R(v, R, hw, wy, dwy);
+    (void) dwx_unused;
+    const float inv_dx = 1.0f / dx;
+    float result = 0.0f;
+    for (int dj = -hw; dj <= hw; dj++) {
+        const int row = (jc + dj) * W;
+        for (int di = -hw; di <= hw; di++) {
+            result += wx[di + hw] * dwy[dj + hw] * arr[row + ic + di];
+        }
+    }
+    return result * inv_dx;
+}
+
 /* 1D CIC (W_2) kernel: w(u) = max(1 - |u|, 0). */
 static inline float cic_w1(float u) {
     const float au = (u < 0.0f) ? -u : u;

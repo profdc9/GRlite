@@ -313,6 +313,14 @@ int   gr_bump_esirkepov_deposit_jxy(float* Jx, float* Jy,
                                     int W, int H, float dx, float dt,
                                     float x0, float y0, float x1, float y1,
                                     float source, float R);
+float gr_bump_lb_dx_xedge(const float* arr, int W, int H, float dx,
+                           float x_p, float y_p, float R);
+float gr_bump_lb_dy_xedge(const float* arr, int W, int H, float dx,
+                           float x_p, float y_p, float R);
+float gr_bump_lb_dx_yedge(const float* arr, int W, int H, float dx,
+                           float x_p, float y_p, float R);
+float gr_bump_lb_dy_yedge(const float* arr, int W, int H, float dx,
+                           float x_p, float y_p, float R);
 
 float gr_tsc_lb_dx_xedge(const float* arr, int W, int H, float dx,
                          float x_p, float y_p);
