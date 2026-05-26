@@ -66,10 +66,10 @@ static void run_orbit(float Q, float q_test, float m_test, float r_orb,
     gr_sim_set_em_electrostatic_enabled(sim, 1);
     gr_sim_set_em_inductive_enabled(sim, 1);
     gr_sim_set_em_magnetic_enabled(sim, 1);
-    gr_sim_set_em_inductive_sign(sim, +1.0f);
-    gr_sim_set_em_inductive_disc(sim, GR_INDUCTIVE_CENTERED);
+
+
     /* No J time-correction (raw Esirkepov). */
-    gr_sim_set_j_time_correction_enabled(sim, 0);
+
     /* Analytic background point charge. */
     gr_sim_set_background_point_charge(sim, cx, cy, Q, eps);
     gr_sim_set_bg_mode(sim, GR_BG_MODE_ANALYTIC);

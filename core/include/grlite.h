@@ -341,72 +341,9 @@ int  gr_sim_get_em_electrostatic_enabled(const gr_sim_t* sim);
 void gr_sim_set_em_magnetic_enabled(gr_sim_t* sim, int enabled);
 int  gr_sim_get_em_magnetic_enabled(const gr_sim_t* sim);
 
-/* Diagnostic: shift the Esirkepov J-deposit trajectory by `fraction_of_dt
- * * v * dt`, while leaving rho deposition at the current particle position.
- *
- *   fraction_of_dt = 0.0  (default): J trajectory x^{n-1} -> x^n; midpoint
- *                                    half a step BEHIND rho.
- *   fraction_of_dt = +0.5:           J trajectory centered on x^n; midpoint
- *                                    COLOCATED with rho (predicted optimal
- *                                    for cancellation of -grad phi against
- *                                    -d_t A on a uniformly-moving charge).
- *   fraction_of_dt = +1.0:           J trajectory x^n -> x^{n+1}; midpoint
- *                                    half a step AHEAD of rho.
- *
- * Any nonzero shift BREAKS discrete continuity (Esirkepov's identity holds
- * only when J connects ρ^n and ρ^{n+1}).  Use for diagnostic exploration
- * of the rho/J spatial-mismatch hypothesis (Stage 37); not for production. */
-void  gr_sim_set_j_deposit_shift(gr_sim_t* sim, float fraction_of_dt);
-float gr_sim_get_j_deposit_shift(const gr_sim_t* sim);
-
-/* Discretization for the inductive piece -q d_t A.  Two choices, both
- * exposed for diagnostic comparison:
- *
- *   GR_INDUCTIVE_CENTERED (default; 2nd-order accurate):
- *     (curr - next) / (2 dt) = (A^{n+1} - A^{n-1}) / (2 dt)
- *     Time-CENTER at t^n, but reads A^{n+1} which contains the particle's
- *     OWN current-step deposit.  This makes the self-deposit "visibility"
- *     inconsistent with the spatial-derivative reads (which use .prev =
- *     A^n and so don't contain the current-step deposit), and empirically
- *     causes PIC self-heating in closed-loop dynamics (Stage 27).
- *
- *   GR_INDUCTIVE_BACKWARD (1st-order accurate; closed-loop stable):
- *     (prev - next) / dt = (A^n - A^{n-1}) / dt
- *     Time-CENTER at t^{n-1/2}, but BOTH slices are pre-current-step --
- *     neither A^n nor A^{n-1} contains this step's deposit.  This matches
- *     the .prev convention of the spatial-derivative reads.  The
- *     half-step time mismatch is the standard read-prev-style trade
- *     (cf. Stage 18 read-prev fix for the gravity scalar gradient). */
-typedef enum {
-    GR_INDUCTIVE_CENTERED = 0,
-    GR_INDUCTIVE_BACKWARD = 1
-} gr_inductive_disc_t;
-void                gr_sim_set_em_inductive_disc(gr_sim_t* sim, gr_inductive_disc_t kind);
-gr_inductive_disc_t gr_sim_get_em_inductive_disc(const gr_sim_t* sim);
 
 
 
-/* Sign of the inductive piece in the force law -- DIAGNOSTIC ONLY,
- * default is +1.0 (the variationally-derived sign of -q d_t A).
- *
- * Setting to -1.0 cosmetically rotates Stage 27/30 orbit drift from
- * outspiral to inspiral.  This was once interpreted as a candidate fix
- * (Stage 36) but Stage 37 (uniform-motion KE drift) shows the
- * underlying problem is a STRUCTURAL failure of the discrete
- * -grad phi / -d_t A cancellation on a moving deposit, NOT a sign
- * convention bug.  The sign flip MASKS the orbit-level symptom; it
- * does not address the cancellation failure (still UV-divergent in
- * dx, still worst at low v).
- *
- * Do not set this to -1 to "fix" orbit drift.  Either accept the
- * orbit-level artifact pending the principled fix (GEMPIC canonical-
- * momentum reformulation), or use sim->em_inductive_enabled to gate
- * the broken term entirely.  Symmetric pair for EM (-q d_t A) and
- * gravity (-m d_t A_g) -- same caveat applies to both. */
-void  gr_sim_set_em_inductive_sign(gr_sim_t* sim, float sign);
-float gr_sim_get_em_inductive_sign(const gr_sim_t* sim);
-void  gr_sim_set_gravitomagnetic_inductive_sign(gr_sim_t* sim, float sign);
-float gr_sim_get_gravitomagnetic_inductive_sign(const gr_sim_t* sim);
 
 /* Shapiro delay (Stage 31+).  When enabled, the EM-field leapfrog uses a
  * per-cell wave speed
@@ -436,24 +373,6 @@ float gr_sim_get_gravitomagnetic_inductive_sign(const gr_sim_t* sim);
 void gr_sim_set_em_shapiro_enabled(gr_sim_t* sim, int enabled);
 int  gr_sim_get_em_shapiro_enabled(const gr_sim_t* sim);
 
-/* J time-centering correction (Stage 27/28 diagnostic).
- *
- * Esirkepov produces J^{n-1/2} satisfying discrete continuity with rho at
- * integer steps.  But the wave equation update
- *   A^{n+1} = 2 A^n - A^{n-1} + (c dt)^2 (Lap A^n + sc * src)
- * has its operator centered at integer step n, so the natural source is
- * J^n -- not the half-step-offset J^{n-1/2} we actually feed it.  This
- * is a half-step time-staggering inconsistency baked into the
- * potential-based scheme (standard Yee+Boris avoids it by storing E and
- * B independently with half-step interleaving).
- *
- * When this flag is on, the wave equation source is replaced by a
- * linear-extrapolation estimate of J at integer time:
- *   J^n_approx = 1.5 J^{n-1/2} - 0.5 J^{n-3/2}
- * which is 2nd-order accurate in dt.  Default OFF -- existing tests are
- * calibrated to the raw half-step-staggered behavior. */
-void gr_sim_set_j_time_correction_enabled(gr_sim_t* sim, int enabled);
-int  gr_sim_get_j_time_correction_enabled(const gr_sim_t* sim);
 
 int  gr_sim_add_particle(gr_sim_t* sim, float x, float y,
                          float mass, float charge,

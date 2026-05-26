@@ -67,7 +67,7 @@ typedef struct {
 
 static void run(float Q, float q_test, float m_test, float r_orb,
                 int n_orbits, int field_evolution, int inductive_enabled,
-                gr_inductive_disc_t disc, float inductive_sign,
+                int disc, float inductive_sign,
                 int j_time_correction,
                 result_t* out) {
     const int   W      = 256, H = 256;
@@ -96,9 +96,9 @@ static void run(float Q, float q_test, float m_test, float r_orb,
     gr_sim_set_field_evolution(sim, field_evolution);
     gr_sim_set_particle_source_deposition(sim, field_evolution);
     gr_sim_set_em_inductive_enabled(sim, inductive_enabled);
-    gr_sim_set_em_inductive_disc(sim, disc);
-    gr_sim_set_em_inductive_sign(sim, inductive_sign);
-    gr_sim_set_j_time_correction_enabled(sim, j_time_correction);
+
+
+
     gr_sim_set_background_point_charge(sim, cx, cy, Q, eps);
     gr_sim_set_bg_mode(sim, GR_BG_MODE_ANALYTIC);
     /* CIC + LEGACY: EM gradient path doesn't yet have TSC/LB variants.
@@ -169,29 +169,29 @@ int main(void) {
 
     /* Baseline: field evolution OFF. */
     result_t base;
-    run(Q, q_test, m_test, r_orb, N, 0, 1, GR_INDUCTIVE_CENTERED, +1.0f, 0, &base);
+    run(Q, q_test, m_test, r_orb, N, 0, 1, 0, +1.0f, 0, &base);
     TEST_ASSERT(!base.nan, "baseline went NaN");
     TEST_ASSERT(base.n_completed == N,
                 "baseline didn't complete %d orbits (got %d)", N, base.n_completed);
 
     /* PIC variants: all centered inductive +1 unless noted. */
     result_t pic_centered;
-    run(Q, q_test, m_test, r_orb, N, 1, 1, GR_INDUCTIVE_CENTERED, +1.0f, 0, &pic_centered);
+    run(Q, q_test, m_test, r_orb, N, 1, 1, 0, +1.0f, 0, &pic_centered);
 
     result_t pic_noind;
-    run(Q, q_test, m_test, r_orb, N, 1, 0, GR_INDUCTIVE_CENTERED, +1.0f, 0, &pic_noind);
+    run(Q, q_test, m_test, r_orb, N, 1, 0, 0, +1.0f, 0, &pic_noind);
 
     result_t pic_flip;
-    run(Q, q_test, m_test, r_orb, N, 1, 1, GR_INDUCTIVE_CENTERED, -1.0f, 0, &pic_flip);
+    run(Q, q_test, m_test, r_orb, N, 1, 1, 0, -1.0f, 0, &pic_flip);
 
     /* NEW: J time-correction enabled (option a from the audit). */
     result_t pic_jt;
-    run(Q, q_test, m_test, r_orb, N, 1, 1, GR_INDUCTIVE_CENTERED, +1.0f, 1, &pic_jt);
+    run(Q, q_test, m_test, r_orb, N, 1, 1, 0, +1.0f, 1, &pic_jt);
 
     /* No inductive + J time-correction (clean radiation-reaction with
      * corrected source timing). */
     result_t pic_jt_noind;
-    run(Q, q_test, m_test, r_orb, N, 1, 0, GR_INDUCTIVE_CENTERED, +1.0f, 1, &pic_jt_noind);
+    run(Q, q_test, m_test, r_orb, N, 1, 0, 0, +1.0f, 1, &pic_jt_noind);
 
     printf("Radius drift at each pi-wrap:\n");
     printf("  %-7s %-10s %-12s %-12s %-12s %-14s %-14s\n",

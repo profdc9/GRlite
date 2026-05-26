@@ -77,8 +77,8 @@ static void run(float GM, float m_test, float r_orb, int n_orbits,
     gr_sim_set_rho_smooth_passes(sim, 4);
     /* The diagnostic switches. */
     gr_sim_set_gravitomagnetic_inductive_enabled(sim, grav_inductive_enabled);
-    gr_sim_set_gravitomagnetic_inductive_sign(sim, inductive_sign);
-    gr_sim_set_j_time_correction_enabled(sim, j_time_correction);
+
+
 
     gr_sim_add_particle(sim, cx + r_orb, cy, m_test, /*charge=*/0.0f,
                         /*vx=*/0.0f, /*vy=*/v_circ);

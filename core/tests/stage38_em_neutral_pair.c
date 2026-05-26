@@ -112,8 +112,8 @@ static pair_result_t run_neutral_pair(float v_drift, int sep_cells, float Q, flo
     gr_sim_set_em_electrostatic_enabled(sim, 1);
     gr_sim_set_em_inductive_enabled(sim, 1);
     gr_sim_set_em_magnetic_enabled(sim, 1);
-    gr_sim_set_em_inductive_sign(sim, +1.0f);   /* variationally correct */
-    gr_sim_set_j_deposit_shift(sim, 0.0f);
+
+
 
     gr_sim_add_particle(sim, xp, cy, mass, +Q, 0.0f, v_drift);
     gr_sim_add_particle(sim, xn, cy, mass, -Q, 0.0f, v_drift);

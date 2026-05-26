@@ -72,14 +72,9 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
     sim->em_inductive_enabled          = 1;
     sim->em_electrostatic_enabled      = 1;
     sim->em_magnetic_enabled           = 1;
-    sim->j_deposit_shift               = 0.0f;
     sim->j_smooth_passes               = 0;
-    sim->em_inductive_disc             = GR_INDUCTIVE_CENTERED;
     sim->kernel_radius                 = 1.5f;
-    sim->em_inductive_sign             = +1.0f;
-    sim->grav_inductive_sign           = +1.0f;
     /* J time-correction off by default (raw Esirkepov J^{n-1/2}). */
-    sim->j_time_correction_enabled     = 0;
     sim->esirkepov_violations    = 0;
     sim->rho_smooth_passes       = 0;
     sim->shape_function          = GR_SHAPE_CIC;
@@ -194,23 +189,11 @@ void gr_sim_step(gr_sim_t* sim) {
             }
 
             /* Deposit J^{n-1/2} for the trajectory x^{n-1} -> x^n.
-             * x^{n-1} = x^n - v^{n-1/2} * dt is exact under leapfrog drift.
-             *
-             * Optional diagnostic shift: j_deposit_shift in units of dt
-             * shifts the WHOLE trajectory by shift * v * dt:
-             *   shift = 0:    trajectory x^{n-1} -> x^n            (default)
-             *   shift = +0.5: trajectory (x^n - 0.5 v dt) -> (x^n + 0.5 v dt)
-             *                 (J midpoint COLOCATED with rho^n)
-             *   shift = +1:   trajectory x^n -> x^{n+1}            (J midpoint AHEAD)
-             * Breaks Esirkepov continuity when nonzero; used by Stage 37 to
-             * test the rho/J spatial-colocation hypothesis. */
-            const float jshift = sim->j_deposit_shift;
-            const float jdx    = jshift * vx * dt;
-            const float jdy    = jshift * vy * dt;
-            const float x0     = p->x - vx * dt + jdx;
-            const float y0     = p->y - vy * dt + jdy;
-            const float x1     = p->x + jdx;
-            const float y1     = p->y + jdy;
+             * x^{n-1} = x^n - v^{n-1/2} * dt is exact under leapfrog drift. */
+            const float x0     = p->x - vx * dt;
+            const float y0     = p->y - vy * dt;
+            const float x1     = p->x;
+            const float y1     = p->y;
             int violated = 0;
             if (sim->esirkepov_enabled) {
                 const int use_bump = (sim->shape_function == GR_SHAPE_BUMP);
@@ -308,40 +291,6 @@ void gr_sim_step(gr_sim_t* sim) {
                     }
                 }
                 free(scratch);
-            }
-        }
-    }
-
-    /* J time-correction: replace the half-step-staggered J^{n-1/2} that
-     * Esirkepov just produced with a linear-extrapolation estimate of
-     * J at integer time n, matching the wave equation operator's
-     * time-center.  J^n ≈ 1.5 J^{n-1/2} - 0.5 J^{n-3/2}, where the
-     * "n-3/2" half-step is the previous step's deposit saved in J_*_prev.
-     * On the first step, J_*_prev is zero (calloc), giving J^n ≈ 1.5 J^{n-1/2}. */
-    if (sim->j_time_correction_enabled
-        && sim->particle_source_deposition && sim->n_particles > 0) {
-        const size_t n = (size_t) sim->width * (size_t) sim->height;
-        float** jpairs[4][2] = {
-            { &sim->J_mx, &sim->J_mx_prev },
-            { &sim->J_my, &sim->J_my_prev },
-            { &sim->J_qx, &sim->J_qx_prev },
-            { &sim->J_qy, &sim->J_qy_prev },
-        };
-        for (int p = 0; p < 4; p++) {
-            float** Jcur  = jpairs[p][0];
-            float** Jprev = jpairs[p][1];
-            if (!*Jprev) {
-                *Jprev = (float*) calloc(n, sizeof(float));
-                if (!*Jprev) continue;
-            }
-            /* J_used = 1.5 * J_cur - 0.5 * J_prev (linear extrapolation
-             * to integer step).  Save raw J_cur to J_prev for next step
-             * BEFORE overwriting.  Use a 2-pass loop with a temp swap. */
-            for (size_t k = 0; k < n; k++) {
-                const float raw  = (*Jcur)[k];
-                const float prev = (*Jprev)[k];
-                (*Jcur)[k]  = 1.5f * raw - 0.5f * prev;
-                (*Jprev)[k] = raw;
             }
         }
     }
@@ -587,31 +536,6 @@ int gr_sim_get_em_magnetic_enabled(const gr_sim_t* sim) {
     return sim ? sim->em_magnetic_enabled : 0;
 }
 
-void gr_sim_set_j_deposit_shift(gr_sim_t* sim, float fraction_of_dt) {
-    if (!sim) return;
-    sim->j_deposit_shift = fraction_of_dt;
-}
-float gr_sim_get_j_deposit_shift(const gr_sim_t* sim) {
-    return sim ? sim->j_deposit_shift : 0.0f;
-}
-
-void gr_sim_set_em_inductive_disc(gr_sim_t* sim, gr_inductive_disc_t kind) {
-    if (!sim) return;
-    sim->em_inductive_disc = (kind == GR_INDUCTIVE_BACKWARD)
-                                 ? GR_INDUCTIVE_BACKWARD
-                                 : GR_INDUCTIVE_CENTERED;
-}
-gr_inductive_disc_t gr_sim_get_em_inductive_disc(const gr_sim_t* sim) {
-    return sim ? sim->em_inductive_disc : GR_INDUCTIVE_CENTERED;
-}
-
-void gr_sim_set_em_inductive_sign(gr_sim_t* sim, float sign) {
-    if (!sim) return;
-    sim->em_inductive_sign = sign;
-}
-float gr_sim_get_em_inductive_sign(const gr_sim_t* sim) {
-    return sim ? sim->em_inductive_sign : 1.0f;
-}
 void gr_sim_set_kernel_radius(gr_sim_t* sim, float r) {
     if (!sim) return;
     if (r < 0.5f) r = 0.5f;       /* below 0.5: degenerate / single-cell */
@@ -619,13 +543,6 @@ void gr_sim_set_kernel_radius(gr_sim_t* sim, float r) {
 }
 float gr_sim_get_kernel_radius(const gr_sim_t* sim) {
     return sim ? sim->kernel_radius : 1.5f;
-}
-void gr_sim_set_gravitomagnetic_inductive_sign(gr_sim_t* sim, float sign) {
-    if (!sim) return;
-    sim->grav_inductive_sign = sign;
-}
-float gr_sim_get_gravitomagnetic_inductive_sign(const gr_sim_t* sim) {
-    return sim ? sim->grav_inductive_sign : 1.0f;
 }
 
 void gr_sim_set_em_shapiro_enabled(gr_sim_t* sim, int enabled) {
@@ -640,14 +557,6 @@ void gr_sim_set_em_shapiro_enabled(gr_sim_t* sim, int enabled) {
 }
 int gr_sim_get_em_shapiro_enabled(const gr_sim_t* sim) {
     return sim ? sim->em_shapiro_enabled : 0;
-}
-
-void gr_sim_set_j_time_correction_enabled(gr_sim_t* sim, int enabled) {
-    if (!sim) return;
-    sim->j_time_correction_enabled = enabled ? 1 : 0;
-}
-int gr_sim_get_j_time_correction_enabled(const gr_sim_t* sim) {
-    return sim ? sim->j_time_correction_enabled : 0;
 }
 
 const float* gr_sim_rho_matter_ptr(const gr_sim_t* sim) {

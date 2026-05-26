@@ -56,7 +56,6 @@ struct gr_sim {
      * with the well-known half-step time mismatch from the operator's
      * integer-step time-center).  1: apply linear-extrapolation correction
      * to land the source at integer step n. */
-    int j_time_correction_enabled;
 
     /* Damping layer (Stage 2). Applied identically to all six fields, since
      * they all satisfy the same wave equation with the same c. */
@@ -133,16 +132,12 @@ struct gr_sim {
      * Note: nonzero shift breaks discrete continuity (ρ and J are no longer
      * connected by Esirkepov's identity), so the Lorenz residual will grow.
      * Diagnostic for the Stage 37 "uniform-motion heating" hypothesis. */
-    float j_deposit_shift;
     /* Discretization for the EM inductive piece. */
-    gr_inductive_disc_t em_inductive_disc;
     float               kernel_radius;  /* default 1.5; bump-kernel half-width
                                          * in cell units.  Only used when
                                          * shape_function = GR_SHAPE_BUMP. */
     /* Sign multipliers for diagnostic sign-flip experiments.  Default +1.0
      * (variationally-correct sign of -q d_t A and -m d_t A_g respectively). */
-    float em_inductive_sign;
-    float grav_inductive_sign;
 
     /* If 0, the per-step wave-equation leapfrog on the six perturbation
      * fields is skipped (along with the buffer rotation).  Used by Stage 7/8

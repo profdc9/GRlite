@@ -84,7 +84,7 @@ static reciprocity_result_t run_reciprocity(int sep_cells, int n_warmup, int n_f
     gr_sim_set_em_electrostatic_enabled(sim, 1);
     gr_sim_set_em_inductive_enabled(sim, 1);
     gr_sim_set_em_magnetic_enabled(sim, 1);
-    gr_sim_set_em_inductive_sign(sim, +1.0f);
+
 
     gr_sim_add_particle(sim, cx, y1, mass, +Q, 0.0f, 0.0f);
     gr_sim_add_particle(sim, cx, y2, mass, +Q, 0.0f, 0.0f);

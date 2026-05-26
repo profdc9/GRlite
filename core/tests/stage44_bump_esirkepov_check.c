@@ -158,7 +158,7 @@ static float run_full_force(float v_drift, gr_shape_function_t shape, float Rk,
     gr_sim_set_em_electrostatic_enabled(sim, 1);
     gr_sim_set_em_inductive_enabled(sim, 1);
     gr_sim_set_em_magnetic_enabled(sim, 1);
-    gr_sim_set_em_inductive_sign(sim, +1.0f);
+
 
     gr_sim_add_particle(sim, cx, y_start, mass, Q, 0.0f, v_drift);
 

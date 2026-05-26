@@ -157,8 +157,8 @@ static run_result_t run_config_full_mass(int electrostatic_on, int inductive_on,
     gr_sim_set_em_electrostatic_enabled(sim, electrostatic_on);
     gr_sim_set_em_inductive_enabled(sim, inductive_on);
     gr_sim_set_em_magnetic_enabled(sim, magnetic_on);
-    gr_sim_set_em_inductive_sign(sim, ind_sign);
-    gr_sim_set_j_deposit_shift(sim, j_shift);
+
+
 
     gr_sim_add_particle(sim, cx, y_start, mass, Q, 0.0f, v_drift);
 

@@ -868,9 +868,8 @@ static void dt_A_g_at_total(const struct gr_sim* sim, float x, float y,
         (shape == GR_SHAPE_BUMP) ? gr_bump_interp_yedge(sim->fields[GR_FIELD_A_GY].prev, W, H, dx, x, y, Rk) :
         (shape == GR_SHAPE_TSC)  ? gr_tsc_interp_yedge (sim->fields[GR_FIELD_A_GY].prev, W, H, dx, x, y) :
                                    cic_interp_yedge    (sim->fields[GR_FIELD_A_GY].prev, W, H, dx, x, y);
-    const float s = sim->grav_inductive_sign;
-    *dAx_out = s * (Ax_curr - Ax_prev) * inv_dt;
-    *dAy_out = s * (Ay_curr - Ay_prev) * inv_dt;
+    *dAx_out = (Ax_curr - Ax_prev) * inv_dt;
+    *dAy_out = (Ay_curr - Ay_prev) * inv_dt;
 }
 
 /* Time derivative of the EM vector potential A_em at the particle, for
@@ -910,12 +909,8 @@ static void dt_A_em_at_total(const struct gr_sim* sim, float x, float y,
     const int   H  = sim->height;
     const float dx = sim->dx;
 
-    const float s = sim->em_inductive_sign;
     /* Half-step A_em convention (v36): .prev = A^{n-1/2}, .curr = A^{n+1/2}.
-     * d_t A^n = (curr - prev) / dt = 1-step centered diff at t^n.  The
-     * BACKWARD discretization option is now structurally equivalent and
-     * retained for API compat (legacy stages that didn't drive A.next).
-     * CENTERED (default) reads the natural 1-step diff. */
+     * d_t A^n = (curr - prev) / dt = 1-step centered diff at t^n. */
     const float inv_dt = 1.0f / sim->dt;
     /* Shape-matched edge interp: bump (when GR_SHAPE_BUMP) / TSC / CIC,
      * matched to the J-deposit shape so the HE adjoint condition on the
@@ -938,8 +933,8 @@ static void dt_A_em_at_total(const struct gr_sim* sim, float x, float y,
         (shape == GR_SHAPE_BUMP) ? gr_bump_interp_yedge(sim->fields[GR_FIELD_A_Y].prev, W, H, dx, x, y, Rk) :
         (shape == GR_SHAPE_TSC)  ? gr_tsc_interp_yedge (sim->fields[GR_FIELD_A_Y].prev, W, H, dx, x, y) :
                                    cic_interp_yedge    (sim->fields[GR_FIELD_A_Y].prev, W, H, dx, x, y);
-    *dAx_out = s * (Ax_curr - Ax_prev) * inv_dt;
-    *dAy_out = s * (Ay_curr - Ay_prev) * inv_dt;
+    *dAx_out = (Ax_curr - Ax_prev) * inv_dt;
+    *dAy_out = (Ay_curr - Ay_prev) * inv_dt;
 }
 
 /* Total EM magnetic field B_z = (curl A)_z at the particle position.
