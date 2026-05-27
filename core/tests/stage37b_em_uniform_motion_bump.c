@@ -56,7 +56,7 @@ static float KE_of(const gr_particle_t* p, float c_eff) {
 static run_t run(gr_shape_function_t shape, float Rk, int smooth, float v_drift) {
     const int W = 128, H = 1024, n_damp = 16;
     const float dx = 1.0f, c_eff = 1.0f, cfl = 1.0f / sqrtf(2.0f);
-    const float mass = 1.0f, Q = 0.01f;   /* mass=1.0 matches stage37's clean measurement regime */
+    const float mass = 0.01f, Q = 0.01f;
     const float y_start = (float)(n_damp + 32) * dx;
     const float y_safe = (float)(H - n_damp - 64) * dx;
     const float dt = cfl * dx / c_eff;
