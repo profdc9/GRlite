@@ -1,0 +1,319 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage[expansion=false]{microtype}
+\usepackage{parskip}
+
+\geometry{margin=2.5cm}
+
+\definecolor{deepblue}{RGB}{31,56,100}
+\definecolor{midblue}{RGB}{46,84,150}
+\titleformat{\section}{\large\bfseries\color{deepblue}}{{\thesection}}{1em}{}
+\titleformat{\subsection}{\normalsize\bfseries\color{midblue}}{{\thesubsection}}{1em}{}
+
+\title{\textbf{GRlite Sandbox v39}: per-particle self-field subtraction\\with empirical $\epsilon(v_x, v_y)$ correction}
+\author{Daniel Marks}
+\date{2026-06-01}
+
+\begin{document}
+\maketitle
+
+This document is an addendum to \texttt{gr\_sandbox\_v38.tex}.  All
+prior content remains current; the v39 work introduces an OPTIONAL
+per-particle field subtraction mechanism for clean self-force
+cancellation, with a velocity-dependent residual-correction knob
+$\epsilon(v_x, v_y)$ intended for analytic or empirical calibration.
+
+\section{Motivation: HE adjoint fails for moving sources under FDTD}
+
+The Hockney–Eastwood adjoint condition guarantees zero spurious
+self-force on a STATIC source when the deposit kernel $D$ and gather
+kernel $G$ satisfy $G = D^T$, provided the field is solved
+quasi-statically (Poisson, $c \to \infty$).  In that limit the field
+is an instantaneous functional of the current source positions and
+the symmetry argument that gives $F_{\mathrm{self}} = 0$ closes.
+
+For a particle moving at velocity $\vec v$ in a wave-evolved FDTD
+scheme the condition no longer applies.  The discrete leapfrog
+\begin{equation}
+\phi^{n+1}_{i,j} = 2\phi^n_{i,j} - \phi^{n-1}_{i,j}
+ + (c\,\Delta t)^2 \left( \nabla^2_d \phi^n_{i,j}
+                          + s_\phi \, \rho^n_{i,j} \right)
+\label{eq:leapfrog}
+\end{equation}
+is NOT Lorentz invariant: the field at any time is built from the
+source at retarded times along characteristic cones of the discrete
+operator, and the steady-state response to a uniformly-moving source
+is NOT the boosted continuum Coulomb shape.  The residual gradient
+at the particle's current position is the discrete spurious
+self-force $F_{\mathrm{spurious}}(\vec v)$.
+
+Empirical findings (Stage 37e--37g, all equal-distance methodology
+with mass = 1, BUMP $R=8$):
+\begin{itemize}
+  \item $F_{\mathrm{spurious}}(\vec v)$ is non-monotonic with sign
+    changes at $v \approx 0.045$ and $v \approx 0.075$.
+  \item The threshold velocities are INDEPENDENT of the deposit
+    kernel (TSC bare, TSC $+ N=4/16/64$, BUMP $R=2.5/4/6/8$ all give
+    the same sign at every $v$ in the scan).  Kernel choice changes
+    only magnitude.
+  \item The threshold pattern lives in the static $-q\nabla\phi$
+    channel; turning off $-q\partial_t A$ and $+q \vec v \times \vec B$
+    does not move the thresholds.
+  \item EM (repulsive self, $c_{\mathrm{em}} = +4\pi k_e$) and GR
+    (attractive self, $c_{\mathrm{grav}} = -4\pi G_{\mathrm{eff}}$)
+    give $F_{\mathrm{spurious}}$ of identical magnitude and OPPOSITE
+    sign at every $v$.
+\end{itemize}
+
+These observations are consistent with the HE adjoint being a
+quasi-static theorem: kernel matching cannot save you once the field
+carries information from retarded source positions.
+
+\section{Proposed mechanism: optional per-particle self-field}
+
+\subsection{Architecture}
+
+Each particle continues to deposit into the collective field as
+today.  In addition, an OPTIONAL per-particle field set may be
+allocated for particle $p$:
+\begin{equation}
+\{\phi_g^{(p)},\ A_{gx}^{(p)},\ A_{gy}^{(p)},\
+   \phi_{em}^{(p)},\ A_x^{(p)},\ A_y^{(p)}\}
+\end{equation}
+sourced ONLY by particle $p$'s deposit.  The collective and
+per-particle fields evolve independently under the same leapfrog
+(equation~\ref{eq:leapfrog}); both see the same damping/PML
+treatment so their wakes match.
+
+At gather time, the force on particle $p$ is
+\begin{equation}
+\vec F_p = \mathrm{gather}\!\left(\phi^{\mathrm{collective}}, \vec x_p\right)
+- (1 + \vec\epsilon(\vec v_p)) \cdot
+  \mathrm{gather}\!\left(\phi^{(p)}, \vec x_p\right)
+\label{eq:force}
+\end{equation}
+where $\vec\epsilon(\vec v_p) = (\epsilon_x(\vec v_p), \epsilon_y(\vec v_p))$
+is a per-axis modulation (the v-dependence may be anisotropic; see
+section~\ref{sec:derivation}).
+
+Interpretation of $\vec\epsilon$:
+\begin{itemize}
+  \item $\vec\epsilon = \vec 0$: full subtraction.  $\vec F_p$ contains
+    only contributions from OTHER particles' fields.  Self-force is
+    identically zero (modulo float roundoff and warmup transients).
+  \item $\vec\epsilon = -\vec 1$: no subtraction, $\vec F_p$ reduces
+    to the current PIC behavior (collective field gather only).
+  \item $\vec\epsilon$ between $0$ and $-1$: partial self-coupling.
+\end{itemize}
+
+By construction, when the per-particle field is OFF for particle $p$,
+the gather collapses to the current behavior ($\vec F_p =
+\mathrm{gather}(\phi^{\mathrm{collective}})$), so existing tests are
+unaffected unless they explicitly opt in.
+
+\subsection{API sketch}
+
+\begin{verbatim}
+gr_sim_particle_enable_self_field(sim, idx);
+gr_sim_particle_disable_self_field(sim, idx);
+gr_sim_particle_set_self_field_epsilon(sim, idx, eps_x, eps_y);
+gr_sim_particle_set_self_field_epsilon_fn(sim, idx, callback);
+int gr_sim_particle_has_self_field(sim, idx);
+\end{verbatim}
+
+\subsection{Cost}
+
+For $N$ particles with self-field enabled and a $W \times H$ grid:
+\begin{itemize}
+  \item Memory: $6 \cdot 3 \cdot W \cdot H \cdot \mathrm{sizeof(float)}$
+    per opted-in particle.  At $W = H = 256$ that is $\sim 4.7$ MB
+    per particle.  A 2-particle binary uses $\sim 9$ MB extra.
+  \item Compute: each FDTD step performs $1 + N_{\mathrm{opt}}$
+    leapfrog updates per field component.  Linear in the number of
+    opted-in particles.
+  \item Esirkepov deposits run twice per opted-in particle (once into
+    collective, once into private).  Same kernel, same continuity
+    properties.
+\end{itemize}
+
+For GRlite's pedagogical scope ($N \lesssim 10$), this is well
+within budget.
+
+\section{Toward an analytic $\vec\epsilon(\vec v)$}
+\label{sec:derivation}
+
+The goal of $\vec\epsilon(\vec v)$ is to make the residual
+self-force vanish at constant $\vec v$ even when the
+per-particle self-field deposit/evolution doesn't exactly mirror
+the collective contribution (warmup transients, anisotropy in the
+gather stencil, etc.).  Ideally $\vec\epsilon$ would be derivable
+analytically from the discrete dispersion relation.
+
+\subsection{Dispersion relation for the leapfrog wave equation}
+
+Plug a spatially periodic plane-wave ansatz into
+equation~\ref{eq:leapfrog}.  With
+$\phi^n_{i,j} = \hat\Phi \exp(i (k_x i \Delta x + k_y j \Delta x - \omega n \Delta t))$
+the time-stencil gives
+\begin{equation}
+-4 \sin^2(\omega \Delta t/2)\, \hat\Phi
+ = (c \Delta t)^2 \left[ \tilde\nabla^2_d(\vec k)\, \hat\Phi
+                        + s_\phi \hat\rho \right]
+\end{equation}
+where the 5-point Yee Laplacian's symbol is
+\begin{equation}
+\tilde\nabla^2_d(\vec k)
+ = -\frac{4}{\Delta x^2}\!\left[
+     \sin^2(k_x \Delta x/2) + \sin^2(k_y \Delta x/2)
+   \right]
+   \equiv -\frac{4}{\Delta x^2} S^2(\vec k).
+\end{equation}
+The discrete dispersion relation for the source-free wave equation
+is therefore
+\begin{equation}
+\sin^2\!\left(\frac{\omega \Delta t}{2}\right)
+ = \left(\frac{c \Delta t}{\Delta x}\right)^2 S^2(\vec k)
+ \equiv r^2 S^2(\vec k),
+\label{eq:dispersion}
+\end{equation}
+where $r = c \Delta t / \Delta x$ is the CFL number.  In the
+continuum limit $\Delta t, \Delta x \to 0$ one recovers $\omega = c |\vec k|$.
+The discrete RHS is anisotropic: at fixed $|\vec k|$, $\omega$ is
+maximal along $\hat x$ or $\hat y$ and minimal along the diagonal.
+
+\subsection{Steady-state response to a uniformly-moving source}
+
+A uniformly-moving deposit translates rigidly with $\vec v$, so its
+Fourier representation is supported on the worldline
+$\omega = \vec k \cdot \vec v$:
+\begin{equation}
+\hat\rho(\vec k, \omega) \propto \hat S(\vec k)\,
+ 2\pi\,\delta\!\left(\omega - \vec k \cdot \vec v\right),
+\end{equation}
+where $\hat S(\vec k)$ is the deposit kernel's spectrum.  Solving for
+$\hat\Phi$ at the source's worldline frequency:
+\begin{equation}
+\hat\Phi(\vec k)
+ = \frac{(c \Delta t)^2 \, s_\phi \, q \, \hat S(\vec k)}
+       {\,4\bigl[r^2 S^2(\vec k) - \sin^2(\vec k \cdot \vec v\, \Delta t/2)\bigr]\,}.
+\label{eq:phi_hat}
+\end{equation}
+The denominator is the discrete analog of $c^2 k^2 - (\vec k \cdot \vec v)^2$.
+In the continuum limit it factorizes and the integral that follows
+vanishes by symmetry; on the grid neither holds.
+
+\subsection{Self-force as a Brillouin-zone integral}
+
+The gather operation, assumed HE-adjoint ($G = D$, same kernel
+spectrum $\hat S$), produces a force on the particle equal to
+\begin{equation}
+\vec F^{(\mathrm{self})}(\vec v)
+ = - q \int_{\mathrm{BZ}} \frac{d^2 k}{(2\pi)^2}\,
+     i \vec k\, |\hat S(\vec k)|^2\, \hat\Phi(\vec k)
+\label{eq:F_self}
+\end{equation}
+with $\hat\Phi$ from equation~\ref{eq:phi_hat} and the integral over
+the first Brillouin zone $k_\alpha \in (-\pi/\Delta x, \pi/\Delta x]$.
+
+In the continuum, the integral is over all of $\mathbb{R}^2$ and the
+integrand is odd in $\vec k$ (after the boost) so it vanishes by
+symmetry: $\vec F^{(\mathrm{self})}_{\mathrm{cont}} = 0$.  On the
+grid, the BZ is compact and the lattice's $\hat x/\hat y$ vs.\
+diagonal anisotropy breaks the rotation symmetry of the continuum
+boost; the integral is generically nonzero and is a function of
+$\vec v$:
+\begin{equation}
+\boxed{\;\;
+\vec F^{(\mathrm{self})}_{\mathrm{discrete}}(\vec v)
+ = -\frac{q^2\, s_\phi\, (c \Delta t)^2}{4}
+   \int_{\mathrm{BZ}} \frac{d^2 k}{(2\pi)^2}\,
+   \frac{i \vec k\, |\hat S(\vec k)|^2}
+        {r^2 S^2(\vec k) - \sin^2\!\left(\frac{(\vec k \cdot \vec v)\Delta t}{2}\right)}
+\;\;}
+\label{eq:F_self_explicit}
+\end{equation}
+
+\subsection{Why the integral fails to vanish on the grid}
+
+In the continuum, the denominator factors as $(c|\vec k| - \vec k\cdot\vec v)(c|\vec k| + \vec k\cdot\vec v)$.  The integrand is then odd under
+$\vec k \to -\vec k$ after a suitable rotation aligning $\hat z$ with $\vec v$, and the integral vanishes.  On the discrete grid, two distinct mechanisms break that cancellation:
+
+\paragraph{Anisotropy of $S^2(\vec k)$.}
+The lattice Laplacian's symbol $S^2(\vec k) = \sin^2(k_x\Delta x/2) + \sin^2(k_y\Delta x/2)$ is NOT rotation-invariant.  At fixed $|\vec k|$ it is maximal along $\hat x$ or $\hat y$ (where one term saturates near $\sin^2(\pi/2) = 1$) and minimal along the diagonal.  A continuum Lorentz boost rotates the integration measure isotropically; the lattice does not respect that rotation, so a boost mixes $\hat x/\hat y$ and diagonal modes asymmetrically.  Residual odd contributions in $\vec k$ no longer cancel.
+
+\paragraph{Numerical Cherenkov resonances.}
+The denominator vanishes exactly on the manifold
+\begin{equation}
+r^2 S^2(\vec k) = \sin^2\!\left(\frac{\vec k\cdot \vec v\, \Delta t}{2}\right)
+\label{eq:cherenkov}
+\end{equation}
+which describes Cherenkov-radiating modes: lattice plane waves whose phase velocity equals $\vec v$ along the direction of motion.  For any $\vec v \neq 0$ this manifold is nonempty in the BZ.  The integrand has a $1/\!\sin$-type pole on this manifold; the integral is finite only in a principal-value or causal-prescription sense (in steady state the damping ring is what regularizes it).  The Cherenkov contribution gives a net force on the particle whose sign depends on which side of each pole the integration sweeps.
+
+\subsection{Predicted sign structure of $\vec F^{(\mathrm{self})}(\vec v)$}
+
+As $|\vec v|$ varies, the Cherenkov manifold (equation~\ref{eq:cherenkov}) reshapes inside the BZ.  When $|\vec v|$ crosses a value at which a NEW family of modes becomes Cherenkov-resonant (i.e., the manifold acquires a new connected component or crosses a high-symmetry edge of the BZ), the net residue changes sign.  The model therefore predicts DISCRETE $v$-thresholds at which $\vec F^{(\mathrm{self})}$ sign-flips, separated by intervals of definite sign.
+
+This matches the Stage~37e/f findings: signs change at $v\approx 0.045$ and $v\approx 0.075$ on our default grid ($c=1$, $\Delta x = 1$, $r = 1/\sqrt 2$), and the locations are kernel-INDEPENDENT (the pole condition does not involve $\hat S$).
+
+\subsection{Kernel as a low-pass filter on the integrand}
+
+The factor $|\hat S(\vec k)|^2$ in equation~\ref{eq:F_self_explicit} weights the integrand but does not move its poles.  Wider kernels (BUMP $R=8$, TSC + N=16 smoothing) have $\hat S$ that decays faster at high $|\vec k|$; they suppress contributions from BZ-edge modes more strongly.  The net effect on the integral is to REDUCE MAGNITUDE proportionally to the kernel's high-$\vec k$ suppression while leaving the topology of the sign pattern unchanged.  This explains the Stage~37e observation that all kernels give the same sign at every $v$ in the scan, with magnitudes varying by factors of $\sim 5{-}10$.
+
+\subsection{Lattice point-group symmetry of $\vec F^{(\mathrm{self})}(v_x, v_y)$}
+
+The square grid has point group $D_4$ (4-fold rotation + reflections).  $S^2(\vec k)$ and the BZ are invariant under all $D_4$ operations, so equation~\ref{eq:F_self_explicit} inherits the same symmetry under simultaneous transformation of $\vec v$ and $\vec k$.  This gives concrete constraints on $\vec F^{(\mathrm{self})}(v_x, v_y) = (F_x, F_y)$:
+\begin{align}
+F_x(-v_x, v_y) &= -F_x(v_x, v_y) \\
+F_x(v_x, -v_y) &= +F_x(v_x, v_y) \\
+F_x(v_y, v_x) &= F_y(v_x, v_y) \\
+F_x(-v_y, -v_x) &= -F_y(v_x, v_y)
+\end{align}
+Equivalently $\vec F^{(\mathrm{self})}$ is the gradient (up to sign) of a $D_4$-invariant scalar function $U(\vec v)$.  An $\epsilon(\vec v)$ fitted to cancel $\vec F^{(\mathrm{self})}$ will inherit the same symmetries.
+
+\subsection{Continuum reference and the limit $\Delta t, \Delta x \to 0$}
+
+In the limit $\Delta t, \Delta x \to 0$ with $r$ held fixed, the boxed integrand reduces to the continuum
+\begin{equation}
+\frac{i \vec k\, |\hat S(\vec k)|^2}{c^2 k^2 - (\vec k\cdot\vec v)^2}
+\end{equation}
+integrated over all of $\mathbb{R}^2$, which vanishes by rotation symmetry (the $D_4$ symmetry promotes to full $SO(2)$).  All sign-flips, Cherenkov poles, and kernel-magnitude effects are discretization artifacts that vanish under joint $(\Delta t, \Delta x)$ refinement at fixed $r$.
+
+\section{Implementation strategy}
+
+\subsection{Phase 1: per-particle field plumbing}
+
+Build the architecture with $\vec\epsilon = \vec 0$ default.  This gives perfect self-force cancellation IF the per-particle field's deposit + FDTD evolution faithfully reproduces what the collective field contains from that particle.  Specifically:
+\begin{enumerate}
+  \item Add a per-particle field-set structure (6 fields $\times$ 3 time slices + 3 source arrays per opted-in particle).
+  \item Modify the deposit phase: when particle $p$ has \verb|self_field_enabled|, deposit into BOTH the collective sources AND $p$'s private sources.  Same kernel, same Esirkepov path.
+  \item Modify the FDTD step: loop the leapfrog over (collective $+$ each enabled self-field set).  Apply identical damping/PML to each.
+  \item Modify the force gather: if $p$ has self-field, compute $\vec F_p$ per equation~\ref{eq:force}.
+  \item Public API for opt-in/opt-out and $\vec\epsilon$ setting.
+\end{enumerate}
+
+\subsection{Phase 2: validate that $\vec\epsilon = \vec 0$ kills the spurious force}
+
+Repeat Stage~37e (single charge at constant $v$) with self-field enabled and $\vec\epsilon = 0$.  Expected: $\vec F^{(\mathrm{total})}(\vec v) = 0$ at every $v$ in the scan (to within float32 noise).  If a residual remains, characterize it and use it to define an empirical $\vec\epsilon(\vec v)$.
+
+\subsection{Phase 3 (optional): tabulate the BZ integral}
+
+Numerically evaluate equation~\ref{eq:F_self_explicit} on a fine $\vec k$-mesh for each production kernel ($|\hat S(\vec k)|^2$ for TSC, TSC$+$smoothing, BUMP $R=6/8$).  Compare to the measured residual from Phase 2.  Agreement would validate the dispersion-based picture; disagreement would point to a missing piece in the model (likely related to the damping ring's modification of the steady-state Cherenkov regularization).
+
+\subsection{Phase 4: empirical $\vec\epsilon(\vec v)$ table or closed form}
+
+If residuals persist, fit $\vec\epsilon(\vec v)$ to whatever functional form captures the lattice $D_4$ symmetry.  Candidate forms include rational functions in $\sin^2(v_x \Delta t/2 \Delta x)$, $\sin^2(v_y \Delta t/2 \Delta x)$ (the natural lattice analogs of $v^2$).
+
+\subsection{Backward compatibility}
+
+When all particles have \verb|self_field_enabled = 0| (the default), the gather collapses to the existing single-collective-field behavior.  Existing tests, scenarios, and WASM/web frontend code path remain unchanged.
+
+\end{document}
