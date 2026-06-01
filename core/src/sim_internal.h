@@ -234,10 +234,48 @@ struct gr_sim {
     float* c_local2_corner;  /* phi_em sublattice */
     float* c_local2_xedge;   /* A_x   sublattice */
     float* c_local2_yedge;   /* A_y   sublattice */
+
+    /* v39: per-particle self-field subtraction.  Each opted-in particle
+     * gets its own field-set sourced only by that particle's deposit.
+     * Used at gather time as
+     *     F_p = gather(collective) - (1 + eps_p) * gather(self_p)
+     * to cancel the discrete spurious self-force on a moving deposit.
+     * See gr_sandbox_v39.tex for the architecture and the analytic
+     * Brillouin-zone derivation of F_self^(discrete)(v).
+     *
+     * Lifecycle: allocated on demand by gr_sim_particle_enable_self_field;
+     * freed by gr_sim_particle_disable_self_field and gr_sim_destroy.
+     * The array is sized to particles_capacity; entries for particles
+     * without self-field are NULL. */
+    struct gr_self_field_set** self_field_sets;  /* indexed by particle idx */
+    /* Per-particle epsilon (vector by axis).  Defaults to (0, 0). */
+    float* self_field_eps_x;
+    float* self_field_eps_y;
 };
+
+/* v39 self-field set: 6 fields (phi_g, A_gx, A_gy, phi_em, A_x, A_y)
+ * each with 3 time slices, plus 6 source arrays.  Exact mirror of the
+ * collective field/source layout in struct gr_sim. */
+typedef struct gr_self_field_set {
+    gr_field_state_t fields[GR_FIELD_COUNT];
+    float* rho_matter;
+    float* J_mx;
+    float* J_my;
+    float* rho_q;
+    float* J_qx;
+    float* J_qy;
+} gr_self_field_set_t;
+
+/* v39: self-field set lifecycle (defined in sim.c). */
+gr_self_field_set_t* gr_self_field_set_alloc(int W, int H);
+void                 gr_self_field_set_free (gr_self_field_set_t* s);
+void                 gr_self_field_set_bind_source_coeffs(struct gr_sim* sim, gr_self_field_set_t* s);
 
 /* Defined in field.c — steps all six fields in parallel. */
 void gr_field_leapfrog_step_all(struct gr_sim* sim);
+/* v39 helper: step one self-field set with the same scheme as the
+ * collective.  Implemented in field.c. */
+void gr_field_leapfrog_step_self(struct gr_sim* sim, gr_self_field_set_t* s);
 
 /* Defined in particle.c — pushes all particles one timestep (kick-drift).
  * Reads (background + perturbation) Phi_g at each particle position to

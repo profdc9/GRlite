@@ -395,6 +395,31 @@ int  gr_sim_particle_count(const gr_sim_t* sim);
 const gr_particle_t* gr_sim_get_particle(const gr_sim_t* sim, int idx);
 void gr_sim_clear_particles(gr_sim_t* sim);
 
+/* v39: per-particle self-field subtraction (gr_sandbox_v39.tex).
+ *
+ * Each opted-in particle gets its own field-set sourced only by that
+ * particle's deposit.  At gather time the force on the particle is
+ *     F_p = gather(collective) - (1 + eps_p) * gather(self_p)
+ * which exactly cancels the particle's own field contribution when
+ * eps_p = 0, leaving only the collective force from OTHER particles.
+ *
+ * Cost: ~5 MB per opted-in particle at 256x256 grid.  One extra FDTD
+ * leapfrog step per field component per opted-in particle per timestep.
+ *
+ * Default: self-field DISABLED for every particle (behavior identical
+ * to pre-v39 code).  Must be explicitly enabled per particle. */
+int  gr_sim_particle_enable_self_field (gr_sim_t* sim, int idx);
+void gr_sim_particle_disable_self_field(gr_sim_t* sim, int idx);
+int  gr_sim_particle_has_self_field    (const gr_sim_t* sim, int idx);
+
+/* Set the (axis-aware) epsilon residual-correction knob for particle
+ * idx.  eps_x and eps_y default to 0.  See v39 sec D_4 symmetry for the
+ * lattice-symmetry constraints any analytic eps(v) must satisfy. */
+void gr_sim_particle_set_self_field_epsilon(gr_sim_t* sim, int idx,
+                                              float eps_x, float eps_y);
+void gr_sim_particle_get_self_field_epsilon(const gr_sim_t* sim, int idx,
+                                              float* eps_x_out, float* eps_y_out);
+
 /* Total energy of particle `idx`: gamma*m*c^2 + m*Phi_g_total(x_p).
  * Used as the conservation diagnostic in Stage 7+. Returns 0 if idx is out
  * of range. */

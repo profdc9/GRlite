@@ -43,6 +43,13 @@ void gr_sim_recompute_source_coeffs(struct gr_sim* sim) {
     sim->fields[GR_FIELD_PHI_EM  ].source_coeff = c_em;
     sim->fields[GR_FIELD_A_X     ].source_coeff = c_em   * inv_c2;
     sim->fields[GR_FIELD_A_Y     ].source_coeff = c_em   * inv_c2;
+    /* v39: propagate to per-particle self-field sets. */
+    if (sim->self_field_sets) {
+        for (int i = 0; i < sim->particles_capacity; i++) {
+            if (sim->self_field_sets[i])
+                gr_self_field_set_bind_source_coeffs(sim, sim->self_field_sets[i]);
+        }
+    }
 }
 
 gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl) {
@@ -121,6 +128,135 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
     return sim;
 }
 
+/* v39 self-field set lifecycle ------------------------------------------- */
+
+gr_self_field_set_t* gr_self_field_set_alloc(int W, int H) {
+    if (W <= 0 || H <= 0) return NULL;
+    const size_t n = (size_t) W * (size_t) H;
+    gr_self_field_set_t* s = (gr_self_field_set_t*) calloc(1, sizeof(*s));
+    if (!s) return NULL;
+    /* 6 source arrays. */
+    s->rho_matter = (float*) calloc(n, sizeof(float));
+    s->J_mx       = (float*) calloc(n, sizeof(float));
+    s->J_my       = (float*) calloc(n, sizeof(float));
+    s->rho_q      = (float*) calloc(n, sizeof(float));
+    s->J_qx       = (float*) calloc(n, sizeof(float));
+    s->J_qy       = (float*) calloc(n, sizeof(float));
+    /* 6 fields x 3 time slices. */
+    for (int f = 0; f < GR_FIELD_COUNT; f++) {
+        s->fields[f].prev = (float*) calloc(n, sizeof(float));
+        s->fields[f].curr = (float*) calloc(n, sizeof(float));
+        s->fields[f].next = (float*) calloc(n, sizeof(float));
+    }
+    /* Verify and bind sources. */
+    int ok = (s->rho_matter && s->J_mx && s->J_my
+              && s->rho_q && s->J_qx && s->J_qy);
+    for (int f = 0; f < GR_FIELD_COUNT && ok; f++) {
+        if (!s->fields[f].prev || !s->fields[f].curr || !s->fields[f].next) ok = 0;
+    }
+    if (!ok) {
+        for (int f = 0; f < GR_FIELD_COUNT; f++) {
+            free(s->fields[f].prev);
+            free(s->fields[f].curr);
+            free(s->fields[f].next);
+        }
+        free(s->rho_matter); free(s->J_mx); free(s->J_my);
+        free(s->rho_q);      free(s->J_qx); free(s->J_qy);
+        free(s);
+        return NULL;
+    }
+    s->fields[GR_FIELD_PHI_GRAV].source = s->rho_matter;
+    s->fields[GR_FIELD_A_GX    ].source = s->J_mx;
+    s->fields[GR_FIELD_A_GY    ].source = s->J_my;
+    s->fields[GR_FIELD_PHI_EM  ].source = s->rho_q;
+    s->fields[GR_FIELD_A_X     ].source = s->J_qx;
+    s->fields[GR_FIELD_A_Y     ].source = s->J_qy;
+    return s;
+}
+
+void gr_self_field_set_free(gr_self_field_set_t* s) {
+    if (!s) return;
+    for (int f = 0; f < GR_FIELD_COUNT; f++) {
+        free(s->fields[f].prev);
+        free(s->fields[f].curr);
+        free(s->fields[f].next);
+    }
+    free(s->rho_matter); free(s->J_mx); free(s->J_my);
+    free(s->rho_q);      free(s->J_qx); free(s->J_qy);
+    free(s);
+}
+
+void gr_self_field_set_bind_source_coeffs(gr_sim_t* sim, gr_self_field_set_t* s) {
+    if (!sim || !s) return;
+    for (int f = 0; f < GR_FIELD_COUNT; f++) {
+        s->fields[f].source_coeff = sim->fields[f].source_coeff;
+    }
+}
+
+/* v39 self-field public API ----------------------------------------------- */
+
+static int ensure_self_field_tracking(gr_sim_t* sim) {
+    if (sim->particles_capacity <= 0) return -1;
+    const int cap = sim->particles_capacity;
+    if (!sim->self_field_sets) {
+        sim->self_field_sets = (gr_self_field_set_t**) calloc((size_t) cap, sizeof(*sim->self_field_sets));
+        if (!sim->self_field_sets) return -1;
+    }
+    if (!sim->self_field_eps_x) {
+        sim->self_field_eps_x = (float*) calloc((size_t) cap, sizeof(float));
+        if (!sim->self_field_eps_x) return -1;
+    }
+    if (!sim->self_field_eps_y) {
+        sim->self_field_eps_y = (float*) calloc((size_t) cap, sizeof(float));
+        if (!sim->self_field_eps_y) return -1;
+    }
+    return 0;
+}
+
+int gr_sim_particle_enable_self_field(gr_sim_t* sim, int idx) {
+    if (!sim) return -1;
+    if (idx < 0 || idx >= sim->n_particles) return -1;
+    if (ensure_self_field_tracking(sim) != 0) return -1;
+    if (sim->self_field_sets[idx]) return 0;  /* already enabled */
+    gr_self_field_set_t* s = gr_self_field_set_alloc(sim->width, sim->height);
+    if (!s) return -1;
+    gr_self_field_set_bind_source_coeffs(sim, s);
+    sim->self_field_sets[idx] = s;
+    return 0;
+}
+
+void gr_sim_particle_disable_self_field(gr_sim_t* sim, int idx) {
+    if (!sim || idx < 0 || idx >= sim->particles_capacity) return;
+    if (!sim->self_field_sets) return;
+    gr_self_field_set_free(sim->self_field_sets[idx]);
+    sim->self_field_sets[idx] = NULL;
+    if (sim->self_field_eps_x) sim->self_field_eps_x[idx] = 0.0f;
+    if (sim->self_field_eps_y) sim->self_field_eps_y[idx] = 0.0f;
+}
+
+int gr_sim_particle_has_self_field(const gr_sim_t* sim, int idx) {
+    if (!sim || idx < 0 || idx >= sim->particles_capacity) return 0;
+    if (!sim->self_field_sets) return 0;
+    return sim->self_field_sets[idx] != NULL;
+}
+
+void gr_sim_particle_set_self_field_epsilon(gr_sim_t* sim, int idx,
+                                              float eps_x, float eps_y) {
+    if (!sim || idx < 0 || idx >= sim->particles_capacity) return;
+    if (ensure_self_field_tracking(sim) != 0) return;
+    sim->self_field_eps_x[idx] = eps_x;
+    sim->self_field_eps_y[idx] = eps_y;
+}
+
+void gr_sim_particle_get_self_field_epsilon(const gr_sim_t* sim, int idx,
+                                              float* eps_x_out, float* eps_y_out) {
+    if (eps_x_out) *eps_x_out = 0.0f;
+    if (eps_y_out) *eps_y_out = 0.0f;
+    if (!sim || idx < 0 || idx >= sim->particles_capacity) return;
+    if (sim->self_field_eps_x && eps_x_out) *eps_x_out = sim->self_field_eps_x[idx];
+    if (sim->self_field_eps_y && eps_y_out) *eps_y_out = sim->self_field_eps_y[idx];
+}
+
 void gr_sim_destroy(gr_sim_t* sim) {
     if (!sim) return;
     for (int f = 0; f < GR_FIELD_COUNT; f++) {
@@ -148,6 +284,15 @@ void gr_sim_destroy(gr_sim_t* sim) {
     free(sim->c_local2_corner);
     free(sim->c_local2_xedge);
     free(sim->c_local2_yedge);
+    /* v39: free all per-particle self-field sets. */
+    if (sim->self_field_sets) {
+        for (int i = 0; i < sim->particles_capacity; i++) {
+            gr_self_field_set_free(sim->self_field_sets[i]);
+        }
+        free(sim->self_field_sets);
+    }
+    free(sim->self_field_eps_x);
+    free(sim->self_field_eps_y);
     free(sim->particles);
     free(sim);
 }
@@ -172,6 +317,19 @@ void gr_sim_step(gr_sim_t* sim) {
             const float vx    = p->px / (gamma * p->mass);
             const float vy    = p->py / (gamma * p->mass);
 
+            /* v39: if this particle has a self-field, also clear its
+             * sources and deposit there.  Same kernel, same Esirkepov path. */
+            gr_self_field_set_t* self = (sim->self_field_sets) ? sim->self_field_sets[i] : NULL;
+            if (self) {
+                const size_t n_cells = (size_t) W * (size_t) H;
+                memset(self->rho_matter, 0, n_cells * sizeof(float));
+                memset(self->rho_q,      0, n_cells * sizeof(float));
+                memset(self->J_mx,       0, n_cells * sizeof(float));
+                memset(self->J_my,       0, n_cells * sizeof(float));
+                memset(self->J_qx,       0, n_cells * sizeof(float));
+                memset(self->J_qy,       0, n_cells * sizeof(float));
+            }
+
             /* Deposit rho^n at the current particle position.  Use TSC
              * (3x3, smoother) if selected; otherwise CIC (2x2).  BUMP
              * is v38 Tier-1: same 3x3 footprint as TSC but C-infinity
@@ -180,12 +338,24 @@ void gr_sim_step(gr_sim_t* sim) {
                 const float Rk = sim->kernel_radius;
                 if (p->mass   != 0.0f) gr_bump_deposit_corner(sim->rho_matter, W, H, dx, p->x, p->y, p->mass,   Rk);
                 if (p->charge != 0.0f) gr_bump_deposit_corner(sim->rho_q,      W, H, dx, p->x, p->y, p->charge, Rk);
+                if (self) {
+                    if (p->mass   != 0.0f) gr_bump_deposit_corner(self->rho_matter, W, H, dx, p->x, p->y, p->mass,   Rk);
+                    if (p->charge != 0.0f) gr_bump_deposit_corner(self->rho_q,      W, H, dx, p->x, p->y, p->charge, Rk);
+                }
             } else if (sim->shape_function == GR_SHAPE_TSC) {
                 if (p->mass   != 0.0f) gr_tsc_deposit_corner(sim->rho_matter, W, H, dx, p->x, p->y, p->mass);
                 if (p->charge != 0.0f) gr_tsc_deposit_corner(sim->rho_q,      W, H, dx, p->x, p->y, p->charge);
+                if (self) {
+                    if (p->mass   != 0.0f) gr_tsc_deposit_corner(self->rho_matter, W, H, dx, p->x, p->y, p->mass);
+                    if (p->charge != 0.0f) gr_tsc_deposit_corner(self->rho_q,      W, H, dx, p->x, p->y, p->charge);
+                }
             } else {
                 if (p->mass   != 0.0f) gr_cic_deposit_corner(sim->rho_matter, W, H, dx, p->x, p->y, p->mass);
                 if (p->charge != 0.0f) gr_cic_deposit_corner(sim->rho_q,      W, H, dx, p->x, p->y, p->charge);
+                if (self) {
+                    if (p->mass   != 0.0f) gr_cic_deposit_corner(self->rho_matter, W, H, dx, p->x, p->y, p->mass);
+                    if (p->charge != 0.0f) gr_cic_deposit_corner(self->rho_q,      W, H, dx, p->x, p->y, p->charge);
+                }
             }
 
             /* Deposit J^{n-1/2} for the trajectory x^{n-1} -> x^n.
@@ -205,6 +375,12 @@ void gr_sim_step(gr_sim_t* sim) {
                         : gr_esirkepov_deposit_jxy     (sim->J_mx, sim->J_my, W, H, dx, dt,
                                                         x0, y0, x1, y1, p->mass);
                     if (!ok) violated = 1;
+                    if (self) {
+                        if (use_bump) gr_bump_esirkepov_deposit_jxy(self->J_mx, self->J_my, W, H, dx, dt,
+                                                                    x0, y0, x1, y1, p->mass, Rk_j);
+                        else          gr_esirkepov_deposit_jxy     (self->J_mx, self->J_my, W, H, dx, dt,
+                                                                    x0, y0, x1, y1, p->mass);
+                    }
                 }
                 if (p->charge != 0.0f) {
                     const int ok = use_bump
@@ -213,6 +389,12 @@ void gr_sim_step(gr_sim_t* sim) {
                         : gr_esirkepov_deposit_jxy     (sim->J_qx, sim->J_qy, W, H, dx, dt,
                                                         x0, y0, x1, y1, p->charge);
                     if (!ok) violated = 1;
+                    if (self) {
+                        if (use_bump) gr_bump_esirkepov_deposit_jxy(self->J_qx, self->J_qy, W, H, dx, dt,
+                                                                    x0, y0, x1, y1, p->charge, Rk_j);
+                        else          gr_esirkepov_deposit_jxy     (self->J_qx, self->J_qy, W, H, dx, dt,
+                                                                    x0, y0, x1, y1, p->charge);
+                    }
                 }
             }
             if (!sim->esirkepov_enabled || violated) {
@@ -293,6 +475,55 @@ void gr_sim_step(gr_sim_t* sim) {
                 free(scratch);
             }
         }
+
+        /* v39: apply the SAME smoothing passes to each opted-in particle's
+         * self-field sources so the self-gather mirrors what the collective
+         * gather receives from this particle. */
+        if (sim->self_field_sets && (sim->rho_smooth_passes > 0 || sim->j_smooth_passes > 0)) {
+            const size_t n = (size_t) W * (size_t) H;
+            float* scratch = (float*) malloc(n * sizeof(float));
+            if (scratch) {
+                for (int pi = 0; pi < sim->n_particles; pi++) {
+                    gr_self_field_set_t* sf = sim->self_field_sets[pi];
+                    if (!sf) continue;
+                    if (sim->rho_smooth_passes > 0) {
+                        float* rho_targets[2] = { sf->rho_matter, sf->rho_q };
+                        for (int pass = 0; pass < sim->rho_smooth_passes; pass++) {
+                            for (int t = 0; t < 2; t++) {
+                                memcpy(scratch, rho_targets[t], n * sizeof(float));
+                                for (int j = 1; j < H - 1; j++) {
+                                    for (int i = 1; i < W - 1; i++) {
+                                        const int k = j * W + i;
+                                        rho_targets[t][k] = (1.0f / 16.0f) * (
+                                              1.0f * scratch[k - W - 1] + 2.0f * scratch[k - W] + 1.0f * scratch[k - W + 1]
+                                            + 2.0f * scratch[k - 1]     + 4.0f * scratch[k]     + 2.0f * scratch[k + 1]
+                                            + 1.0f * scratch[k + W - 1] + 2.0f * scratch[k + W] + 1.0f * scratch[k + W + 1]);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (sim->j_smooth_passes > 0) {
+                        float* j_targets[4] = { sf->J_mx, sf->J_my, sf->J_qx, sf->J_qy };
+                        for (int pass = 0; pass < sim->j_smooth_passes; pass++) {
+                            for (int t = 0; t < 4; t++) {
+                                memcpy(scratch, j_targets[t], n * sizeof(float));
+                                for (int j = 1; j < H - 1; j++) {
+                                    for (int i = 1; i < W - 1; i++) {
+                                        const int k = j * W + i;
+                                        j_targets[t][k] = (1.0f / 16.0f) * (
+                                              1.0f * scratch[k - W - 1] + 2.0f * scratch[k - W] + 1.0f * scratch[k - W + 1]
+                                            + 2.0f * scratch[k - 1]     + 4.0f * scratch[k]     + 2.0f * scratch[k + 1]
+                                            + 1.0f * scratch[k + W - 1] + 2.0f * scratch[k + W] + 1.0f * scratch[k + W + 1]);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                free(scratch);
+            }
+        }
     }
 
     if (sim->field_evolution_enabled) {
@@ -303,6 +534,20 @@ void gr_sim_step(gr_sim_t* sim) {
             sim->fields[f].prev  = sim->fields[f].curr;
             sim->fields[f].curr  = sim->fields[f].next;
             sim->fields[f].next  = tmp;
+        }
+        /* v39: step + rotate each per-particle self-field set. */
+        if (sim->self_field_sets) {
+            for (int pi = 0; pi < sim->n_particles; pi++) {
+                gr_self_field_set_t* sf = sim->self_field_sets[pi];
+                if (!sf) continue;
+                gr_field_leapfrog_step_self(sim, sf);
+                for (int f = 0; f < GR_FIELD_COUNT; f++) {
+                    float* tmp          = sf->fields[f].prev;
+                    sf->fields[f].prev  = sf->fields[f].curr;
+                    sf->fields[f].curr  = sf->fields[f].next;
+                    sf->fields[f].next  = tmp;
+                }
+            }
         }
     }
     /* Stage 7+: push particles each step (Boris-leapfrog kick-drift). */

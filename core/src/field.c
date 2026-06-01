@@ -298,6 +298,37 @@ static const float* shapiro_c_local2_for(const struct gr_sim* sim, int f) {
     }
 }
 
+/* v39: step one self-field set with the same scheme the collective uses.
+ * Shapiro is collective-only (per its documentation) so self-fields use
+ * the uniform-c leapfrog variants regardless of em_shapiro_enabled. */
+void gr_field_leapfrog_step_self(struct gr_sim* sim, gr_self_field_set_t* s) {
+    if (!sim || !s) return;
+    const int   W       = sim->width;
+    const int   H       = sim->height;
+    const float c2      = sim->c_eff * sim->c_eff;
+    const float dt2     = sim->dt * sim->dt;
+    const float c2dt2   = c2 * dt2;
+    const float inv_dx2 = 1.0f / (sim->dx * sim->dx);
+    const float* damp   = sim->damping_d;
+    if (sim->periodic_bc) {
+        for (int f = 0; f < GR_FIELD_COUNT; f++)
+            leapfrog_field_periodic(&s->fields[f], damp, W, H, c2dt2, inv_dx2);
+        return;
+    }
+    if (damp) {
+        if (sim->damp_time_form == GR_DAMP_TIME_CRITICAL) {
+            for (int f = 0; f < GR_FIELD_COUNT; f++)
+                leapfrog_field_critical(&s->fields[f], damp, W, H, c2dt2, inv_dx2);
+            return;
+        }
+        for (int f = 0; f < GR_FIELD_COUNT; f++)
+            leapfrog_field_damped(&s->fields[f], damp, W, H, c2dt2, inv_dx2);
+    } else {
+        for (int f = 0; f < GR_FIELD_COUNT; f++)
+            leapfrog_field_undamped(&s->fields[f], W, H, c2dt2, inv_dx2);
+    }
+}
+
 void gr_field_leapfrog_step_all(struct gr_sim* sim) {
     const int   W       = sim->width;
     const int   H       = sim->height;

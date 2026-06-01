@@ -1091,6 +1091,57 @@ void gr_particle_push_all(struct gr_sim* sim) {
             Fy += Fy_em;
         }
 
+        /* v39: per-particle self-field subtraction.  Re-gather the force
+         * using THIS particle's own deposit-only fields, then form
+         *     F_total = F_collective - (1 + eps) * F_self.
+         * Implemented by temporarily swapping sim->fields with the
+         * particle's self_field_sets[i] fields, replaying the same gather
+         * chain, then swapping back.  Background (phi_g_bg, phi_bg, etc.)
+         * is NOT swapped -- bg is not part of any particle's deposit, so
+         * the swap correctly captures only the self-deposit contribution. */
+        gr_self_field_set_t* self = (sim->self_field_sets) ? sim->self_field_sets[i] : NULL;
+        if (self) {
+            gr_field_state_t saved[GR_FIELD_COUNT];
+            for (int f = 0; f < GR_FIELD_COUNT; f++) {
+                saved[f]       = sim->fields[f];
+                sim->fields[f] = self->fields[f];
+            }
+            /* Same gather chain, same v values (vx_pre).  We always use
+             * vx_pre / vy_pre here; the corrector iteration on the
+             * collective force already captured velocity-dependence to
+             * sufficient order for this subtraction. */
+            float s_grad_x, s_grad_y;
+            grav_grad_at(sim, p->x, p->y, &s_grad_x, &s_grad_y);
+            const float s_phi  = gr_phi_g_total_at(sim, p->x, p->y);
+            const float s_Bg_z = B_g_z_at_total(sim, p->x, p->y);
+            const float s_B_em_z = B_em_z_at_total(sim, x_em, y_em);
+            float s_E_phi_grad_x, s_E_phi_grad_y;
+            phi_em_grad_at_total(sim, x_em, y_em, &s_E_phi_grad_x, &s_E_phi_grad_y);
+            float s_E_dAx, s_E_dAy;
+            dt_A_em_at_total(sim, x_em, y_em, &s_E_dAx, &s_E_dAy);
+            float s_G_dAx, s_G_dAy;
+            dt_A_g_at_total(sim, p->x, p->y, &s_G_dAx, &s_G_dAy);
+            float Fx_self_grav, Fy_self_grav;
+            grav_force_at(sim, p->mass, vx_pre, vy_pre,
+                          s_phi, s_grad_x, s_grad_y, s_Bg_z,
+                          s_G_dAx, s_G_dAy,
+                          &Fx_self_grav, &Fy_self_grav);
+            float Fx_self_em, Fy_self_em;
+            em_force_at(p->charge, vx_pre, vy_pre,
+                        s_E_phi_grad_x, s_E_phi_grad_y,
+                        s_E_dAx, s_E_dAy,
+                        s_B_em_z, &Fx_self_em, &Fy_self_em);
+            /* Restore collective field pointers. */
+            for (int f = 0; f < GR_FIELD_COUNT; f++) sim->fields[f] = saved[f];
+
+            const float eps_x = sim->self_field_eps_x ? sim->self_field_eps_x[i] : 0.0f;
+            const float eps_y = sim->self_field_eps_y ? sim->self_field_eps_y[i] : 0.0f;
+            const float Fx_self = Fx_self_grav + Fx_self_em;
+            const float Fy_self = Fy_self_grav + Fy_self_em;
+            Fx -= (1.0f + eps_x) * Fx_self;
+            Fy -= (1.0f + eps_y) * Fy_self;
+        }
+
         p->px += Fx * dt;
         p->py += Fy * dt;
         pmag2 = p->px * p->px + p->py * p->py;
@@ -1134,12 +1185,42 @@ int gr_sim_add_particle(gr_sim_t* sim, float x, float y,
                         float vx, float vy) {
     if (!sim || mass <= 0.0f) return -1;
     if (sim->n_particles >= sim->particles_capacity) {
+        int old_cap = sim->particles_capacity;
         int new_cap = sim->particles_capacity > 0 ? sim->particles_capacity * 2 : 16;
         gr_particle_t* new_arr = (gr_particle_t*) realloc(sim->particles,
                                                           (size_t) new_cap * sizeof(*new_arr));
         if (!new_arr) return -1;
         sim->particles          = new_arr;
         sim->particles_capacity = new_cap;
+        /* v39: grow the parallel self-field tracking arrays.  We only
+         * allocate the tracking arrays themselves (initialized to NULL/0);
+         * the actual per-particle field-sets are allocated lazily by
+         * gr_sim_particle_enable_self_field. */
+        if (sim->self_field_sets) {
+            gr_self_field_set_t** new_sets = (gr_self_field_set_t**) realloc(
+                sim->self_field_sets,
+                (size_t) new_cap * sizeof(*new_sets));
+            if (new_sets) {
+                sim->self_field_sets = new_sets;
+                for (int i = old_cap; i < new_cap; i++) sim->self_field_sets[i] = NULL;
+            }
+        }
+        if (sim->self_field_eps_x) {
+            float* nx = (float*) realloc(sim->self_field_eps_x,
+                                         (size_t) new_cap * sizeof(float));
+            if (nx) {
+                sim->self_field_eps_x = nx;
+                for (int i = old_cap; i < new_cap; i++) sim->self_field_eps_x[i] = 0.0f;
+            }
+        }
+        if (sim->self_field_eps_y) {
+            float* ny = (float*) realloc(sim->self_field_eps_y,
+                                         (size_t) new_cap * sizeof(float));
+            if (ny) {
+                sim->self_field_eps_y = ny;
+                for (int i = old_cap; i < new_cap; i++) sim->self_field_eps_y[i] = 0.0f;
+            }
+        }
     }
     /* Initialize half-step-back momentum from a single half-kick of the
      * force at t=0 (gr_sandbox_v32.tex §9.7 "leapfrog initialization"). The
@@ -1201,6 +1282,19 @@ const gr_particle_t* gr_sim_get_particle(const gr_sim_t* sim, int idx) {
 
 void gr_sim_clear_particles(gr_sim_t* sim) {
     if (!sim) return;
+    /* v39: free any allocated self-field sets, since particles are gone. */
+    if (sim->self_field_sets) {
+        for (int i = 0; i < sim->particles_capacity; i++) {
+            gr_self_field_set_free(sim->self_field_sets[i]);
+            sim->self_field_sets[i] = NULL;
+        }
+    }
+    if (sim->self_field_eps_x) {
+        for (int i = 0; i < sim->particles_capacity; i++) sim->self_field_eps_x[i] = 0.0f;
+    }
+    if (sim->self_field_eps_y) {
+        for (int i = 0; i < sim->particles_capacity; i++) sim->self_field_eps_y[i] = 0.0f;
+    }
     sim->n_particles = 0;
     /* keep capacity allocated for reuse */
 }
