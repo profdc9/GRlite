@@ -377,6 +377,18 @@ int gr_esirkepov_deposit_jxy(float* Jx, float* Jy,
                              float x0, float y0, float x1, float y1,
                              float source);
 
+/* v40 spin dipole curl deposit (gr_sandbox_v38.tex sec:alg_2d step 2).
+ * Deposits J = curl(mu_z * W) at the X_EDGE / Y_EDGE staggering, with
+ * mu_z the scalar z-component of the dipole moment.  Same kernel choices
+ * as the rho/J deposit (CIC, TSC, BUMP); BUMP takes the kernel radius R.
+ * Inherently divergence-free, so no associated rho contribution. */
+void gr_cic_curl_dipole_deposit_jxy (float* Jx, float* Jy, int W, int H, float dx,
+                                      float x_p, float y_p, float mu_z);
+void gr_tsc_curl_dipole_deposit_jxy (float* Jx, float* Jy, int W, int H, float dx,
+                                      float x_p, float y_p, float mu_z);
+void gr_bump_curl_dipole_deposit_jxy(float* Jx, float* Jy, int W, int H, float dx,
+                                      float x_p, float y_p, float mu_z, float R);
+
 /* Defined in scenarios/registry.c. */
 const gr_scenario_t* gr_scenario_find(const char* name);
 

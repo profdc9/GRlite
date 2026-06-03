@@ -409,6 +409,41 @@ void gr_sim_step(gr_sim_t* sim) {
                 if (p->charge != 0.0f && vy != 0.0f) gr_cic_deposit_yedge(sim->J_qy, W, H, dx, xc, yc, p->charge * vy);
                 if (violated) sim->esirkepov_violations++;
             }
+
+            /* v40 spin dipole curl deposit: a spinning particle contributes
+             * a curl-of-dipole-density on top of the regular J.  Magnetic
+             * moment mu = (g q / 2m) S for EM; gravitomagnetic moment
+             * sigma = 2 S.  Same kernel as the rho/J deposit.  Inherently
+             * divergence-free so rho continuity is preserved. */
+            if (p->spin != 0.0f) {
+                const float mu_em   = (p->mass > 0.0f)
+                    ? (p->g_factor * p->charge / (2.0f * p->mass)) * p->spin
+                    : 0.0f;
+                const float sigma_g = 2.0f * p->spin;
+                if (sim->shape_function == GR_SHAPE_BUMP) {
+                    const float Rk = sim->kernel_radius;
+                    if (mu_em   != 0.0f) gr_bump_curl_dipole_deposit_jxy(sim->J_qx, sim->J_qy, W, H, dx, p->x, p->y, mu_em,   Rk);
+                    if (sigma_g != 0.0f) gr_bump_curl_dipole_deposit_jxy(sim->J_mx, sim->J_my, W, H, dx, p->x, p->y, sigma_g, Rk);
+                    if (self) {
+                        if (mu_em   != 0.0f) gr_bump_curl_dipole_deposit_jxy(self->J_qx, self->J_qy, W, H, dx, p->x, p->y, mu_em,   Rk);
+                        if (sigma_g != 0.0f) gr_bump_curl_dipole_deposit_jxy(self->J_mx, self->J_my, W, H, dx, p->x, p->y, sigma_g, Rk);
+                    }
+                } else if (sim->shape_function == GR_SHAPE_TSC) {
+                    if (mu_em   != 0.0f) gr_tsc_curl_dipole_deposit_jxy(sim->J_qx, sim->J_qy, W, H, dx, p->x, p->y, mu_em);
+                    if (sigma_g != 0.0f) gr_tsc_curl_dipole_deposit_jxy(sim->J_mx, sim->J_my, W, H, dx, p->x, p->y, sigma_g);
+                    if (self) {
+                        if (mu_em   != 0.0f) gr_tsc_curl_dipole_deposit_jxy(self->J_qx, self->J_qy, W, H, dx, p->x, p->y, mu_em);
+                        if (sigma_g != 0.0f) gr_tsc_curl_dipole_deposit_jxy(self->J_mx, self->J_my, W, H, dx, p->x, p->y, sigma_g);
+                    }
+                } else {
+                    if (mu_em   != 0.0f) gr_cic_curl_dipole_deposit_jxy(sim->J_qx, sim->J_qy, W, H, dx, p->x, p->y, mu_em);
+                    if (sigma_g != 0.0f) gr_cic_curl_dipole_deposit_jxy(sim->J_mx, sim->J_my, W, H, dx, p->x, p->y, sigma_g);
+                    if (self) {
+                        if (mu_em   != 0.0f) gr_cic_curl_dipole_deposit_jxy(self->J_qx, self->J_qy, W, H, dx, p->x, p->y, mu_em);
+                        if (sigma_g != 0.0f) gr_cic_curl_dipole_deposit_jxy(self->J_mx, self->J_my, W, H, dx, p->x, p->y, sigma_g);
+                    }
+                }
+            }
         }
         /* Binomial smoothing on rho_matter (and rho_q) if enabled.
          * Applied N_smooth times, where each pass is the 3x3 [[1,2,1],

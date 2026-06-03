@@ -884,3 +884,188 @@ int gr_esirkepov_deposit_jxy(float* Jx, float* Jy,
     }
     return 1;
 }
+
+/* ============================================================================
+ * v40 Spin dipole curl deposition
+ *
+ * For a point magnetic dipole with z-component mu at (x_p, y_p), the
+ * magnetization is M(x) = mu * delta^2(x - x_p) zhat.  In 2D, taking the
+ * curl gives J_M = (dM/dy, -dM/dx) -- divergence-free by construction, so
+ * no extra rho_q contribution.
+ *
+ * Discretizing M with a smooth shape kernel W(x - x_p) (so that the curl
+ * is well-defined),
+ *   J_x = +mu * d_y W(x - x_p)   on x-edge sublattice
+ *   J_y = -mu * d_x W(x - x_p)   on y-edge sublattice
+ *
+ * For a tensor-product kernel W(x, y) = wx(x) * wy(y), spatial derivative
+ *   d_y W = wx(x) * dwy(y)/dx_in_cell_units
+ *         = wx(x) * (1/dx) * dw_1d(v)
+ * so the deposit picks up an extra 1/dx beyond the usual 1/(dx*dx) area
+ * normalization.  Total factor: mu * w_1d * dw_1d / dx^3.
+ *
+ * Spec: gr_sandbox_v38.tex sec spin_dipole_curl_deposition and sec:alg_2d
+ * step 2.  Implementations for CIC, TSC, and BUMP kernels are provided so
+ * the production setup (BUMP R=6/8) and legacy CIC/TSC paths both work. */
+
+/* ---- CIC (W_2 / linear) ------------------------------------------------- */
+
+/* CIC dipole curl deposit.  Mu_z is the scalar z-component of the magnetic
+ * dipole moment.  Deposits to J_x at X_EDGE and J_y at Y_EDGE staggering. */
+void gr_cic_curl_dipole_deposit_jxy(float* Jx, float* Jy, int W, int H, float dx,
+                                     float x_p, float y_p, float mu_z) {
+    if (!Jx || !Jy || mu_z == 0.0f) return;
+    const float inv_dx     = 1.0f / dx;
+    const float inv_volume = inv_dx * inv_dx * inv_dx;  /* 1/dx * 1/(dx*dx) */
+
+    /* J_x at X_EDGE: x-direction uses CIC weights at edge sublattice, */
+    /* y-direction uses CIC derivative (constant +/-1) at corner sublattice. */
+    {
+        const float xn = x_p / dx - 0.5f;
+        const float yn = y_p / dx;
+        const int   ic = (int) floorf(xn);
+        const int   jc = (int) floorf(yn);
+        if (ic >= 0 && ic < W - 2 && jc >= 0 && jc < H - 1) {
+            const float alpha = xn - (float) ic;
+            const float wx[2] = { 1.0f - alpha, alpha };
+            /* CIC 1D dw/du at the two support cells: dw[0] = -1, dw[1] = +1. */
+            for (int di = 0; di < 2; di++) {
+                const int i = ic + di;
+                /* J_x = mu * wx * dwy.  dwy[0] = -1, dwy[1] = +1. */
+                Jx[ jc      * W + i] += -mu_z * wx[di] * inv_volume;
+                Jx[(jc + 1) * W + i] += +mu_z * wx[di] * inv_volume;
+            }
+        }
+    }
+    /* J_y at Y_EDGE: x-direction uses CIC derivative, y-direction uses CIC weights. */
+    {
+        const float xn = x_p / dx;
+        const float yn = y_p / dx - 0.5f;
+        const int   ic = (int) floorf(xn);
+        const int   jc = (int) floorf(yn);
+        if (ic >= 0 && ic < W - 1 && jc >= 0 && jc < H - 2) {
+            const float beta = yn - (float) jc;
+            const float wy[2] = { 1.0f - beta, beta };
+            for (int dj = 0; dj < 2; dj++) {
+                const int j = jc + dj;
+                /* J_y = -mu * dwx * wy.  dwx[0] = -1, dwx[1] = +1. */
+                Jy[j * W + ic    ] += +mu_z * wy[dj] * inv_volume;
+                Jy[j * W + ic + 1] += -mu_z * wy[dj] * inv_volume;
+            }
+        }
+    }
+}
+
+/* ---- TSC (W_3 / quadratic B-spline) ------------------------------------ */
+
+void gr_tsc_curl_dipole_deposit_jxy(float* Jx, float* Jy, int W, int H, float dx,
+                                     float x_p, float y_p, float mu_z) {
+    if (!Jx || !Jy || mu_z == 0.0f) return;
+    const float inv_dx     = 1.0f / dx;
+    const float inv_volume = inv_dx * inv_dx * inv_dx;
+
+    /* J_x at X_EDGE: x-edge sublattice in x, corner-like in y. */
+    {
+        const float xn = x_p / dx - 0.5f;
+        const float yn = y_p / dx;
+        const int   ic = (int) floorf(xn + 0.5f);
+        const int   jc = (int) floorf(yn + 0.5f);
+        if (ic >= 1 && ic <= W - 3 && jc >= 1 && jc <= H - 2) {
+            const float u = xn - (float) ic;
+            const float v = yn - (float) jc;
+            float wx[3], dwy[3];
+            tsc_weights_1d(u, wx);
+            tsc_dw_1d(v, dwy);
+            for (int dj = -1; dj <= 1; dj++) {
+                const int j = jc + dj;
+                const int row = j * W;
+                for (int di = -1; di <= 1; di++) {
+                    const int i = ic + di;
+                    Jx[row + i] += mu_z * wx[di + 1] * dwy[dj + 1] * inv_volume;
+                }
+            }
+        }
+    }
+    /* J_y at Y_EDGE: corner-like in x, y-edge sublattice in y. */
+    {
+        const float xn = x_p / dx;
+        const float yn = y_p / dx - 0.5f;
+        const int   ic = (int) floorf(xn + 0.5f);
+        const int   jc = (int) floorf(yn + 0.5f);
+        if (ic >= 1 && ic <= W - 2 && jc >= 1 && jc <= H - 3) {
+            const float u = xn - (float) ic;
+            const float v = yn - (float) jc;
+            float dwx[3], wy[3];
+            tsc_dw_1d(u, dwx);
+            tsc_weights_1d(v, wy);
+            for (int dj = -1; dj <= 1; dj++) {
+                const int j = jc + dj;
+                const int row = j * W;
+                for (int di = -1; di <= 1; di++) {
+                    const int i = ic + di;
+                    Jy[row + i] += -mu_z * dwx[di + 1] * wy[dj + 1] * inv_volume;
+                }
+            }
+        }
+    }
+}
+
+/* ---- BUMP (parameterized C-infinity) ----------------------------------- */
+
+void gr_bump_curl_dipole_deposit_jxy(float* Jx, float* Jy, int W, int H, float dx,
+                                      float x_p, float y_p, float mu_z, float R) {
+    if (!Jx || !Jy || mu_z == 0.0f) return;
+    const float inv_dx     = 1.0f / dx;
+    const float inv_volume = inv_dx * inv_dx * inv_dx;
+    const int   hw         = bump_half_width(R);
+
+    /* J_x at X_EDGE. */
+    {
+        const float xn = x_p / dx - 0.5f;
+        const float yn = y_p / dx;
+        const int   ic = (int) floorf(xn + 0.5f);
+        const int   jc = (int) floorf(yn + 0.5f);
+        if (ic >= hw && ic <= W - 2 - hw && jc >= hw && jc <= H - 1 - hw) {
+            const float u = xn - (float) ic;
+            const float v = yn - (float) jc;
+            float wx[BUMP_MAX_W], dwx_unused[BUMP_MAX_W];
+            float wy[BUMP_MAX_W], dwy[BUMP_MAX_W];
+            bump_weights_1d_R(u, R, hw, wx);
+            bump_dw_1d_R     (v, R, hw, wy, dwy);
+            (void) dwx_unused;
+            for (int dj = -hw; dj <= hw; dj++) {
+                const int j = jc + dj;
+                const int row = j * W;
+                const float wy_idx = wy[dj + hw];  /* not used (the wy was filled by dw call) */
+                (void) wy_idx;
+                for (int di = -hw; di <= hw; di++) {
+                    const int i = ic + di;
+                    Jx[row + i] += mu_z * wx[di + hw] * dwy[dj + hw] * inv_volume;
+                }
+            }
+        }
+    }
+    /* J_y at Y_EDGE. */
+    {
+        const float xn = x_p / dx;
+        const float yn = y_p / dx - 0.5f;
+        const int   ic = (int) floorf(xn + 0.5f);
+        const int   jc = (int) floorf(yn + 0.5f);
+        if (ic >= hw && ic <= W - 1 - hw && jc >= hw && jc <= H - 2 - hw) {
+            const float u = xn - (float) ic;
+            const float v = yn - (float) jc;
+            float wx[BUMP_MAX_W], dwx[BUMP_MAX_W];
+            float wy[BUMP_MAX_W];
+            bump_dw_1d_R     (u, R, hw, wx, dwx);
+            bump_weights_1d_R(v, R, hw, wy);
+            for (int dj = -hw; dj <= hw; dj++) {
+                const int j = jc + dj;
+                const int row = j * W;
+                for (int di = -hw; di <= hw; di++) {
+                    const int i = ic + di;
+                    Jy[row + i] += -mu_z * dwx[di + hw] * wy[dj + hw] * inv_volume;
+                }
+            }
+        }
+    }
+}
