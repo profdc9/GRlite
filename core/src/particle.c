@@ -1149,6 +1149,23 @@ void gr_particle_push_all(struct gr_sim* sim) {
         const float vx = p->px / (gamma * p->mass);
         const float vy = p->py / (gamma * p->mass);
 
+        /* v40 spin precession update (gr_sandbox_v38.tex sec:alg_2d step 11).
+         * In 2D the spin axis is fixed perpendicular to the plane; phi_spin
+         * accumulates the scalar precession phase at rate
+         *   d phi_spin/dt = B_g,z + (g_s q / 2m) B_z + Omega_Thomas,z
+         * with Omega_Thomas,z = -gamma^2/(gamma+1) (v x a)_z / c^2.
+         * Uses post-push v and gamma; acceleration from (v - v_pre)/dt. */
+        {
+            const float ax = (vx - vx_pre) / dt;
+            const float ay = (vy - vy_pre) / dt;
+            const float v_cross_a_z = vx * ay - vy * ax;
+            const float Omega_T = -(gamma * gamma) / (gamma + 1.0f) * v_cross_a_z / c2;
+            const float mag_gyro = (p->mass > 0.0f)
+                ? (p->g_factor * p->charge / (2.0f * p->mass)) : 0.0f;
+            const float Omega_z = Bg_z + mag_gyro * B_em_z + Omega_T;
+            p->phi_spin += Omega_z * dt;
+        }
+
         /* Stage 9: accumulate proper time over [t_n, t_{n+1}] using v^{n+1/2}
          * (just computed) and the (Phi, A_g) at the particle's current
          * position x_n.  This is 2nd-order accurate since v^{n+1/2} sits at
@@ -1268,7 +1285,23 @@ int gr_sim_add_particle(gr_sim_t* sim, float x, float y,
     sim->particles[idx].mass        = mass;
     sim->particles[idx].charge      = charge;
     sim->particles[idx].proper_time = 0.0f;
+    /* v40 spin defaults: zero spin, g=2 (Dirac).  Set via
+     * gr_sim_set_particle_spin if a spinning particle is wanted. */
+    sim->particles[idx].spin        = 0.0f;
+    sim->particles[idx].phi_spin    = 0.0f;
+    sim->particles[idx].g_factor    = 2.0f;
     return idx;
+}
+
+void gr_sim_set_particle_spin(gr_sim_t* sim, int idx, float spin, float g_factor) {
+    if (!sim || idx < 0 || idx >= sim->n_particles) return;
+    sim->particles[idx].spin     = spin;
+    sim->particles[idx].g_factor = g_factor;
+}
+
+void gr_sim_set_particle_phi_spin(gr_sim_t* sim, int idx, float phi_spin) {
+    if (!sim || idx < 0 || idx >= sim->n_particles) return;
+    sim->particles[idx].phi_spin = phi_spin;
 }
 
 int gr_sim_particle_count(const gr_sim_t* sim) {

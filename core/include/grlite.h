@@ -259,6 +259,31 @@ typedef struct {
      * with Phi, A_g evaluated at the particle's current position.
      * Initialized to 0 in gr_sim_add_particle. */
     float proper_time;
+    /* v40 -- intrinsic spin (gr_sandbox_v38.tex sec:alg_2d, sec 16).
+     *
+     * In strict 2D the spin 3-vector reduces to a scalar spin angular
+     * momentum perpendicular to the plane, plus a scalar precession
+     * angle.  The Tulczyjew-Dixon constraint is automatically satisfied
+     * (no correction step needed) since both the spin axis and any
+     * precession axis lie along z.
+     *
+     * spin       = magnitude of the spin angular momentum (z-component).
+     *              Conserved in the absence of radiation damping; set
+     *              once at init.  Default 0 (no spin).
+     * phi_spin   = accumulated precession phase, in radians.  Updated
+     *              each step by
+     *                d phi_spin/dt = B_g,z + (g_s q / 2m) B_z + Omega_T,z
+     *              where Omega_T,z = -gamma^2/(gamma+1) (v x a)_z / c^2.
+     *              Pure diagnostic: changing phi_spin does not feed back
+     *              into the dynamics in the pure 2D treatment, but it
+     *              is the visualization observable.
+     * g_factor   = gyromagnetic g-factor.  Default 2.0 (Dirac fermion).
+     *              Affects only the EM Larmor contribution to phi_spin's
+     *              precession rate, via the magnetic moment
+     *              mu = g_factor * charge / (2 * mass) * spin. */
+    float spin;
+    float phi_spin;
+    float g_factor;
 } gr_particle_t;
 
 /* Force tier — selects which terms enter the gravitational force.
@@ -394,6 +419,17 @@ int  gr_sim_add_particle(gr_sim_t* sim, float x, float y,
 int  gr_sim_particle_count(const gr_sim_t* sim);
 const gr_particle_t* gr_sim_get_particle(const gr_sim_t* sim, int idx);
 void gr_sim_clear_particles(gr_sim_t* sim);
+
+/* v40 -- particle spin (gr_sandbox_v38.tex sec:alg_2d / sec 16).
+ *
+ * Set the scalar spin magnitude (z-component of S, perpendicular to
+ * the 2D plane) and g-factor on particle idx.  Default after
+ * gr_sim_add_particle: spin = 0 (no spin), g_factor = 2.0 (Dirac).
+ * Setting nonzero spin enables the phi_spin precession diagnostic
+ * and the dipole-source / spin-gradient-force contributions (when
+ * phases 2/3 land). */
+void gr_sim_set_particle_spin(gr_sim_t* sim, int idx, float spin, float g_factor);
+void gr_sim_set_particle_phi_spin(gr_sim_t* sim, int idx, float phi_spin);
 
 /* v39: per-particle self-field subtraction (gr_sandbox_v39.tex).
  *
