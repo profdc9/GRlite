@@ -52,13 +52,14 @@ void gr_sim_clear_background(gr_sim_t* sim) {
     sim->bg_kind   = GR_BG_KIND_NONE;
     sim->bg_x0     = 0.0f;
     sim->bg_y0     = 0.0f;
-    sim->bg_GM     = 0.0f;
-    sim->bg_eps    = 0.0f;
-    sim->bg_charge = 0.0f;
-    sim->bg_Jz     = 0.0f;
-    sim->bg_B0     = 0.0f;
-    sim->bg_B0_em  = 0.0f;
-    sim->bg_Ex_em  = 0.0f;
+    sim->bg_GM         = 0.0f;
+    sim->bg_eps        = 0.0f;
+    sim->bg_charge     = 0.0f;
+    sim->bg_Jz         = 0.0f;
+    sim->bg_B0         = 0.0f;
+    sim->bg_B0_em      = 0.0f;
+    sim->bg_B_prime_em = 0.0f;
+    sim->bg_Ex_em      = 0.0f;
     sim->bg_Ey_em  = 0.0f;
 }
 
@@ -291,6 +292,47 @@ void gr_sim_set_background_uniform_magnetic(gr_sim_t* sim,
     sim->bg_B0_em = B0;
 }
 
+/* v40 Linear-B background.  A_x = 0; A_y(x) = B0 (x-x0) + 0.5 B' (x-x0)^2
+ * gives B_z = d_x A_y = B0 + B' (x - x0). */
+void gr_sim_set_background_linear_magnetic(gr_sim_t* sim,
+                                            float x0, float y0,
+                                            float B0, float B_prime) {
+    if (!sim) return;
+    gr_sim_clear_background(sim);
+    float* Ax = ensure_bg_alloc(sim, GR_FIELD_A_X);
+    float* Ay = ensure_bg_alloc(sim, GR_FIELD_A_Y);
+    if (!Ax || !Ay) return;
+
+    const int   W  = sim->width;
+    const int   H  = sim->height;
+    const float dx = sim->dx;
+
+    /* A_x at X_EDGE = 0 everywhere. */
+    for (int j = 0; j < H; j++) {
+        const int row = j * W;
+        for (int i = 0; i < W; i++) Ax[row + i] = 0.0f;
+    }
+    /* A_y at Y_EDGE sublattice -- node positions (i, j+0.5)*dx. */
+    for (int j = 0; j < H; j++) {
+        const int row = j * W;
+        for (int i = 0; i < W; i++) {
+            const float xv  = (float) i * dx;
+            const float xrm = xv - x0;
+            Ay[row + i] = B0 * xrm + 0.5f * B_prime * xrm * xrm;
+        }
+    }
+
+    sim->bg_kind        = GR_BG_KIND_LINEAR_MAGNETIC;
+    sim->bg_x0          = x0;
+    sim->bg_y0          = y0;
+    sim->bg_GM          = 0.0f;
+    sim->bg_eps         = 0.0f;
+    sim->bg_Jz          = 0.0f;
+    sim->bg_B0          = 0.0f;
+    sim->bg_B0_em       = B0;
+    sim->bg_B_prime_em  = B_prime;
+}
+
 /* Uniform EM electric background — fills the EM scalar phi_bg with a
  * linear potential whose negative gradient is the desired uniform field:
  *   phi^{bg}(x, y) = -( E_x (x - x_0) + E_y (y - y_0) ),
@@ -519,6 +561,15 @@ int gr_bg_eval_A_em(const struct gr_sim* sim, float x, float y,
         *Ay_out =  0.5f * sim->bg_B0_em * dxi;
         return 1;
     }
+    case GR_BG_KIND_LINEAR_MAGNETIC: {
+        /* A_x = 0; A_y = B0 (x - x0) + 0.5 B' (x - x0)^2 ->
+         * B_z = d_x A_y = B0 + B' (x - x0). */
+        const float dxi = x - sim->bg_x0;
+        (void) y;
+        *Ax_out = 0.0f;
+        *Ay_out = sim->bg_B0_em * dxi + 0.5f * sim->bg_B_prime_em * dxi * dxi;
+        return 1;
+    }
     default:
         *Ax_out = 0.0f;
         *Ay_out = 0.0f;
@@ -538,6 +589,12 @@ int gr_bg_eval_B_em(const struct gr_sim* sim, float x, float y,
         /* Constant by construction. */
         (void) x; (void) y;
         *Bz_out = sim->bg_B0_em;
+        return 1;
+    }
+    case GR_BG_KIND_LINEAR_MAGNETIC: {
+        /* B_z = B0 + B' (x - x0). */
+        (void) y;
+        *Bz_out = sim->bg_B0_em + sim->bg_B_prime_em * (x - sim->bg_x0);
         return 1;
     }
     default:

@@ -705,6 +705,25 @@ void gr_sim_set_background_uniform_magnetic(gr_sim_t* sim,
                                             float x0, float y0,
                                             float B0);
 
+/* v40: Linear-gradient magnetic background -- B_z varies linearly with x.
+ *
+ *   B_z^{bg}(x, y) = B0 + B_prime * (x - x0)
+ *
+ * implemented via the vector potential
+ *
+ *   A_x^{bg} = 0
+ *   A_y^{bg}(x) = B0 (x - x0) + 0.5 B_prime (x - x0)^2
+ *
+ * which gives B_z = d_x A_y = B0 + B_prime (x - x0).
+ *
+ * Used for Stage 57 Stern-Gerlach validation: a spinning charged particle
+ * placed in this gradient feels F_x = mu * B_prime where mu = (g q / 2m) S
+ * is its magnetic moment.  Analytic gradient of B is uniform and equal to
+ * (B_prime, 0), so no kernel artifacts contaminate the test. */
+void gr_sim_set_background_linear_magnetic(gr_sim_t* sim,
+                                            float x0, float y0,
+                                            float B0, float B_prime);
+
 /* Uniform electric field — fills phi^{bg} (EM scalar potential) so the
  * gradient gives a spatially constant (E_x, E_y):
  *
@@ -764,7 +783,8 @@ typedef enum {
     GR_BG_KIND_UNIFORM_GRAVITOMAGNETIC = 3,
     GR_BG_KIND_UNIFORM_MAGNETIC        = 4,
     GR_BG_KIND_UNIFORM_ELECTRIC        = 5,
-    GR_BG_KIND_POINT_CHARGE            = 6
+    GR_BG_KIND_POINT_CHARGE            = 6,
+    GR_BG_KIND_LINEAR_MAGNETIC         = 7  /* v40 -- B_z(x) = B0 + B' (x - x0) */
     /* Future: CHARGED_POINT_MASS, KERR_NEWMAN, ... */
 } gr_bg_kind_t;
 

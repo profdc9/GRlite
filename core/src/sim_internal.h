@@ -213,6 +213,9 @@ struct gr_sim {
      *   A_x = -0.5 B0_em (y - bg_y0),  A_y = +0.5 B0_em (x - bg_x0).
      * Stage 23 unit-isolation test for the q v x B EM Lorentz force. */
     float        bg_B0_em;
+    /* v40 Linear B_z gradient: B_z(x) = bg_B0_em + bg_B_prime_em (x - bg_x0).
+     * Used by GR_BG_KIND_LINEAR_MAGNETIC for Stage 57 Stern-Gerlach test. */
+    float        bg_B_prime_em;
     /* Uniform EM electric field (E_x, E_y), used by GR_BG_KIND_UNIFORM_ELECTRIC.
      *   phi^{bg}(x, y) = -( bg_Ex_em (x - bg_x0) + bg_Ey_em (y - bg_y0) )
      * Stage 24 unit-isolation test for the q E EM Lorentz force. */

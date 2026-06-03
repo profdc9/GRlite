@@ -3,6 +3,7 @@
  * §9.5 (CIC adjoint condition for force interpolation), and v33 §12.7. */
 
 #include "grlite.h"
+#include <stdio.h>
 #include "sim_internal.h"
 
 #include <math.h>
@@ -1099,8 +1100,11 @@ void gr_particle_push_all(struct gr_sim* sim) {
         }
         /* v40 spin-gradient force (Stern-Gerlach-like).
          * F_spin = s * grad B_g,z + mu * grad B_z,
-         * where mu = (g q / 2m) * spin.  Only adds anything when the
-         * particle has spin AND there is a nonzero B field gradient. */
+         * where mu = (g q / 2m) * spin.  Computed BEFORE the corrector
+         * but stored separately (since the corrector overwrites Fx, Fy
+         * with the v-dependent terms it computes from scratch).  We
+         * fold spin force back in AFTER the corrector. */
+        float Fx_spin = 0.0f, Fy_spin = 0.0f;
         if (p->spin != 0.0f) {
             float dBg_dx = 0.0f, dBg_dy = 0.0f;
             float dBe_dx = 0.0f, dBe_dy = 0.0f;
@@ -1109,9 +1113,11 @@ void gr_particle_push_all(struct gr_sim* sim) {
             const float mu_em = (p->mass > 0.0f)
                 ? (p->g_factor * p->charge / (2.0f * p->mass)) * p->spin
                 : 0.0f;
-            Fx += p->spin * dBg_dx + mu_em * dBe_dx;
-            Fy += p->spin * dBg_dy + mu_em * dBe_dy;
+            Fx_spin = p->spin * dBg_dx + mu_em * dBe_dx;
+            Fy_spin = p->spin * dBg_dy + mu_em * dBe_dy;
         }
+        Fx += Fx_spin;
+        Fy += Fy_spin;
 
         /* Corrector iteration for velocity-dependent terms (Tier-2 scalar
          * coupling + Tier-1 gravitomagnetic v x B_g + EM v x B_em):
@@ -1139,6 +1145,9 @@ void gr_particle_push_all(struct gr_sim* sim) {
                         B_em_z, &Fx_em, &Fy_em);
             Fx += Fx_em;
             Fy += Fy_em;
+            /* Re-fold spin-gradient force back in (corrector overwrote it). */
+            Fx += Fx_spin;
+            Fy += Fy_spin;
         }
 
         /* v39: per-particle self-field subtraction.  Re-gather the force
@@ -1181,6 +1190,24 @@ void gr_particle_push_all(struct gr_sim* sim) {
                         s_E_phi_grad_x, s_E_phi_grad_y,
                         s_E_dAx, s_E_dAy,
                         s_B_em_z, &Fx_self_em, &Fy_self_em);
+            /* v40: include the spin-gradient force in the self-subtraction.
+             * The B_*_z_grad_at calls below read from sim->fields (now
+             * swapped to self->fields), so they return the gradient of
+             * the THIS-particle-only field at the particle's position.
+             * Subtracting this leaves only the cross-particle contribution. */
+            if (p->spin != 0.0f) {
+                float s_dBg_dx = 0.0f, s_dBg_dy = 0.0f;
+                float s_dBe_dx = 0.0f, s_dBe_dy = 0.0f;
+                B_g_z_grad_at (sim, p->x,  p->y,  &s_dBg_dx, &s_dBg_dy);
+                B_em_z_grad_at(sim, x_em, y_em, &s_dBe_dx, &s_dBe_dy);
+                const float s_mu_em = (p->mass > 0.0f)
+                    ? (p->g_factor * p->charge / (2.0f * p->mass)) * p->spin
+                    : 0.0f;
+                Fx_self_grav += p->spin  * s_dBg_dx;
+                Fy_self_grav += p->spin  * s_dBg_dy;
+                Fx_self_em   += s_mu_em * s_dBe_dx;
+                Fy_self_em   += s_mu_em * s_dBe_dy;
+            }
             /* Restore collective field pointers. */
             for (int f = 0; f < GR_FIELD_COUNT; f++) sim->fields[f] = saved[f];
 
