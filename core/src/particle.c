@@ -985,6 +985,41 @@ static float B_em_z_at_total(const struct gr_sim* sim, float x, float y) {
     return bg + pert;
 }
 
+/* v40 spin-gradient force: returns (d B_z / d x, d B_z / d y) at the
+ * particle position via centered 4-point finite difference of the
+ * existing on-the-fly B-field gatherers.  Step size = dx (one cell).
+ * Returns zero if the relevant field gate is disabled (so we don't
+ * compute B for it). */
+static void B_em_z_grad_at(const struct gr_sim* sim, float x, float y,
+                            float* dBx_out, float* dBy_out) {
+    if (!sim || !sim->em_lorentz_force_enabled) {
+        *dBx_out = 0.0f; *dBy_out = 0.0f; return;
+    }
+    const float h = sim->dx;
+    const float inv_2h = 1.0f / (2.0f * h);
+    const float Bz_xp = B_em_z_at_total(sim, x + h, y);
+    const float Bz_xm = B_em_z_at_total(sim, x - h, y);
+    const float Bz_yp = B_em_z_at_total(sim, x, y + h);
+    const float Bz_ym = B_em_z_at_total(sim, x, y - h);
+    *dBx_out = (Bz_xp - Bz_xm) * inv_2h;
+    *dBy_out = (Bz_yp - Bz_ym) * inv_2h;
+}
+
+static void B_g_z_grad_at(const struct gr_sim* sim, float x, float y,
+                           float* dBx_out, float* dBy_out) {
+    if (!sim || !sim->gravitomagnetic_force_enabled) {
+        *dBx_out = 0.0f; *dBy_out = 0.0f; return;
+    }
+    const float h = sim->dx;
+    const float inv_2h = 1.0f / (2.0f * h);
+    const float Bz_xp = B_g_z_at_total(sim, x + h, y);
+    const float Bz_xm = B_g_z_at_total(sim, x - h, y);
+    const float Bz_yp = B_g_z_at_total(sim, x, y + h);
+    const float Bz_ym = B_g_z_at_total(sim, x, y - h);
+    *dBx_out = (Bz_xp - Bz_xm) * inv_2h;
+    *dBy_out = (Bz_yp - Bz_ym) * inv_2h;
+}
+
 /* Boris-leapfrog kick-drift for one timestep.
  *
  * gr_sandbox_v32.tex §9.2:
@@ -1061,6 +1096,21 @@ void gr_particle_push_all(struct gr_sim* sim) {
                         B_em_z, &Fx_em, &Fy_em);
             Fx += Fx_em;
             Fy += Fy_em;
+        }
+        /* v40 spin-gradient force (Stern-Gerlach-like).
+         * F_spin = s * grad B_g,z + mu * grad B_z,
+         * where mu = (g q / 2m) * spin.  Only adds anything when the
+         * particle has spin AND there is a nonzero B field gradient. */
+        if (p->spin != 0.0f) {
+            float dBg_dx = 0.0f, dBg_dy = 0.0f;
+            float dBe_dx = 0.0f, dBe_dy = 0.0f;
+            B_g_z_grad_at (sim, p->x,  p->y,  &dBg_dx, &dBg_dy);
+            B_em_z_grad_at(sim, x_em, y_em, &dBe_dx, &dBe_dy);
+            const float mu_em = (p->mass > 0.0f)
+                ? (p->g_factor * p->charge / (2.0f * p->mass)) * p->spin
+                : 0.0f;
+            Fx += p->spin * dBg_dx + mu_em * dBe_dx;
+            Fy += p->spin * dBg_dy + mu_em * dBe_dy;
         }
 
         /* Corrector iteration for velocity-dependent terms (Tier-2 scalar
