@@ -387,11 +387,12 @@ int  gr_sim_get_em_magnetic_enabled(const gr_sim_t* sim);
  * which damps the Lorenz gauge violation G = d_t phi / c^2 + div A on
  * a timescale ~ 1/(R c).  Bounds the linear gauge-residual accumulation
  * that comes from inconsistent source deposition (eg the v40 spin
- * dipole's approximately-but-not-exactly div-free J).  Default ON with
- * R = CFL^2/4 set at gr_sim_create.  Cost: one cheap multiply-add pass
- * per scalar potential per step.  Has no effect on particle dynamics
- * (forces are gauge-invariant); purely cleans up potential
- * visualizations and the gauge-residual diagnostic. */
+ * dipole's approximately-but-not-exactly div-free J).
+ *
+ * Default OFF.  The doc claims cleaning is "purely cosmetic" but in
+ * the discrete scheme it shifts orbital periods (Stage 10: 6.8%) and
+ * affects other diagnostics.  Enable only when gauge-residual
+ * monitoring matters more than per-step dynamic fidelity. */
 void  gr_sim_set_parabolic_gauge_cleaning_enabled(gr_sim_t* sim, int enabled);
 int   gr_sim_get_parabolic_gauge_cleaning_enabled(const gr_sim_t* sim);
 void  gr_sim_set_parabolic_gauge_R(gr_sim_t* sim, float R);

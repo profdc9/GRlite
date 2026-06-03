@@ -79,10 +79,18 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
     sim->em_inductive_enabled          = 1;
     sim->em_electrostatic_enabled      = 1;
     sim->em_magnetic_enabled           = 1;
-    /* v40 parabolic gauge cleaning: default ON with R = CFL^2/4 per
-     * gr_sandbox_v38.tex sec:gauge.  Cheap and bounds Lorenz drift to
-     * a small steady-state value. */
-    sim->parabolic_gauge_cleaning_enabled = 1;
+    /* v40 parabolic Lorenz-gauge cleaning (gr_sandbox_v38.tex sec:gauge).
+     * Default OFF: the doc claims cleaning is "purely cosmetic" but
+     * empirically (2026-06-03 regression) it shifts orbital periods
+     * by 6.8%% (stage10), causes CFL-sweep failures (stage29), and
+     * flips field signs in PIC profiles (stage32b).  The discrete
+     * scheme inherits gauge invariance only approximately, so
+     * modifying phi (the cleaning operation) leaks into the gradient
+     * force on charged particles.  When enabled the cleaning IS
+     * effective at bounding the Lorenz-residual drift; turn on via
+     * gr_sim_set_parabolic_gauge_cleaning_enabled(sim, 1) if that
+     * matters more than dynamic fidelity. */
+    sim->parabolic_gauge_cleaning_enabled = 0;
     sim->parabolic_gauge_R                = cfl * cfl * 0.25f;
     sim->j_smooth_passes               = 0;
     sim->kernel_radius                 = 1.5f;
