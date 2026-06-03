@@ -391,3 +391,66 @@ void gr_field_leapfrog_step_all(struct gr_sim* sim) {
         }
     }
 }
+
+/* v40 parabolic Lorenz-gauge cleaning (gr_sandbox_v38.tex sec:gauge,
+ * eq:parabolic_clean).  Per-step subtraction
+ *   phi(i,j) -= R c^2 dt * div A(i,j)
+ * applied to both phi_em (with div A_em from A_x, A_y) and Phi_g (with
+ * div A_g from A_gx, A_gy).  div is the discrete divergence at the corner
+ * sublattice using the edge-staggered A:
+ *   div A (i,j) = (A_x[i+1/2,j] - A_x[i-1/2,j])/dx
+ *               + (A_y[i,j+1/2] - A_y[i,j-1/2])/dx
+ * Storage indexing: A_x at storage[j*W + i] represents A_x at edge
+ * position (i+0.5, j); so A_x at (i-0.5, j) is storage[j*W + (i-1)]. */
+static void parabolic_clean_pair(float* phi, const float* Ax, const float* Ay,
+                                  int W, int H, float coef) {
+    /* coef = -R c^2 dt / dx (the inv_dx is from the central differences). */
+    for (int j = 1; j < H - 1; j++) {
+        const int row     = j * W;
+        const int row_dn  = (j - 1) * W;
+        for (int i = 1; i < W - 1; i++) {
+            const float dAx = Ax[row    + i] - Ax[row    + (i - 1)];
+            const float dAy = Ay[row    + i] - Ay[row_dn + i];
+            const float div = dAx + dAy;
+            phi[row + i] += coef * div;
+        }
+    }
+}
+
+void gr_field_parabolic_gauge_clean(struct gr_sim* sim) {
+    if (!sim || !sim->parabolic_gauge_cleaning_enabled) return;
+    if (sim->parabolic_gauge_R <= 0.0f) return;
+    const int W = sim->width, H = sim->height;
+    const float c2 = sim->c_eff * sim->c_eff;
+    const float coef = -sim->parabolic_gauge_R * c2 * sim->dt / sim->dx;
+
+    /* EM: phi_em from div A_x, A_y. */
+    parabolic_clean_pair(sim->fields[GR_FIELD_PHI_EM  ].curr,
+                          sim->fields[GR_FIELD_A_X     ].curr,
+                          sim->fields[GR_FIELD_A_Y     ].curr,
+                          W, H, coef);
+    /* GEM: Phi_g from div A_g. */
+    parabolic_clean_pair(sim->fields[GR_FIELD_PHI_GRAV].curr,
+                          sim->fields[GR_FIELD_A_GX    ].curr,
+                          sim->fields[GR_FIELD_A_GY    ].curr,
+                          W, H, coef);
+
+    /* Apply identically to each per-particle self-field set so the
+     * self-field's gauge state stays clean.  Important because the spin
+     * dipole's div-J spurious bit gets deposited into both the collective
+     * AND each opted-in particle's self J. */
+    if (sim->self_field_sets) {
+        for (int p = 0; p < sim->particles_capacity; p++) {
+            gr_self_field_set_t* s = sim->self_field_sets[p];
+            if (!s) continue;
+            parabolic_clean_pair(s->fields[GR_FIELD_PHI_EM  ].curr,
+                                  s->fields[GR_FIELD_A_X     ].curr,
+                                  s->fields[GR_FIELD_A_Y     ].curr,
+                                  W, H, coef);
+            parabolic_clean_pair(s->fields[GR_FIELD_PHI_GRAV].curr,
+                                  s->fields[GR_FIELD_A_GX    ].curr,
+                                  s->fields[GR_FIELD_A_GY    ].curr,
+                                  W, H, coef);
+        }
+    }
+}

@@ -79,6 +79,11 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
     sim->em_inductive_enabled          = 1;
     sim->em_electrostatic_enabled      = 1;
     sim->em_magnetic_enabled           = 1;
+    /* v40 parabolic gauge cleaning: default ON with R = CFL^2/4 per
+     * gr_sandbox_v38.tex sec:gauge.  Cheap and bounds Lorenz drift to
+     * a small steady-state value. */
+    sim->parabolic_gauge_cleaning_enabled = 1;
+    sim->parabolic_gauge_R                = cfl * cfl * 0.25f;
     sim->j_smooth_passes               = 0;
     sim->kernel_radius                 = 1.5f;
     /* J time-correction off by default (raw Esirkepov J^{n-1/2}). */
@@ -584,6 +589,11 @@ void gr_sim_step(gr_sim_t* sim) {
                 }
             }
         }
+        /* v40 parabolic Lorenz gauge cleaning: applied to phi and Phi_g
+         * after each leapfrog + buffer rotation.  Bounds the gauge drift
+         * from inconsistent source deposition (eg the spin dipole's
+         * approximately-but-not-exactly div-free J).  Default ON. */
+        gr_field_parabolic_gauge_clean(sim);
     }
     /* Stage 7+: push particles each step (Boris-leapfrog kick-drift). */
     if (sim->n_particles > 0) gr_particle_push_all(sim);
@@ -814,6 +824,21 @@ void gr_sim_set_em_magnetic_enabled(gr_sim_t* sim, int enabled) {
 }
 int gr_sim_get_em_magnetic_enabled(const gr_sim_t* sim) {
     return sim ? sim->em_magnetic_enabled : 0;
+}
+
+void gr_sim_set_parabolic_gauge_cleaning_enabled(gr_sim_t* sim, int enabled) {
+    if (!sim) return;
+    sim->parabolic_gauge_cleaning_enabled = enabled ? 1 : 0;
+}
+int gr_sim_get_parabolic_gauge_cleaning_enabled(const gr_sim_t* sim) {
+    return sim ? sim->parabolic_gauge_cleaning_enabled : 0;
+}
+void gr_sim_set_parabolic_gauge_R(gr_sim_t* sim, float R) {
+    if (!sim) return;
+    sim->parabolic_gauge_R = (R > 0.0f) ? R : 0.0f;
+}
+float gr_sim_get_parabolic_gauge_R(const gr_sim_t* sim) {
+    return sim ? sim->parabolic_gauge_R : 0.0f;
 }
 
 /* Apply the recommended pedagogical defaults bundle.

@@ -235,6 +235,19 @@ struct gr_sim {
     float* c_local2_xedge;   /* A_x   sublattice */
     float* c_local2_yedge;   /* A_y   sublattice */
 
+    /* v40 parabolic Lorenz-gauge cleaning (gr_sandbox_v38.tex sec:gauge
+     * eq:parabolic_clean).  Per-step subtraction
+     *   Phi_g <- Phi_g - R c^2 dt (div A_g)
+     *   phi   <- phi   - R c^2 dt (div A)
+     * damps the Lorenz gauge violation G = d_t phi / c^2 + div A on a
+     * timescale ~ 1/(R c).  Converts the linear gauge drift caused by
+     * inconsistent source deposition (eg the v40 spin dipole's
+     * approximately-but-not-exactly div-free J) into a bounded
+     * steady-state.  Default ON with R = CFL^2/4 per the doc's
+     * recommendation. */
+    int   parabolic_gauge_cleaning_enabled;
+    float parabolic_gauge_R;        /* dimensionless damping coefficient */
+
     /* v39: per-particle self-field subtraction.  Each opted-in particle
      * gets its own field-set sourced only by that particle's deposit.
      * Used at gather time as
@@ -276,6 +289,10 @@ void gr_field_leapfrog_step_all(struct gr_sim* sim);
 /* v39 helper: step one self-field set with the same scheme as the
  * collective.  Implemented in field.c. */
 void gr_field_leapfrog_step_self(struct gr_sim* sim, gr_self_field_set_t* s);
+
+/* v40 parabolic Lorenz gauge cleaning.  Applied once per step after
+ * the leapfrog + buffer rotation.  Implemented in field.c. */
+void gr_field_parabolic_gauge_clean(struct gr_sim* sim);
 
 /* Defined in particle.c — pushes all particles one timestep (kick-drift).
  * Reads (background + perturbation) Phi_g at each particle position to
