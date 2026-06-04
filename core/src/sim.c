@@ -92,6 +92,8 @@ gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl)
      * matters more than dynamic fidelity. */
     sim->parabolic_gauge_cleaning_enabled = 0;
     sim->parabolic_gauge_R                = cfl * cfl * 0.25f;
+    /* v41 EM stress-energy contribution to GEM sources: default OFF. */
+    sim->em_stress_energy_enabled         = 0;
     sim->j_smooth_passes               = 0;
     sim->kernel_radius                 = 1.5f;
     /* J time-correction off by default (raw Esirkepov J^{n-1/2}). */
@@ -574,6 +576,12 @@ void gr_sim_step(gr_sim_t* sim) {
         }
     }
 
+    /* v41 EM stress-energy contribution to gravity sources.  Added on
+     * top of the particle-derived rho_matter / J_m before the GEM
+     * wave-equation leapfrog so that the EM field energy and Poynting
+     * flux gravitate via the standard linearized-GR coupling. */
+    gr_sim_apply_em_stress_energy_sources(sim);
+
     if (sim->field_evolution_enabled) {
         gr_field_leapfrog_step_all(sim);
         /* Three-pointer rotation per field. */
@@ -847,6 +855,88 @@ void gr_sim_set_parabolic_gauge_R(gr_sim_t* sim, float R) {
 }
 float gr_sim_get_parabolic_gauge_R(const gr_sim_t* sim) {
     return sim ? sim->parabolic_gauge_R : 0.0f;
+}
+
+void gr_sim_set_em_stress_energy_enabled(gr_sim_t* sim, int enabled) {
+    if (!sim) return;
+    sim->em_stress_energy_enabled = enabled ? 1 : 0;
+}
+int gr_sim_get_em_stress_energy_enabled(const gr_sim_t* sim) {
+    return sim ? sim->em_stress_energy_enabled : 0;
+}
+
+/* v41 -- EM stress-energy contribution to gravity sources
+ * (gr_sandbox_v38.tex sec:alg_2d step 3).
+ *
+ * For each interior corner cell, compute the local EM perturbation
+ * energy density and Poynting flux from the perturbation potentials
+ * and add to rho_matter / J_mx / J_my.  We work in our unit convention
+ * eps_0 = 1/(4 pi k_e), mu_0 = 4 pi k_e / c^2:
+ *
+ *   eps_0 / (2 c^2)  = 1 / (8 pi k_e c^2)
+ *   1 / (mu_0 c^2)   = 1 / (4 pi k_e)
+ *
+ * Approximation: all quantities are evaluated at the corner sublattice
+ * via the natural finite-difference / averaging stencils.  J_EM_x is
+ * deposited into J_mx at the same storage index (effective x-edge
+ * position is dx/2 off the corner; tolerable for smooth field
+ * configurations).  Same for J_EM_y. */
+void gr_sim_apply_em_stress_energy_sources(gr_sim_t* sim) {
+    if (!sim || !sim->em_stress_energy_enabled) return;
+    if (sim->k_e <= 0.0f) return;          /* coupling undefined */
+    const int   W   = sim->width;
+    const int   H   = sim->height;
+    const float dx  = sim->dx;
+    const float dt  = sim->dt;
+    const float c   = sim->c_eff;
+    const float c2  = c * c;
+    const float pi  = 3.14159265358979323846f;
+    const float eps0_over_2c2 = 1.0f / (8.0f * pi * sim->k_e * c2);
+    const float inv_mu0c2     = 1.0f / (4.0f * pi * sim->k_e);
+    const float inv_dx        = 1.0f / dx;
+    const float inv_2dx       = 1.0f / (2.0f * dx);
+    const float inv_dt        = 1.0f / dt;
+
+    const float* phi  = sim->fields[GR_FIELD_PHI_EM].curr;
+    const float* Ax_c = sim->fields[GR_FIELD_A_X].curr;
+    const float* Ax_p = sim->fields[GR_FIELD_A_X].prev;
+    const float* Ay_c = sim->fields[GR_FIELD_A_Y].curr;
+    const float* Ay_p = sim->fields[GR_FIELD_A_Y].prev;
+
+    for (int j = 1; j < H - 1; j++) {
+        for (int i = 1; i < W - 1; i++) {
+            const int k = j * W + i;
+            /* grad phi at corner (i,j): centered differences. */
+            const float dphi_dx = (phi[k + 1] - phi[k - 1]) * inv_2dx;
+            const float dphi_dy = (phi[k + W] - phi[k - W]) * inv_2dx;
+            /* d_t A averaged to corner from edge values.
+             * Ax storage at [j*W+i] is x-edge at (i+0.5, j); the two
+             * x-edges flanking corner (i, j) are at storage [k-1] and [k]. */
+            const float Ax_corner_c = 0.5f * (Ax_c[k - 1] + Ax_c[k]);
+            const float Ax_corner_p = 0.5f * (Ax_p[k - 1] + Ax_p[k]);
+            const float Ay_corner_c = 0.5f * (Ay_c[k - W] + Ay_c[k]);
+            const float Ay_corner_p = 0.5f * (Ay_p[k - W] + Ay_p[k]);
+            const float dtAx = (Ax_corner_c - Ax_corner_p) * inv_dt;
+            const float dtAy = (Ay_corner_c - Ay_corner_p) * inv_dt;
+            /* (grad phi + d_t A) -- E = -(this) but we square or take J */
+            const float ex = dphi_dx + dtAx;
+            const float ey = dphi_dy + dtAy;
+            const float e2 = ex * ex + ey * ey;
+            /* B_z = curl A at the cell center (i+0.5, j+0.5).  Standard
+             * Yee curl: A_y[j, i+1] - A_y[j, i] minus A_x[j+1, i] - A_x[j, i],
+             * divided by dx.  Used as the B_z value at corner (i, j) --
+             * half-cell offset is a small approximation for smooth fields. */
+            const float Bz = (Ay_c[k + 1] - Ay_c[k]) * inv_dx
+                           - (Ax_c[k + W] - Ax_c[k]) * inv_dx;
+            /* rho_EM = eps_0 / (2 c^2) * (E^2 + c^2 B_z^2) */
+            const float rho_em = eps0_over_2c2 * (e2 + c2 * Bz * Bz);
+            sim->rho_matter[k] += rho_em;
+            /* J_EM = -F_12/(mu_0 c^2) (d_y phi + d_t A_y, -(d_x phi + d_t A_x))
+             * which in our (ex, ey) variables is -B_z * (ey, -ex) / (mu_0 c^2). */
+            sim->J_mx[k] += -Bz * ey * inv_mu0c2;
+            sim->J_my[k] += +Bz * ex * inv_mu0c2;
+        }
+    }
 }
 
 /* Apply the recommended pedagogical defaults bundle.

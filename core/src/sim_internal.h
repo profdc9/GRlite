@@ -251,6 +251,17 @@ struct gr_sim {
     int   parabolic_gauge_cleaning_enabled;
     float parabolic_gauge_R;        /* dimensionless damping coefficient */
 
+    /* v41 EM stress-energy contribution to gravity sources
+     * (gr_sandbox_v38.tex sec:alg_2d step 3).  When enabled, before each
+     * GEM wave-equation step we compute the local EM perturbation field
+     * energy density and Poynting flux and add them to rho_matter / J_m:
+     *   rho_EM = eps_0 / (2 c^2) * (|E|^2 + c^2 B_z^2)
+     *   J_EM   = -F_12 / (mu_0 c^2) * (E_y, -E_x)
+     * where E = -grad phi - d_t A and F_12 = curl_z A.  This is how EM
+     * fields gravitate in linearized GR -- their stress-energy sources
+     * Phi_g and A_g.  Default OFF for backward compatibility. */
+    int em_stress_energy_enabled;
+
     /* v39: per-particle self-field subtraction.  Each opted-in particle
      * gets its own field-set sourced only by that particle's deposit.
      * Used at gather time as
@@ -296,6 +307,10 @@ void gr_field_leapfrog_step_self(struct gr_sim* sim, gr_self_field_set_t* s);
 /* v40 parabolic Lorenz gauge cleaning.  Applied once per step after
  * the leapfrog + buffer rotation.  Implemented in field.c. */
 void gr_field_parabolic_gauge_clean(struct gr_sim* sim);
+
+/* v41 EM stress-energy contribution to GEM sources.  Applied once per
+ * step after particle deposits, before the FDTD evolution. */
+void gr_sim_apply_em_stress_energy_sources(struct gr_sim* sim);
 
 /* Defined in particle.c — pushes all particles one timestep (kick-drift).
  * Reads (background + perturbation) Phi_g at each particle position to

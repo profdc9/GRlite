@@ -398,6 +398,29 @@ int   gr_sim_get_parabolic_gauge_cleaning_enabled(const gr_sim_t* sim);
 void  gr_sim_set_parabolic_gauge_R(gr_sim_t* sim, float R);
 float gr_sim_get_parabolic_gauge_R(const gr_sim_t* sim);
 
+/* v41 EM stress-energy contribution to gravity sources
+ * (gr_sandbox_v38.tex sec:alg_2d step 3).
+ *
+ * When enabled, before each GEM wave-equation step gr_sim_step computes
+ * the local EM perturbation field energy density and Poynting flux and
+ * adds them to rho_matter and J_m:
+ *
+ *   rho_EM = eps_0 / (2 c^2) * (|grad phi + d_t A|^2 + c^2 (curl A)_z^2)
+ *   J_EM_x = -(curl A)_z / (mu_0 c^2) * (d_y phi + d_t A_y)
+ *   J_EM_y = +(curl A)_z / (mu_0 c^2) * (d_x phi + d_t A_x)
+ *
+ * This is how EM fields gravitate in linearized GR -- their stress-
+ * energy contributes to Phi_g and A_g via the gravitational wave
+ * equation source.  Background EM potentials are excluded to avoid
+ * double-counting; only the perturbation phi^pert and A^pert from the
+ * sim->fields arrays are used.
+ *
+ * Default OFF.  Cost: one O(N_cells) pass per step.  Enable for demos
+ * of EM-field gravitational radiation, parallel-currents extra
+ * attraction, etc. */
+void gr_sim_set_em_stress_energy_enabled(gr_sim_t* sim, int enabled);
+int  gr_sim_get_em_stress_energy_enabled(const gr_sim_t* sim);
+
 
 
 
