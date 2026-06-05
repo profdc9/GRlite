@@ -13,14 +13,24 @@ import type { GRliteModule } from './grlite';
 
 /* ---- Sim configuration -------------------------------------------------- */
 
-const GRID_W = 256;
-const GRID_H = 256;
+const GRID_W = 384;
+const GRID_H = 384;
 const DX = 1.0;
 const C_EFF = 1.0;
 const CFL = 1.0 / Math.sqrt(2);
-const N_DAMPING = 16;
+/* Damping layer chosen to absorb the long-wavelength quasi-static log tail
+ * of Phi_g without strong reflection.  Polynomial m=2 with target_reflection
+ * = 1e-3 is matched for n_damping = 48 (~12% of the box, ~3x deeper than
+ * the typical Stage 02 layer). */
+const N_DAMPING = 48;
 const STEPS_PER_FRAME = 4;
-const DISPLAY_SCALE = 30.0;            /* gain on Phi_g for the colormap */
+/* Number of steps to run silently before the first render frame, so that
+ * the t=0 transient (Phi_g suddenly switching on as the particles deposit
+ * for the first time) has time to propagate to the absorber and die. */
+const WARMUP_STEPS = 1600;
+/* Colormap gain on Phi_g.  Picked so the log-r far field is visible (not
+ * clamped) and the near-zone cyan wells are still bright. */
+const DISPLAY_SCALE = 5.0;
 
 /* Binary scenario parameters (pic_binary):
  *   params[0] = mass per particle
@@ -316,6 +326,8 @@ async function main(): Promise<void> {
         M.HEAPF32.set(params, ptr >> 2);
         api.loadScenario(api.sim, 'pic_binary', ptr, params.length);
         M._free(ptr);
+        /* Re-warm so reset doesn't re-introduce the t=0 transient. */
+        api.stepN(api.sim, WARMUP_STEPS);
     });
 
     function frame(): void {
@@ -369,6 +381,14 @@ async function main(): Promise<void> {
             `grid ${GRID_W}x${GRID_H}  cfl=${CFL.toFixed(4)}`;
         requestAnimationFrame(frame);
     }
+
+    /* Silent warmup: let the t=0 deposit transient propagate out to the
+     * absorber so the displayed field starts from a near-quasi-static
+     * configuration instead of a wavefront still bouncing around the box. */
+    statusEl.textContent = `warming up (${WARMUP_STEPS} silent steps)…`;
+    /* Yield to the browser so the status text actually paints, then run. */
+    await new Promise<void>((r) => requestAnimationFrame(() => r()));
+    api.stepN(api.sim, WARMUP_STEPS);
 
     statusEl.textContent = 'running pic_binary';
     frame();
