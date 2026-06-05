@@ -647,6 +647,32 @@ void gr_sim_step(gr_sim_t* sim) {
                 }
             }
         }
+
+        /* v42 zero-mean gauge fix.  Under Neumann outer BC the DC mode
+         * of the scalar potentials is unconstrained, and the wave equation
+         * accelerates it whenever the spatial source mean is nonzero
+         * (Phi_DC_dotdot = sc * rho_avg).  Subtract the mean from prev
+         * and curr (same value, so the encoded time derivative
+         * curr - prev is preserved) to keep the DC mode at zero. */
+        if (sim->zero_mean_scalar_potentials) {
+            const size_t ncells = (size_t) sim->width * (size_t) sim->height;
+            const int scalar_ids[2] = { GR_FIELD_PHI_GRAV, GR_FIELD_PHI_EM };
+            for (int idx = 0; idx < 2; idx++) {
+                const int f = scalar_ids[idx];
+                float* curr = sim->fields[f].curr;
+                float* prev = sim->fields[f].prev;
+                double sum = 0.0;
+                for (size_t k = 0; k < ncells; k++) sum += (double) curr[k];
+                const float mean = (float)(sum / (double) ncells);
+                if (mean != 0.0f) {
+                    for (size_t k = 0; k < ncells; k++) {
+                        curr[k] -= mean;
+                        prev[k] -= mean;
+                    }
+                }
+            }
+        }
+
         /* v40 parabolic Lorenz gauge cleaning: applied to phi and Phi_g
          * after each leapfrog + buffer rotation.  Bounds the gauge drift
          * from inconsistent source deposition (eg the spin dipole's
@@ -680,6 +706,14 @@ void gr_sim_set_outer_bc_neumann(gr_sim_t* sim, int neumann) {
 }
 int gr_sim_get_outer_bc_neumann(const gr_sim_t* sim) {
     return sim ? sim->outer_bc_neumann : 0;
+}
+
+void gr_sim_set_zero_mean_scalar_potentials(gr_sim_t* sim, int enabled) {
+    if (!sim) return;
+    sim->zero_mean_scalar_potentials = enabled ? 1 : 0;
+}
+int gr_sim_get_zero_mean_scalar_potentials(const gr_sim_t* sim) {
+    return sim ? sim->zero_mean_scalar_potentials : 0;
 }
 
 /* v42 derivative-friction taper builder.  Per-cell value stored in

@@ -86,6 +86,7 @@ interface SimAPI {
     initPotentialsLWTaper: (sim: number, taperInner: number, taperOuter: number) => void;
     setOuterBcNeumann: (sim: number, neumann: number) => void;
     setVolumeFrictionTaper: (sim: number, uniform: number, taperMax: number, taperDepth: number) => void;
+    setZeroMeanScalarPotentials: (sim: number, enabled: number) => void;
     stepCount: (sim: number) => number;
     simTime: (sim: number) => number;
     particleCount: (sim: number) => number;
@@ -157,6 +158,12 @@ function bindApi(M: GRliteModule): SimAPI {
         null, ['number','number','number','number']) as unknown as CFnVoid;
     if (typeof setVolumeFrictionTaper !== 'function') {
         throw new Error('gr_sim_set_volume_friction_taper missing from WASM exports — rebuild grlite.wasm');
+    }
+    const setZeroMeanScalarPotentials = M.cwrap(
+        'gr_sim_set_zero_mean_scalar_potentials', null,
+        ['number','number']) as unknown as CFnVoid;
+    if (typeof setZeroMeanScalarPotentials !== 'function') {
+        throw new Error('gr_sim_set_zero_mean_scalar_potentials missing from WASM exports — rebuild grlite.wasm');
     }
     /* Hard-fail if any expected symbol didn't resolve -- otherwise cwrap
      * silently returns a no-op and we get a confusing "is not a function"
@@ -248,12 +255,16 @@ function bindApi(M: GRliteModule): SimAPI {
     const FRICTION_TAPER_MAX = 0.02;    // at the wall
     const FRICTION_TAPER_DEPTH = N_DAMPING;
     setVolumeFrictionTaper(sim, FRICTION_UNIFORM, FRICTION_TAPER_MAX, FRICTION_TAPER_DEPTH);
+    /* Under Neumann BC the DC mode of the scalar potentials is
+     * unconstrained.  Zero-mean each step so any nonzero rho_avg
+     * doesn't accelerate Phi_DC -> -infty. */
+    setZeroMeanScalarPotentials(sim, 1);
 
     return { sim, step, stepN, fieldPtr, loadScenario, setDamping,
              setParticlesFrozen, relaxPhiGPoisson, initPotentialsLW,
              initPotentialsLWTaper, setOuterBcNeumann, setVolumeFrictionTaper,
-             stepCount, simTime, particleCount, getParticle, clearParticles,
-             particleStrideF32: stride };
+             setZeroMeanScalarPotentials, stepCount, simTime, particleCount,
+             getParticle, clearParticles, particleStrideF32: stride };
 }
 
 /* ---- WebGL2 plumbing ---------------------------------------------------- */

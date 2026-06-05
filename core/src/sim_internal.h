@@ -163,6 +163,16 @@ struct gr_sim {
      * with Dirichlet.  Default 0 for backward compatibility. */
     int outer_bc_neumann;
 
+    /* v42 zero-mean gauge fix for scalar potentials (Phi_g, phi_em).
+     * When nonzero, after each leapfrog rotation the spatial mean of
+     * Phi_g and phi_em is subtracted from prev and curr so the DC
+     * mode stays at zero.  Needed under Neumann outer BC, where the
+     * DC mode is unconstrained and the wave equation drives it to
+     * unbounded drift via the nonzero spatial mean of the sources.
+     * Physically harmless (Poisson is gauge-invariant up to a constant,
+     * and forces -m grad Phi only depend on gradients). */
+    int zero_mean_scalar_potentials;
+
     /* v42 derivative-friction array.  Applied AFTER each leapfrog rotation:
      *
      *   Phi_prev[k] := (1 - friction_d[k]) * Phi_prev[k]

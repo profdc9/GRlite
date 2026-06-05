@@ -554,6 +554,18 @@ void gr_sim_set_volume_friction_taper(gr_sim_t* sim,
                                        int   taper_depth);
 int  gr_sim_volume_friction_enabled(const gr_sim_t* sim);
 
+/* v42 zero-mean gauge fix.  Under Neumann outer BC the DC mode of
+ * each scalar potential (Phi_g, phi_em) is unconstrained, and any
+ * nonzero spatial mean of the corresponding source (rho_matter for
+ * Phi_g, rho_q for phi_em) accelerates the DC mode toward unbounded
+ * drift.  When enabled, gr_sim_step subtracts the spatial mean from
+ * both prev and curr of Phi_g and phi_em after the rotation.  The
+ * subtraction is identical for prev and curr so the encoded time
+ * derivative is preserved.  Physically harmless (forces depend on
+ * gradients, not absolute potential value).  Default 0. */
+void gr_sim_set_zero_mean_scalar_potentials(gr_sim_t* sim, int enabled);
+int  gr_sim_get_zero_mean_scalar_potentials(const gr_sim_t* sim);
+
 /* Direct Poisson solver for Phi_g via SOR.  Bypasses the wave-equation
  * convergence iteration -- which leaves the lowest standing mode of the
  * absorber-bounded box undamped at ~50% of |Phi_static| amplitude --
