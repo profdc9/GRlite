@@ -56,11 +56,31 @@ interface SimAPI {
 }
 
 async function loadWasm(): Promise<GRliteModule> {
-    // @ts-expect-error  WASM bundle resolves at runtime via Vite's public/ dir
-    const mod = (await import(/* @vite-ignore */ '/grlite/grlite.js')) as {
-        default: () => Promise<GRliteModule>;
-    };
-    return mod.default();
+    /* Vite 6 forbids static imports from /public/, so we load grlite.js
+     * by injecting a <script type="module"> into the DOM and stashing
+     * the factory on the window.  This bypasses Vite's import analyzer
+     * entirely and keeps grlite.js + grlite.wasm in /public/ where
+     * Emscripten's relative-URL .wasm fetch works correctly. */
+    const W = window as unknown as { __GRliteFactory?: () => Promise<GRliteModule> };
+    if (!W.__GRliteFactory) {
+        await new Promise<void>((resolve, reject) => {
+            const script = document.createElement('script');
+            script.type = 'module';
+            script.textContent =
+                `import GRlite from '/grlite/grlite.js';` +
+                `window.__GRliteFactory = GRlite;` +
+                `window.dispatchEvent(new Event('grlite-ready'));`;
+            const onReady = () => { window.removeEventListener('grlite-error', onError); resolve(); };
+            const onError = (e: Event) => { window.removeEventListener('grlite-ready', onReady); reject(new Error(String(e))); };
+            window.addEventListener('grlite-ready', onReady, { once: true });
+            window.addEventListener('grlite-error', onError, { once: true });
+            script.onerror = (e) => reject(new Error(`script load failed: ${String(e)}`));
+            document.head.appendChild(script);
+        });
+    }
+    const factory = W.__GRliteFactory;
+    if (!factory) throw new Error('GRlite factory not set on window');
+    return factory();
 }
 
 function bindApi(M: GRliteModule): SimAPI {
