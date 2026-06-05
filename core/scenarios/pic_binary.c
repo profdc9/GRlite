@@ -44,6 +44,12 @@ static int build_pic_binary(gr_sim_t* sim, const float* params, int n_params) {
 
     const float mass     = (n_params >= 1 && params[0] > 0.0f) ? params[0] : 0.01f;
     const float r_orb    = (n_params >= 2 && params[1] > 0.0f) ? params[1] : 15.0f * dx;
+    /* v_factor default 1.0 = the continuum analytic circular speed
+     * sqrt(G m).  NOTE: with the BUMP R=8 kernel the discrete force during
+     * motion is ~8% stronger, so the matched (near-circular) value is
+     * v_factor ~ 1.05 -- the web demo passes that explicitly (stage63).
+     * The default is left at 1.0 so existing tests that omit params[2]
+     * (e.g. stage12) keep the documented continuum reference. */
     const float v_factor = (n_params >= 3) ? params[2] : 1.0f;
     /* True box center (W-1)/2 so the absorbing damping is symmetric
      * around the orbit / COM. */

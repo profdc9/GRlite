@@ -53,8 +53,13 @@ interface ScenarioSpec {
 const SCENARIOS: { [k: string]: ScenarioSpec } = {
     pic_binary: {
         name: 'pic_binary',
-        /* params[0]=mass, params[1]=orbital radius, params[2]=v_factor */
-        params: [0.01, 15.0 * DX, 1.0],
+        /* params[0]=mass, params[1]=orbital radius, params[2]=v_factor.
+         * v_factor=1.05 is the empirically-calibrated circular velocity for
+         * BUMP R=8 at this mass/radius: the discrete force during motion is
+         * ~8% stronger than the continuum sqrt(G m), so the matched circular
+         * speed is ~1.05x.  stage63: v=1.05 gives ~2% orbit breathing and
+         * growth~1.0 (vs ~20% / inspiral at v=1.0). */
+        params: [0.01, 15.0 * DX, 1.05],
     },
     pic_static: {
         name: 'pic_static',
@@ -259,15 +264,16 @@ function bindApi(M: GRliteModule): SimAPI {
      *   - Dirichlet outer BC: Phi pinned to 0 at the outermost ring,
      *     which also pins the DC mode (no gauge runaway).
      *   - Disable the legacy multiplicative damping ring entirely.
-     *   - Enable centered-implicit derivative friction: small uniform
-     *     floor that damps the lowest standing mode (the one the
-     *     Dirichlet absorber misses because it has nodes at the wall),
-     *     plus a tapered ramp to a larger value at the wall so
-     *     radiative wave packets attenuate as they propagate into the
-     *     ring.  Stable at CFL = 1/sqrt(2) for any beta. */
+     *   - Centered-implicit derivative friction, WALL-RAMP ONLY (interior
+     *     floor = 0).  stage62/63: the boundary-mean L-W + settle gives a
+     *     clean init with no interior floor, and a nonzero interior floor
+     *     bleeds the moving binary's orbital near-field energy (numerical
+     *     inspiral, ~13% over 4 orbits).  The wall ramp alone absorbs both
+     *     the settle transient and outgoing radiation.  Stable at
+     *     CFL = 1/sqrt(2) for any beta. */
     setOuterBcNeumann(sim, 0);                               // Dirichlet
     setDamping(sim, 0);                                      // disable multiplicative ring
-    const FRICTION_UNIFORM   = 0.001;   // interior floor (beta = gamma * dt)
+    const FRICTION_UNIFORM   = 0.0;     // interior floor OFF (wall ramp only)
     const FRICTION_TAPER_MAX = 0.02;    // at the wall
     const FRICTION_TAPER_DEPTH = N_DAMPING;
     setVolumeFrictionTaper(sim, FRICTION_UNIFORM, FRICTION_TAPER_MAX, FRICTION_TAPER_DEPTH);

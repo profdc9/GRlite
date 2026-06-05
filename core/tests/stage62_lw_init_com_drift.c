@@ -30,12 +30,13 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-static void configure_absorber(gr_sim_t* sim, int n_ring) {
-    /* Mirrors web/src/main.ts bindApi: Dirichlet outer BC, multiplicative
-     * ring OFF, centered-implicit derivative friction ON. */
+static void configure_absorber(gr_sim_t* sim, int n_ring, float beta_floor) {
+    /* Dirichlet outer BC, multiplicative ring OFF, centered-implicit
+     * derivative friction ON.  beta_floor = interior friction floor;
+     * 0 => wall-ramp-only friction. */
     gr_sim_set_outer_bc_neumann(sim, 0);
     gr_sim_set_damping(sim, 0);
-    gr_sim_set_volume_friction_taper(sim, 0.001f, 0.02f, n_ring);
+    gr_sim_set_volume_friction_taper(sim, beta_floor, 0.02f, n_ring);
 }
 
 static int part_a_frozen_transient(void) {
@@ -48,7 +49,7 @@ static int part_a_frozen_transient(void) {
     gr_sim_set_G_eff(sim, 1.0f);
     gr_sim_set_field_evolution(sim, 1);
     gr_sim_set_particle_source_deposition(sim, 1);
-    configure_absorber(sim, n_ring);
+    configure_absorber(sim, n_ring, 0.001f);
 
     const float params[1] = { mass };
     if (gr_sim_load_scenario(sim, "pic_static", params, 1) != 0) {
@@ -97,8 +98,8 @@ static int part_a_frozen_transient(void) {
     return 0;
 }
 
-static float part_b_momentum_drift(float v_factor, int presettle_steps,
-                                    const char* label) {
+static float part_b_momentum_drift(float beta_floor, float v_factor,
+                                    int presettle_steps, const char* label) {
     const int   W = 256, H = 256;
     const float dx = 1.0f, c_eff = 1.0f, cfl = 1.0f / sqrtf(2.0f);
     const int   n_ring = 32;
@@ -108,7 +109,7 @@ static float part_b_momentum_drift(float v_factor, int presettle_steps,
     gr_sim_set_G_eff(sim, 1.0f);
     gr_sim_set_field_evolution(sim, 1);
     gr_sim_set_particle_source_deposition(sim, 1);
-    configure_absorber(sim, n_ring);
+    configure_absorber(sim, n_ring, beta_floor);
 
     const float params[3] = { mass, r_orb, v_factor };
     if (gr_sim_load_scenario(sim, "pic_binary", params, 3) != 0) {
@@ -144,23 +145,14 @@ int main(void) {
     printf("=== stage62_lw_init_com_drift ===\n\n");
     part_a_frozen_transient();
 
-    printf("=== Part B: total-momentum (COM-impulse) drift ===\n");
-    printf("  P=0 by point-inversion symmetry; any |P|>0 is symmetry-breaking.\n");
-    printf("  Discriminator: presettle pins the field at its fixed point before\n");
-    printf("  release, so a drop with presettle => init-transient cause;\n");
-    printf("  no drop => orbital-dynamics cause (separate v_factor issue).\n\n");
-    part_b_momentum_drift(1.00f, 0,    "v=1.00, no presettle");
-    part_b_momentum_drift(1.00f, 2000, "v=1.00, presettle 2000");
-    part_b_momentum_drift(0.98f, 0,    "v=0.98, no presettle");
-    part_b_momentum_drift(0.98f, 2000, "v=0.98, presettle 2000");
-
-    printf("\n=== Part C: presettle-count sweep (quarter-orbit init impulse) ===\n");
-    printf("  Pick the smallest settle that drives the init impulse to ~round-off.\n");
-    part_b_momentum_drift(1.00f, 0,   "v=1.00, settle    0");
-    part_b_momentum_drift(1.00f, 100, "v=1.00, settle  100");
-    part_b_momentum_drift(1.00f, 200, "v=1.00, settle  200");
-    part_b_momentum_drift(1.00f, 400, "v=1.00, settle  400");
-    part_b_momentum_drift(1.00f, 800, "v=1.00, settle  800");
+    printf("=== Part B: settle init impulse vs friction floor ===\n");
+    printf("  Does the settle drive the quarter-orbit init impulse to round-off\n");
+    printf("  with WALL-ONLY friction (floor 0)?  If yes, the interior floor can\n");
+    printf("  be dropped entirely.  settle = max(W,H) = 256 steps.\n\n");
+    part_b_momentum_drift(0.001f, 1.05f, 256, "floor 1e-3, settle 256, v=1.05");
+    part_b_momentum_drift(0.0f,   1.05f, 256, "floor 0,    settle 256, v=1.05");
+    part_b_momentum_drift(0.0f,   1.05f, 512, "floor 0,    settle 512, v=1.05");
+    part_b_momentum_drift(0.0f,   1.05f, 0,   "floor 0,    settle   0, v=1.05");
 
     /* Measurement, not a pass/fail gate. */
     return 0;
