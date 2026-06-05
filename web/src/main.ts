@@ -366,6 +366,33 @@ async function main(): Promise<void> {
         api.stepN(api.sim, WARMUP_STEPS);
         api.setParticlesFrozen(api.sim, 0);
     }
+
+    /* Field-stability probe: run N extra steps with particles still
+     * frozen and sample Phi_g(center) along the way.  For a converged
+     * static Poisson solution with constant sources this should produce
+     * a flat trajectory.  If it oscillates, the wave equation isn't
+     * actually at a fixed point. */
+    function fieldStabilityProbe(label: string, batches: number, perBatch: number): void {
+        api.setParticlesFrozen(api.sim, 1);
+        const ptr = api.fieldPtr(api.sim, /* GR_FIELD_PHI_GRAV */ 0);
+        const phi = new Float32Array(M.HEAPF32.buffer, ptr, GRID_W * GRID_H);
+        const cx = GRID_W >> 1, cy = GRID_H >> 1;
+        const series: string[] = [];
+        let pmin = Infinity, pmax = -Infinity;
+        for (let b = 0; b < batches; b++) {
+            const phiCenter = phi[cy * GRID_W + cx];
+            let lmin = Infinity, lmax = -Infinity;
+            for (let v of phi) { if (v < lmin) lmin = v; if (v > lmax) lmax = v; }
+            if (lmin < pmin) pmin = lmin;
+            if (lmax > pmax) pmax = lmax;
+            series.push(`step+=${(b * perBatch).toString().padStart(5)}  center=${phiCenter.toExponential(3)}  range=[${lmin.toExponential(2)}, ${lmax.toExponential(2)}]`);
+            api.stepN(api.sim, perBatch);
+        }
+        api.setParticlesFrozen(api.sim, 0);
+        console.log(`[stability probe: ${label}] frozen, ${batches}x${perBatch}=${batches * perBatch} steps`);
+        for (const s of series) console.log('  ' + s);
+        console.log(`[stability probe: ${label}] envelope min=${pmin.toExponential(3)} max=${pmax.toExponential(3)} swing=${(pmax - pmin).toExponential(3)}`);
+    }
     resetBtn.addEventListener('click', () => {
         loadAndWarmup(scenarioSel.value);
         paused = true;
@@ -375,6 +402,10 @@ async function main(): Promise<void> {
         statusEl.textContent = `loading ${scenarioSel.value}…`;
         requestAnimationFrame(() => {
             loadAndWarmup(scenarioSel.value);
+            snapshotParticles(`post-warmup ${scenarioSel.value}`);
+            snapshotPhi(`post-warmup ${scenarioSel.value}`);
+            fieldStabilityProbe(
+                `${scenarioSel.value} post-warmup, particles frozen`, 20, 200);
             paused = true;
             pauseBtn.textContent = 'resume';
             statusEl.textContent = `paused on converged ${scenarioSel.value} (press resume)`;
@@ -502,6 +533,10 @@ async function main(): Promise<void> {
     api.setParticlesFrozen(api.sim, 0);
     snapshotParticles('post-warmup (should be IDENTICAL to pre)');
     snapshotPhi('post-warmup (should resemble 2D-log Poisson)');
+
+    /* Field-stability probe: confirm or refute whether the converged
+     * field is actually a static fixed point of the wave equation. */
+    fieldStabilityProbe('post-warmup, particles frozen', 20, 200);
 
     statusEl.textContent = 'running pic_binary';
     frame();
