@@ -68,11 +68,16 @@ static int build_pic_binary(gr_sim_t* sim, const float* params, int n_params) {
     gr_sim_set_bg_mode(sim, GR_BG_MODE_SAMPLED);
     gr_sim_set_field_evolution(sim, 1);
     gr_sim_set_particle_source_deposition(sim, 1);
-    /* Production defaults: TSC + Lewis-Birdsall.  See pic_orbiting and
-     * memory [[grlite-lewis-birdsall-result]] for the rationale.  For two
-     * mutually-bound particles in vacuum this is the test bed where the
-     * difference matters most. */
-    gr_sim_set_shape_function(sim, GR_SHAPE_TSC);
+    /* Production defaults: BUMP kernel (R=8) + Lewis-Birdsall.  stage63
+     * (2026-06-05) shows TSC deposition produces a catastrophic center-of-
+     * mass drift for the symmetric binary (max |p0+p1| ~ 1.6 m*v_orb over
+     * 4 orbits) and 130% separation breathing; switching to the wider,
+     * smoother BUMP R=8 kernel pins the COM (max |p0+p1| ~ 4e-4 m*v_orb,
+     * a ~3700x reduction) and cuts the breathing to ~20%.  See memory
+     * [[grlite-self-vs-mutual-force-direction]] (BUMP R=6-8 is production)
+     * and [[grlite-v42-orbit-stability]]. */
+    gr_sim_set_shape_function(sim, GR_SHAPE_BUMP);
+    gr_sim_set_kernel_radius(sim, 8.0f);
     gr_sim_set_force_interp(sim, GR_FORCE_INTERP_LEWIS_BIRDSALL);
     /* Enable ALL gravity force pieces: -m grad Phi_g, +4 m v x B_g, and
      * -m d_t A_g.  This mirrors pic_binary_em's setup, where -q grad phi,

@@ -32,6 +32,15 @@ const STEPS_PER_FRAME = 4;
  * the symmetric-binary momentum impulse to round-off; max(W,H) gives ample
  * margin and is still a sub-second one-time cost. */
 const N_SETTLE = Math.max(GRID_W, GRID_H);
+
+/* Deposition/force config (matches the pic_binary scenario's production
+ * setup).  stage63 shows the wide, smooth BUMP R=8 kernel pins the binary
+ * center of mass (TSC drifts it ~1.6 m*v_orb over 4 orbits; BUMP ~4e-4) and
+ * cuts separation breathing from ~130% to ~20%.  Enum values from grlite.h:
+ * GR_SHAPE_{CIC,TSC,BUMP} = {0,1,2}; GR_FORCE_INTERP_{LEGACY,LB} = {0,1}. */
+const GR_SHAPE_BUMP = 2;
+const GR_FORCE_INTERP_LB = 1;
+const KERNEL_RADIUS_CELLS = 8.0;
 /* Colormap gain on Phi_g.  Picked so the log-r far field is visible (not
  * clamped) and the near-zone cyan wells are still bright. */
 const DISPLAY_SCALE = 5.0;
@@ -81,6 +90,9 @@ interface SimAPI {
     initPotentialsLW: (sim: number) => void;
     initPotentialsLWTaper: (sim: number, taperInner: number, taperOuter: number) => void;
     initPotentialsSettled: (sim: number, nSettle: number) => void;
+    setShapeFunction: (sim: number, shape: number) => void;
+    setKernelRadius: (sim: number, radiusCells: number) => void;
+    setForceInterp: (sim: number, scheme: number) => void;
     setOuterBcNeumann: (sim: number, neumann: number) => void;
     setVolumeFrictionTaper: (sim: number, uniform: number, taperMax: number, taperDepth: number) => void;
     setZeroMeanScalarPotentials: (sim: number, enabled: number) => void;
@@ -153,6 +165,15 @@ function bindApi(M: GRliteModule): SimAPI {
         null, ['number','number']) as unknown as CFnVoid;
     if (typeof initPotentialsSettled !== 'function') {
         throw new Error('gr_sim_init_potentials_settled missing from WASM exports — rebuild grlite.wasm');
+    }
+    const setShapeFunction = M.cwrap('gr_sim_set_shape_function', null,
+        ['number','number']) as unknown as CFnVoid;
+    const setKernelRadius = M.cwrap('gr_sim_set_kernel_radius', null,
+        ['number','number']) as unknown as CFnVoid;
+    const setForceInterp = M.cwrap('gr_sim_set_force_interp', null,
+        ['number','number']) as unknown as CFnVoid;
+    if (typeof setShapeFunction !== 'function' || typeof setKernelRadius !== 'function') {
+        throw new Error('gr_sim_set_shape_function/kernel_radius missing from WASM exports — rebuild grlite.wasm');
     }
     const setOuterBcNeumann = M.cwrap('gr_sim_set_outer_bc_neumann', null,
         ['number','number']) as unknown as CFnVoid;
@@ -252,9 +273,17 @@ function bindApi(M: GRliteModule): SimAPI {
     setVolumeFrictionTaper(sim, FRICTION_UNIFORM, FRICTION_TAPER_MAX, FRICTION_TAPER_DEPTH);
     setZeroMeanScalarPotentials(sim, 0);                     // Dirichlet pins DC already
 
+    /* Deposition/force config for the initial scenario: BUMP R=8 + Lewis-
+     * Birdsall.  pic_binary sets this internally too, but make it explicit
+     * in the demo (stage63: BUMP pins the binary COM, TSC drifts it). */
+    setShapeFunction(sim, GR_SHAPE_BUMP);
+    setKernelRadius(sim, KERNEL_RADIUS_CELLS);
+    setForceInterp(sim, GR_FORCE_INTERP_LB);
+
     return { sim, step, stepN, fieldPtr, loadScenario, setDamping,
              setParticlesFrozen, relaxPhiGPoisson, initPotentialsLW,
              initPotentialsLWTaper, initPotentialsSettled,
+             setShapeFunction, setKernelRadius, setForceInterp,
              setOuterBcNeumann, setVolumeFrictionTaper,
              setZeroMeanScalarPotentials, stepCount, simTime, particleCount,
              getParticle, clearParticles, particleStrideF32: stride };
@@ -427,6 +456,12 @@ async function main(): Promise<void> {
         const rc = api.loadScenario(api.sim, spec.name, ptr, arr.length);
         M._free(ptr);
         if (rc !== 0) { console.error(`load_scenario ${spec.name} failed rc=${rc}`); return; }
+        /* Deposition/force config: BUMP R=8 + Lewis-Birdsall (pins the COM;
+         * see stage63).  Set after load so it is explicit in the demo even
+         * if a scenario's internal default changes. */
+        api.setShapeFunction(api.sim, GR_SHAPE_BUMP);
+        api.setKernelRadius(api.sim, KERNEL_RADIUS_CELLS);
+        api.setForceInterp(api.sim, GR_FORCE_INTERP_LB);
         /* Field initialization: boundary-mean Liénard-Wiechert direct sum
          * (gauge-shifted to ~0 at the Dirichlet wall) followed by an
          * N_SETTLE frozen-friction settle to the exact discrete fixed
