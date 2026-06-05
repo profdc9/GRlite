@@ -532,19 +532,25 @@ int  gr_sim_get_outer_bc_neumann(const gr_sim_t* sim);
 
 /* v42 derivative-friction absorber.  Replaces the multiplicative
  * damping ring with a Klein-Gordon-style friction term that bleeds
- * the time derivative without changing the static fixed point.  All
- * modes (including the lowest standing mode, which has nodes at the
- * wall and is undamped by the multiplicative absorber) decay at the
- * friction rate.  See the v38 doc revision for the derivation.
+ * the time derivative without changing the static fixed point.
+ * Centered-implicit discretization (stable at CFL = 1/sqrt(2) for
+ * any beta >= 0):
  *
- *   uniform_2gamma_dt:  uniform interior friction floor (per step)
- *   taper_max_2gamma_dt: friction at the outer wall
- *   taper_depth:         taper width in cells, from wall inward
+ *   (1+beta) Phi_next = 2 Phi_curr - (1-beta) Phi_prev + dt^2 (...)
+ *
+ * applied as a per-cell post-leapfrog correction.  All modes
+ * (including the lowest standing mode, which has nodes at the wall
+ * and is undamped by the multiplicative absorber) decay at rate
+ * beta = gamma * dt per step.
+ *
+ *   uniform_beta:   uniform interior friction floor (gamma * dt)
+ *   taper_max_beta: friction at the outer wall
+ *   taper_depth:    taper width in cells, from wall inward
  *
  * Call with (0, 0, 0) to deallocate. */
 void gr_sim_set_volume_friction_taper(gr_sim_t* sim,
-                                       float uniform_2gamma_dt,
-                                       float taper_max_2gamma_dt,
+                                       float uniform_beta,
+                                       float taper_max_beta,
                                        int   taper_depth);
 int  gr_sim_volume_friction_enabled(const gr_sim_t* sim);
 

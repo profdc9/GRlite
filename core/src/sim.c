@@ -585,6 +585,47 @@ void gr_sim_step(gr_sim_t* sim) {
 
     if (sim->field_evolution_enabled) {
         gr_field_leapfrog_step_all(sim);
+
+        /* v42 derivative-friction: CENTERED-IMPLICIT discretization
+         * applied AFTER the standard leapfrog computes next, BEFORE
+         * the rotation.
+         *
+         * Continuous PDE:  d^2 Phi/dt^2 + 2 gamma d Phi/dt = c^2 Lap Phi + ...
+         * Centered discrete (gives ~implicit pull on Phi_next):
+         *   (1+beta) Phi_next = 2 Phi_curr - (1-beta) Phi_prev + dt^2(...)
+         * with beta = gamma * dt.  Equivalent to the post-leapfrog
+         * correction:
+         *   next[k] := (next_standard[k] + beta[k] * prev[k]) / (1 + beta[k])
+         *
+         * Eigenvalues of the recurrence at the 2D Nyquist mode (s^2=4)
+         * are -1 (marginal) and -(1-beta)/(1+beta) (stable), so unlike
+         * a post-step bleed on prev (which destabilizes the Nyquist
+         * mode at CFL = 1/sqrt(2)), this form is stable for any beta. */
+        if (sim->friction_d) {
+            const float* beta = sim->friction_d;
+            const size_t ncells = (size_t) sim->width * (size_t) sim->height;
+            for (int f = 0; f < GR_FIELD_COUNT; f++) {
+                float* prev = sim->fields[f].prev;
+                float* next = sim->fields[f].next;
+                for (size_t k = 0; k < ncells; k++) {
+                    next[k] = (next[k] + beta[k] * prev[k]) / (1.0f + beta[k]);
+                }
+            }
+            if (sim->self_field_sets) {
+                for (int pi = 0; pi < sim->n_particles; pi++) {
+                    gr_self_field_set_t* sf = sim->self_field_sets[pi];
+                    if (!sf) continue;
+                    for (int f = 0; f < GR_FIELD_COUNT; f++) {
+                        float* prev = sf->fields[f].prev;
+                        float* next = sf->fields[f].next;
+                        for (size_t k = 0; k < ncells; k++) {
+                            next[k] = (next[k] + beta[k] * prev[k]) / (1.0f + beta[k]);
+                        }
+                    }
+                }
+            }
+        }
+
         /* Three-pointer rotation per field. */
         for (int f = 0; f < GR_FIELD_COUNT; f++) {
             float* tmp           = sim->fields[f].prev;
@@ -603,38 +644,6 @@ void gr_sim_step(gr_sim_t* sim) {
                     sf->fields[f].prev  = sf->fields[f].curr;
                     sf->fields[f].curr  = sf->fields[f].next;
                     sf->fields[f].next  = tmp;
-                }
-            }
-        }
-
-        /* v42 derivative-friction bleed.  Applied AFTER the rotation:
-         *   Phi_prev[k] := (1 - friction_d[k]) Phi_prev[k]
-         *                + friction_d[k]       Phi_curr[k]
-         * which reduces (Phi_curr - Phi_prev) -- the encoded leapfrog
-         * time derivative -- by a factor (1 - friction_d[k]) per step,
-         * without changing the static fixed point (Phi_curr == Phi_prev
-         * is invariant under this update). */
-        if (sim->friction_d) {
-            const float* fric = sim->friction_d;
-            const size_t ncells = (size_t) sim->width * (size_t) sim->height;
-            for (int f = 0; f < GR_FIELD_COUNT; f++) {
-                float* prev = sim->fields[f].prev;
-                float* curr = sim->fields[f].curr;
-                for (size_t k = 0; k < ncells; k++) {
-                    prev[k] = (1.0f - fric[k]) * prev[k] + fric[k] * curr[k];
-                }
-            }
-            if (sim->self_field_sets) {
-                for (int pi = 0; pi < sim->n_particles; pi++) {
-                    gr_self_field_set_t* sf = sim->self_field_sets[pi];
-                    if (!sf) continue;
-                    for (int f = 0; f < GR_FIELD_COUNT; f++) {
-                        float* prev = sf->fields[f].prev;
-                        float* curr = sf->fields[f].curr;
-                        for (size_t k = 0; k < ncells; k++) {
-                            prev[k] = (1.0f - fric[k]) * prev[k] + fric[k] * curr[k];
-                        }
-                    }
                 }
             }
         }
@@ -673,32 +682,33 @@ int gr_sim_get_outer_bc_neumann(const gr_sim_t* sim) {
     return sim ? sim->outer_bc_neumann : 0;
 }
 
-/* v42 derivative-friction taper builder.
+/* v42 derivative-friction taper builder.  Per-cell value stored in
+ * friction_d[k] is beta = gamma * dt, used in the centered-implicit
+ * post-leapfrog correction:
+ *   next[k] := (next_std[k] + beta[k] * prev[k]) / (1 + beta[k])
  *
- *   uniform_2gamma_dt: friction floor everywhere (catches the lowest
- *     standing mode, which has nonzero d/dt content throughout the
- *     box).  Typical: 1e-3 .. 5e-3.
+ *   uniform_beta:   friction floor everywhere (catches the lowest
+ *                   standing mode, which has nonzero d/dt content
+ *                   throughout the box).  Typical: 1e-3 .. 5e-3.
  *
- *   taper_max_2gamma_dt: friction at the outer wall.  Typical: 1e-2 ..
- *     5e-2 so radiative wave packets attenuate by several e-folds
- *     across the taper width.
+ *   taper_max_beta: friction at the outer wall.  Typical: 1e-2 ..
+ *                   5e-2 so radiative wave packets attenuate by
+ *                   several e-folds across the taper width.
  *
- *   taper_depth: width of the taper from the wall inward, in cells.
- *     Beyond taper_depth into the interior, friction == uniform.
+ *   taper_depth:    width of the taper from the wall inward, in cells.
+ *                   Beyond taper_depth into the interior, beta ==
+ *                   uniform.
  *
- * Profile: polynomial m=2 in the taper region, smoothly joining the
- * uniform interior to the wall value.  All values are clamped to [0,
- * 0.999) to keep the leapfrog stable.
- *
- * Pass uniform == 0 and taper_max == 0 to deallocate. */
+ * Profile: polynomial m=2 in the taper region.  Pass (0, 0, 0) to
+ * deallocate. */
 void gr_sim_set_volume_friction_taper(gr_sim_t* sim,
-                                       float uniform_2gamma_dt,
-                                       float taper_max_2gamma_dt,
+                                       float uniform_beta,
+                                       float taper_max_beta,
                                        int   taper_depth) {
     if (!sim) return;
     free(sim->friction_d);
     sim->friction_d = NULL;
-    if (uniform_2gamma_dt <= 0.0f && (taper_max_2gamma_dt <= 0.0f || taper_depth <= 0)) {
+    if (uniform_beta <= 0.0f && (taper_max_beta <= 0.0f || taper_depth <= 0)) {
         return;
     }
     const int W = sim->width;
@@ -707,8 +717,8 @@ void gr_sim_set_volume_friction_taper(gr_sim_t* sim,
     sim->friction_d = (float*) calloc(ncells, sizeof(float));
     if (!sim->friction_d) return;
 
-    const float floor = (uniform_2gamma_dt > 0.0f) ? uniform_2gamma_dt : 0.0f;
-    const float wall  = (taper_max_2gamma_dt > 0.0f) ? taper_max_2gamma_dt : 0.0f;
+    const float floor = (uniform_beta > 0.0f) ? uniform_beta : 0.0f;
+    const float wall  = (taper_max_beta > 0.0f) ? taper_max_beta : 0.0f;
     const int   Nd    = (taper_depth > 0) ? taper_depth : 0;
 
     for (int j = 0; j < H; j++) {

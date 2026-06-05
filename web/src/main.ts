@@ -239,8 +239,13 @@ function bindApi(M: GRliteModule): SimAPI {
      * fast enough to settle visible oscillation within seconds. */
     setOuterBcNeumann(sim, 1);
     setDamping(sim, 0);                                      // disable multiplicative ring
-    const FRICTION_UNIFORM   = 0.002;   // 2*γ_floor*dt per step
-    const FRICTION_TAPER_MAX = 0.04;    // at the wall
+    /* beta = gamma * dt per cell.  |lambda| ~ 1 - beta per step, so a
+     * mode decays to 1/e in ~1/beta steps.  Centered-implicit form
+     * (post-leapfrog correction) is stable at CFL=1/sqrt(2) for any
+     * beta >= 0 -- unlike the post-step bleed which destabilized the
+     * Nyquist mode for any beta > 0. */
+    const FRICTION_UNIFORM   = 0.001;   // interior floor
+    const FRICTION_TAPER_MAX = 0.02;    // at the wall
     const FRICTION_TAPER_DEPTH = N_DAMPING;
     setVolumeFrictionTaper(sim, FRICTION_UNIFORM, FRICTION_TAPER_MAX, FRICTION_TAPER_DEPTH);
 
