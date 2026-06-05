@@ -510,6 +510,16 @@ float gr_sim_particle_energy(const gr_sim_t* sim, int idx);
 void gr_sim_set_field_evolution(gr_sim_t* sim, int enabled);
 int  gr_sim_get_field_evolution(const gr_sim_t* sim);
 
+/* v38 §15.9 "Field initialization": freeze particle positions and
+ * velocities while the field leapfrog iterates to the static Poisson
+ * solution at the initial particle configuration.  Sources still
+ * deposit, fields still evolve, but gr_particle_push_all is skipped.
+ * Run ~1000-3000 steps with frozen=1, then frozen=0 and begin dynamics
+ * from a quasi-static field configuration -- no spurious switch-on
+ * wavefront.  Default at gr_sim_create: 0 (unfrozen). */
+void gr_sim_set_particles_frozen(gr_sim_t* sim, int frozen);
+int  gr_sim_get_particles_frozen(const gr_sim_t* sim);
+
 /* Stage 10 — enable automatic per-step deposition of every particle's mass
  * and current (rho_matter, J_mx, J_my) and, if charged, charge and current
  * (rho_q, J_qx, J_qy) onto the grid before each gr_sim_step's leapfrog runs.

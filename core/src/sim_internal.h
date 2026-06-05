@@ -145,6 +145,14 @@ struct gr_sim {
      * for tens of thousands of steps.  Default 1 (full step). */
     int field_evolution_enabled;
 
+    /* v38 §15.9 "Field initialization": when nonzero, gr_sim_step deposits
+     * sources and evolves the fields normally but SKIPS gr_particle_push_all
+     * so positions and velocities stay frozen at their initial values.
+     * Used for the convergence-iteration warmup that drives the perturbation
+     * fields to their static (Poisson) solution before dynamics begin.
+     * Default 0 (particles push every step). */
+    int particles_frozen;
+
     /* Stage 10: when nonzero, gr_sim_step auto-deposits every particle's
      * mass, charge, and currents onto the source arrays before each field
      * leapfrog runs.  Default 0 (no automatic deposition; scenarios deposit

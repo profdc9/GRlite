@@ -611,9 +611,25 @@ void gr_sim_step(gr_sim_t* sim) {
          * approximately-but-not-exactly div-free J).  Default ON. */
         gr_field_parabolic_gauge_clean(sim);
     }
-    /* Stage 7+: push particles each step (Boris-leapfrog kick-drift). */
-    if (sim->n_particles > 0) gr_particle_push_all(sim);
+    /* Stage 7+: push particles each step (Boris-leapfrog kick-drift).
+     * Skipped while particles_frozen is set so the v38 §15.9 convergence
+     * iteration can drive the fields to the static Poisson solution at
+     * the initial particle configuration. */
+    if (sim->n_particles > 0 && !sim->particles_frozen) gr_particle_push_all(sim);
     sim->step_count++;
+}
+
+/* v38 §15.9: freeze particle motion so the field leapfrog can iterate to
+ * the static (Poisson) solution at the initial configuration before
+ * dynamics begin.  Sources still deposit (positions and velocities are
+ * read from the frozen particle state), the field still evolves, only the
+ * Boris kick-drift on each particle is suppressed. */
+void gr_sim_set_particles_frozen(gr_sim_t* sim, int frozen) {
+    if (!sim) return;
+    sim->particles_frozen = frozen ? 1 : 0;
+}
+int gr_sim_get_particles_frozen(const gr_sim_t* sim) {
+    return sim ? sim->particles_frozen : 0;
 }
 
 /* Stage 8 — skip the per-step leapfrog when no perturbation dynamics are

@@ -24,10 +24,12 @@ const CFL = 1.0 / Math.sqrt(2);
  * the typical Stage 02 layer). */
 const N_DAMPING = 48;
 const STEPS_PER_FRAME = 4;
-/* Number of steps to run silently before the first render frame, so that
- * the t=0 transient (Phi_g suddenly switching on as the particles deposit
- * for the first time) has time to propagate to the absorber and die. */
-const WARMUP_STEPS = 1600;
+/* v38 §15.9 "Field initialization": iterate the field leapfrog with the
+ * particles' positions and velocities held fixed so the perturbation
+ * fields converge to the static Poisson solution at the initial
+ * configuration.  The doc estimates ~1000-3000 steps for N=256; we use
+ * a few domain-crossing times at our N=384 grid. */
+const WARMUP_STEPS = 2400;
 /* Colormap gain on Phi_g.  Picked so the log-r far field is visible (not
  * clamped) and the near-zone cyan wells are still bright. */
 const DISPLAY_SCALE = 5.0;
@@ -56,6 +58,7 @@ interface SimAPI {
     fieldPtr: (sim: number, which: number) => number;
     loadScenario: (sim: number, name: string, paramsPtr: number, n: number) => number;
     setDamping: (sim: number, nDamping: number) => void;
+    setParticlesFrozen: (sim: number, frozen: number) => void;
     stepCount: (sim: number) => number;
     simTime: (sim: number) => number;
     particleCount: (sim: number) => number;
@@ -106,6 +109,8 @@ function bindApi(M: GRliteModule): SimAPI {
         ['number','string','number','number']) as unknown as
         (sim: number, name: string, paramsPtr: number, n: number) => number;
     const setDamping = M.cwrap('gr_sim_set_damping', null,
+        ['number','number']) as unknown as CFnVoid;
+    const setParticlesFrozen = M.cwrap('gr_sim_set_particles_frozen', null,
         ['number','number']) as unknown as CFnVoid;
     const stepCount = M.cwrap('gr_sim_step_count', 'number', ['number']) as unknown as CFn;
     const simTime = M.cwrap('gr_sim_time', 'number', ['number']) as unknown as CFn;
@@ -163,8 +168,8 @@ function bindApi(M: GRliteModule): SimAPI {
     }
 
     return { sim, step, stepN, fieldPtr, loadScenario, setDamping,
-             stepCount, simTime, particleCount, getParticle, clearParticles,
-             particleStrideF32: stride };
+             setParticlesFrozen, stepCount, simTime, particleCount,
+             getParticle, clearParticles, particleStrideF32: stride };
 }
 
 /* ---- WebGL2 plumbing ---------------------------------------------------- */
@@ -326,8 +331,10 @@ async function main(): Promise<void> {
         M.HEAPF32.set(params, ptr >> 2);
         api.loadScenario(api.sim, 'pic_binary', ptr, params.length);
         M._free(ptr);
-        /* Re-warm so reset doesn't re-introduce the t=0 transient. */
+        /* Re-converge fields before resuming dynamics. */
+        api.setParticlesFrozen(api.sim, 1);
         api.stepN(api.sim, WARMUP_STEPS);
+        api.setParticlesFrozen(api.sim, 0);
     });
 
     function frame(): void {
@@ -382,13 +389,18 @@ async function main(): Promise<void> {
         requestAnimationFrame(frame);
     }
 
-    /* Silent warmup: let the t=0 deposit transient propagate out to the
-     * absorber so the displayed field starts from a near-quasi-static
-     * configuration instead of a wavefront still bouncing around the box. */
-    statusEl.textContent = `warming up (${WARMUP_STEPS} silent steps)…`;
+    /* v38 §15.9 convergence iteration: freeze the particles in place
+     * (positions AND velocities pinned to scenario IC), iterate the field
+     * leapfrog until Phi_g, A_g, etc. converge to their static Poisson
+     * solutions for those sources, then unfreeze and begin dynamics.  The
+     * displayed field at t=0 of the visible run is already quasi-static --
+     * no switch-on wavefront. */
+    statusEl.textContent = `converging fields (${WARMUP_STEPS} frozen steps)…`;
     /* Yield to the browser so the status text actually paints, then run. */
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
+    api.setParticlesFrozen(api.sim, 1);
     api.stepN(api.sim, WARMUP_STEPS);
+    api.setParticlesFrozen(api.sim, 0);
 
     statusEl.textContent = 'running pic_binary';
     frame();
