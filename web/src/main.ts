@@ -324,8 +324,11 @@ async function main(): Promise<void> {
     const xyBuf = new Float32Array(PARTICLE_MAX * 2);
 
     /* ---- Controls ---- */
-    let paused = false;
+    /* Start paused so the post-warmup quasi-static field renders without
+     * any orbital evolution on top -- press 'resume' to begin dynamics. */
+    let paused = true;
     let singleStep = false;
+    pauseBtn.textContent = 'resume';
     pauseBtn.addEventListener('click', () => {
         paused = !paused;
         pauseBtn.textContent = paused ? 'resume' : 'pause';
@@ -418,6 +421,16 @@ async function main(): Promise<void> {
         console.log(`[${label}]   at p1 (cx+r,cy)=${at(cx + r, cy).toExponential(3)}`);
         console.log(`[${label}]   at (cx,cy+r)=${at(cx, cy + r).toExponential(3)} (perp axis)`);
         console.log(`[${label}]   at (16,16) corner=${at(16, 16).toExponential(3)}`);
+        /* Radial profile along y=cy from i=0 to i=GRID_W-1, every 16 cells.
+         * For a converged 2D-log Poisson solution this should be monotone:
+         * ~0 at the absorber, growing more negative as we approach a
+         * particle, two minima at i = cx +/- r_orb, less-negative bump
+         * at the COM between them. */
+        const profile: string[] = [];
+        for (let i = 0; i < GRID_W; i += 16) {
+            profile.push(`(i=${i.toString().padStart(3)}, v=${at(i, cy).toExponential(2)})`);
+        }
+        console.log(`[${label}]   radial profile y=cy: ${profile.join(' ')}`);
     }
 
     /* v38 §15.9 convergence iteration: freeze the particles in place
