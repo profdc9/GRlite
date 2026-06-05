@@ -530,6 +530,24 @@ int  gr_sim_get_particles_frozen(const gr_sim_t* sim);
 void gr_sim_set_outer_bc_neumann(gr_sim_t* sim, int neumann);
 int  gr_sim_get_outer_bc_neumann(const gr_sim_t* sim);
 
+/* v42 derivative-friction absorber.  Replaces the multiplicative
+ * damping ring with a Klein-Gordon-style friction term that bleeds
+ * the time derivative without changing the static fixed point.  All
+ * modes (including the lowest standing mode, which has nodes at the
+ * wall and is undamped by the multiplicative absorber) decay at the
+ * friction rate.  See the v38 doc revision for the derivation.
+ *
+ *   uniform_2gamma_dt:  uniform interior friction floor (per step)
+ *   taper_max_2gamma_dt: friction at the outer wall
+ *   taper_depth:         taper width in cells, from wall inward
+ *
+ * Call with (0, 0, 0) to deallocate. */
+void gr_sim_set_volume_friction_taper(gr_sim_t* sim,
+                                       float uniform_2gamma_dt,
+                                       float taper_max_2gamma_dt,
+                                       int   taper_depth);
+int  gr_sim_volume_friction_enabled(const gr_sim_t* sim);
+
 /* Direct Poisson solver for Phi_g via SOR.  Bypasses the wave-equation
  * convergence iteration -- which leaves the lowest standing mode of the
  * absorber-bounded box undamped at ~50% of |Phi_static| amplitude --

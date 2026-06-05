@@ -290,6 +290,7 @@ void gr_sim_destroy(gr_sim_t* sim) {
     free(sim->J_qx_prev);
     free(sim->J_qy_prev);
     free(sim->damping_d);
+    free(sim->friction_d);
     free(sim->phi_g_bg);
     free(sim->Agx_bg);
     free(sim->Agy_bg);
@@ -605,6 +606,38 @@ void gr_sim_step(gr_sim_t* sim) {
                 }
             }
         }
+
+        /* v42 derivative-friction bleed.  Applied AFTER the rotation:
+         *   Phi_prev[k] := (1 - friction_d[k]) Phi_prev[k]
+         *                + friction_d[k]       Phi_curr[k]
+         * which reduces (Phi_curr - Phi_prev) -- the encoded leapfrog
+         * time derivative -- by a factor (1 - friction_d[k]) per step,
+         * without changing the static fixed point (Phi_curr == Phi_prev
+         * is invariant under this update). */
+        if (sim->friction_d) {
+            const float* fric = sim->friction_d;
+            const size_t ncells = (size_t) sim->width * (size_t) sim->height;
+            for (int f = 0; f < GR_FIELD_COUNT; f++) {
+                float* prev = sim->fields[f].prev;
+                float* curr = sim->fields[f].curr;
+                for (size_t k = 0; k < ncells; k++) {
+                    prev[k] = (1.0f - fric[k]) * prev[k] + fric[k] * curr[k];
+                }
+            }
+            if (sim->self_field_sets) {
+                for (int pi = 0; pi < sim->n_particles; pi++) {
+                    gr_self_field_set_t* sf = sim->self_field_sets[pi];
+                    if (!sf) continue;
+                    for (int f = 0; f < GR_FIELD_COUNT; f++) {
+                        float* prev = sf->fields[f].prev;
+                        float* curr = sf->fields[f].curr;
+                        for (size_t k = 0; k < ncells; k++) {
+                            prev[k] = (1.0f - fric[k]) * prev[k] + fric[k] * curr[k];
+                        }
+                    }
+                }
+            }
+        }
         /* v40 parabolic Lorenz gauge cleaning: applied to phi and Phi_g
          * after each leapfrog + buffer rotation.  Bounds the gauge drift
          * from inconsistent source deposition (eg the spin dipole's
@@ -638,6 +671,67 @@ void gr_sim_set_outer_bc_neumann(gr_sim_t* sim, int neumann) {
 }
 int gr_sim_get_outer_bc_neumann(const gr_sim_t* sim) {
     return sim ? sim->outer_bc_neumann : 0;
+}
+
+/* v42 derivative-friction taper builder.
+ *
+ *   uniform_2gamma_dt: friction floor everywhere (catches the lowest
+ *     standing mode, which has nonzero d/dt content throughout the
+ *     box).  Typical: 1e-3 .. 5e-3.
+ *
+ *   taper_max_2gamma_dt: friction at the outer wall.  Typical: 1e-2 ..
+ *     5e-2 so radiative wave packets attenuate by several e-folds
+ *     across the taper width.
+ *
+ *   taper_depth: width of the taper from the wall inward, in cells.
+ *     Beyond taper_depth into the interior, friction == uniform.
+ *
+ * Profile: polynomial m=2 in the taper region, smoothly joining the
+ * uniform interior to the wall value.  All values are clamped to [0,
+ * 0.999) to keep the leapfrog stable.
+ *
+ * Pass uniform == 0 and taper_max == 0 to deallocate. */
+void gr_sim_set_volume_friction_taper(gr_sim_t* sim,
+                                       float uniform_2gamma_dt,
+                                       float taper_max_2gamma_dt,
+                                       int   taper_depth) {
+    if (!sim) return;
+    free(sim->friction_d);
+    sim->friction_d = NULL;
+    if (uniform_2gamma_dt <= 0.0f && (taper_max_2gamma_dt <= 0.0f || taper_depth <= 0)) {
+        return;
+    }
+    const int W = sim->width;
+    const int H = sim->height;
+    const size_t ncells = (size_t) W * (size_t) H;
+    sim->friction_d = (float*) calloc(ncells, sizeof(float));
+    if (!sim->friction_d) return;
+
+    const float floor = (uniform_2gamma_dt > 0.0f) ? uniform_2gamma_dt : 0.0f;
+    const float wall  = (taper_max_2gamma_dt > 0.0f) ? taper_max_2gamma_dt : 0.0f;
+    const int   Nd    = (taper_depth > 0) ? taper_depth : 0;
+
+    for (int j = 0; j < H; j++) {
+        int dy = j; if (H - 1 - j < dy) dy = H - 1 - j;
+        const int row = j * W;
+        for (int i = 0; i < W; i++) {
+            int dxi = i; if (W - 1 - i < dxi) dxi = W - 1 - i;
+            const int depth = (dxi < dy) ? dxi : dy;
+            float g;
+            if (Nd > 0 && depth < Nd && wall > floor) {
+                const float u = (float)(Nd - depth) / (float) Nd;
+                g = floor + (wall - floor) * u * u;
+            } else {
+                g = floor;
+            }
+            if (g < 0.0f)   g = 0.0f;
+            if (g > 0.999f) g = 0.999f;
+            sim->friction_d[row + i] = g;
+        }
+    }
+}
+int gr_sim_volume_friction_enabled(const gr_sim_t* sim) {
+    return (sim && sim->friction_d) ? 1 : 0;
 }
 
 /* Direct Poisson solver for Phi_g via SOR (Successive Over-Relaxation).

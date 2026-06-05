@@ -85,6 +85,7 @@ interface SimAPI {
     initPotentialsLW: (sim: number) => void;
     initPotentialsLWTaper: (sim: number, taperInner: number, taperOuter: number) => void;
     setOuterBcNeumann: (sim: number, neumann: number) => void;
+    setVolumeFrictionTaper: (sim: number, uniform: number, taperMax: number, taperDepth: number) => void;
     stepCount: (sim: number) => number;
     simTime: (sim: number) => number;
     particleCount: (sim: number) => number;
@@ -152,6 +153,11 @@ function bindApi(M: GRliteModule): SimAPI {
         null, ['number','number','number']) as unknown as CFnVoid;
     const setOuterBcNeumann = M.cwrap('gr_sim_set_outer_bc_neumann', null,
         ['number','number']) as unknown as CFnVoid;
+    const setVolumeFrictionTaper = M.cwrap('gr_sim_set_volume_friction_taper',
+        null, ['number','number','number','number']) as unknown as CFnVoid;
+    if (typeof setVolumeFrictionTaper !== 'function') {
+        throw new Error('gr_sim_set_volume_friction_taper missing from WASM exports — rebuild grlite.wasm');
+    }
     /* Hard-fail if any expected symbol didn't resolve -- otherwise cwrap
      * silently returns a no-op and we get a confusing "is not a function"
      * deep inside the warmup later. */
@@ -219,15 +225,29 @@ function bindApi(M: GRliteModule): SimAPI {
         console.warn(`unexpected particle stride: ${stride} floats`);
     }
 
-    /* Enable Neumann outer BC by default for the web demo so that
-     * outgoing waves reflect without sign flip and standing-mode
-     * antinodes sit at the absorber instead of at the center. */
+    /* v42 derivative-friction absorber configuration:
+     *   - Neumann outer BC: no Dirichlet pull-to-zero at the wall.
+     *   - Disable the multiplicative damping ring entirely.
+     *   - Enable derivative friction with a uniform interior floor
+     *     (catches the lowest standing mode, which the absorber ring
+     *     missed) plus a polynomial-m=2 taper to a larger value at the
+     *     wall (so radiative wave packets attenuate as they propagate
+     *     into the ring).
+     *
+     * Magnitudes chosen so the lowest mode (period ~ 2L/c) damps with
+     * a time constant of ~1/(2*γ_floor*dt) ~ a few thousand steps,
+     * fast enough to settle visible oscillation within seconds. */
     setOuterBcNeumann(sim, 1);
+    setDamping(sim, 0);                                      // disable multiplicative ring
+    const FRICTION_UNIFORM   = 0.002;   // 2*γ_floor*dt per step
+    const FRICTION_TAPER_MAX = 0.04;    // at the wall
+    const FRICTION_TAPER_DEPTH = N_DAMPING;
+    setVolumeFrictionTaper(sim, FRICTION_UNIFORM, FRICTION_TAPER_MAX, FRICTION_TAPER_DEPTH);
 
     return { sim, step, stepN, fieldPtr, loadScenario, setDamping,
              setParticlesFrozen, relaxPhiGPoisson, initPotentialsLW,
-             initPotentialsLWTaper, setOuterBcNeumann, stepCount,
-             simTime, particleCount, getParticle, clearParticles,
+             initPotentialsLWTaper, setOuterBcNeumann, setVolumeFrictionTaper,
+             stepCount, simTime, particleCount, getParticle, clearParticles,
              particleStrideF32: stride };
 }
 
@@ -398,22 +418,12 @@ async function main(): Promise<void> {
         const rc = api.loadScenario(api.sim, spec.name, ptr, arr.length);
         M._free(ptr);
         if (rc !== 0) { console.error(`load_scenario ${spec.name} failed rc=${rc}`); return; }
-        /* Field initialization: direct-sum 2D Liénard-Wiechert potentials
-         * for all six fields, with the taper pulled INWARD as a diagnostic
-         * for boundary-vs-bulk responsibility for residual oscillation.
-         *
-         * Half-box dimension = ~min(W,H)/2.  Damping ring depth = N_DAMPING.
-         * Active interior depth range = [N_DAMPING, ~half-box].  Pulling
-         * the taper to roughly halfway through the active region:
-         *   taper_inner = 3/4 of half-box, taper_outer = 1/2 of half-box.
-         * That puts a ring of literally-zero L-W field BETWEEN the
-         * tapered L-W and the absorbing layer -- so whatever the absorber
-         * does to that zero field is decoupled from what we see in the
-         * bulk.  If oscillation persists, the boundary is innocent. */
-        const halfBox = Math.min(GRID_W, GRID_H) / 2;
-        const taperInner = Math.floor(halfBox * 0.75);
-        const taperOuter = Math.floor(halfBox * 0.50);
-        api.initPotentialsLWTaper(api.sim, taperInner, taperOuter);
+        /* Field initialization: direct-sum L-W with the default taper
+         * across the absorbing ring.  With derivative friction handling
+         * the boundary, we no longer need the aggressive halfway taper
+         * to isolate the bulk from the wall -- the friction makes the
+         * wall innocent. */
+        api.initPotentialsLW(api.sim);
     }
 
     /* Field-stability probe: run N extra steps with particles still
@@ -590,15 +600,9 @@ async function main(): Promise<void> {
     statusEl.textContent = `direct-sum L-W initialization…`;
     /* Yield to the browser so the status text actually paints, then run. */
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
-    {
-        const halfBox = Math.min(GRID_W, GRID_H) / 2;
-        const taperInner = Math.floor(halfBox * 0.75);
-        const taperOuter = Math.floor(halfBox * 0.50);
-        console.log(`[init] L-W taper: full L-W for depth >= ${taperInner}, zero for depth <= ${taperOuter} (halfBox=${halfBox})`);
-        api.initPotentialsLWTaper(api.sim, taperInner, taperOuter);
-    }
+    api.initPotentialsLW(api.sim);
     snapshotParticles('post-init (should be IDENTICAL to pre)');
-    snapshotPhi('post-init (L-W tapered halfway, big zero buffer to absorber)');
+    snapshotPhi('post-init (L-W + derivative-friction absorber)');
 
     /* Optional field-stability probe: gated behind the "probe" button
      * so it doesn't add ~5 seconds to every page load.  Enable via the

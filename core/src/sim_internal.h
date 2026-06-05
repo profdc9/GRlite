@@ -163,6 +163,24 @@ struct gr_sim {
      * with Dirichlet.  Default 0 for backward compatibility. */
     int outer_bc_neumann;
 
+    /* v42 derivative-friction array.  Applied AFTER each leapfrog rotation:
+     *
+     *   Phi_prev[k] := (1 - friction_d[k]) * Phi_prev[k]
+     *                + friction_d[k]       * Phi_curr[k]
+     *
+     * which bleeds the time derivative (Phi_curr - Phi_prev) toward zero
+     * at rate 2*gamma*dt per step.  Unlike the multiplicative damping_d
+     * (which pulls Phi -> 0 and creates an effective Dirichlet boundary
+     * inside the absorber), this preserves the Poisson static fixed
+     * point exactly: at equilibrium Phi_prev == Phi_curr so the bleed
+     * is a no-op.  All modes (including the lowest standing mode of a
+     * closed box, which has nodes at the wall) decay at the friction
+     * rate, fixing the v38 §9.6 absorber's failure to absorb the
+     * lowest standing mode.
+     *
+     * NULL = friction disabled (default; backward compatible). */
+    float* friction_d;
+
     /* Stage 10: when nonzero, gr_sim_step auto-deposits every particle's
      * mass, charge, and currents onto the source arrays before each field
      * leapfrog runs.  Default 0 (no automatic deposition; scenarios deposit
