@@ -418,12 +418,13 @@ async function main(): Promise<void> {
         const rc = api.loadScenario(api.sim, spec.name, ptr, arr.length);
         M._free(ptr);
         if (rc !== 0) { console.error(`load_scenario ${spec.name} failed rc=${rc}`); return; }
-        /* Field initialization: direct-sum L-W with the default taper
-         * across the absorbing ring.  With derivative friction handling
-         * the boundary, we no longer need the aggressive halfway taper
-         * to isolate the bulk from the wall -- the friction makes the
-         * wall innocent. */
-        api.initPotentialsLW(api.sim);
+        /* Field initialization: direct-sum L-W with NO taper.  With
+         * Neumann outer BC + derivative friction, tapering Phi to zero
+         * at the wall is incompatible (Neumann forces Phi(wall) =
+         * Phi(wall-1) which is nonzero from L-W) and launches a wave
+         * inward on every step.  Let the L-W extend all the way to
+         * the wall; the friction handles outgoing radiation. */
+        api.initPotentialsLWTaper(api.sim, 0, 0);
     }
 
     /* Field-stability probe: run N extra steps with particles still
@@ -600,9 +601,9 @@ async function main(): Promise<void> {
     statusEl.textContent = `direct-sum L-W initialization…`;
     /* Yield to the browser so the status text actually paints, then run. */
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
-    api.initPotentialsLW(api.sim);
+    api.initPotentialsLWTaper(api.sim, 0, 0);  /* no taper */
     snapshotParticles('post-init (should be IDENTICAL to pre)');
-    snapshotPhi('post-init (L-W + derivative-friction absorber)');
+    snapshotPhi('post-init (L-W, no taper, Neumann + friction absorber)');
 
     /* Optional field-stability probe: gated behind the "probe" button
      * so it doesn't add ~5 seconds to every page load.  Enable via the

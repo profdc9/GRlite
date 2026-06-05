@@ -833,7 +833,11 @@ void gr_sim_init_potentials_lienard_wiechert_with_taper(gr_sim_t* sim,
     if (!sim) return;
     if (taper_inner < 0) taper_inner = 0;
     if (taper_outer < 0) taper_outer = 0;
-    if (taper_outer >= taper_inner) taper_inner = taper_outer + 1;
+    /* taper_inner == 0 (or taper_inner <= taper_outer) disables the
+     * taper -- L-W extends all the way to the wall.  Required when
+     * using Neumann outer BC + derivative friction (the taper-induced
+     * Phi(wall)=0 is incompatible with Neumann's Phi(wall)=Phi(wall-1)
+     * and the discontinuity launches a wave inward each step). */
     const int   W       = sim->width;
     const int   H       = sim->height;
     const float dx      = sim->dx;
