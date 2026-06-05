@@ -34,7 +34,12 @@
     <main>
       <canvas id="view" width="640" height="640"></canvas>
       <div class="controls">
-        <button id="reset">reset scenario</button>
+        <label for="scenario" style="margin-right:6px;color:#aaa">scenario</label>
+        <select id="scenario">
+          <option value="pic_binary">pic_binary (two-body orbit)</option>
+          <option value="pic_static">pic_static (single stationary mass)</option>
+        </select>
+        <button id="reset">reset</button>
         <button id="pause">pause</button>
         <button id="stepFrame">step 1</button>
       </div>

@@ -40,13 +40,29 @@ const WARMUP_STEPS = Math.ceil(
  * clamped) and the near-zone cyan wells are still bright. */
 const DISPLAY_SCALE = 5.0;
 
-/* Binary scenario parameters (pic_binary):
- *   params[0] = mass per particle
- *   params[1] = orbital radius
- *   params[2] = v_factor (1.0 = circular for the continuum 2D-log)        */
-const BINARY_MASS = 0.01;
-const BINARY_R    = 15.0 * DX;
-const BINARY_VF   = 1.0;
+/* Per-scenario parameter packages. */
+interface ScenarioSpec {
+    name: string;
+    params: number[];
+}
+const SCENARIOS: { [k: string]: ScenarioSpec } = {
+    pic_binary: {
+        name: 'pic_binary',
+        /* params[0]=mass, params[1]=orbital radius, params[2]=v_factor */
+        params: [0.01, 15.0 * DX, 1.0],
+    },
+    pic_static: {
+        name: 'pic_static',
+        /* params[0]=mass.  Use 0.01 so Phi_g is comparable in magnitude
+         * to the pic_binary scenario for the same DISPLAY_SCALE. */
+        params: [0.01],
+    },
+};
+/* Kept for backwards compat in the diagnostic snapshot code below: the
+ * "radius" used to sample at p0/p1 only makes sense for pic_binary. */
+const BINARY_MASS = SCENARIOS.pic_binary.params[0];
+const BINARY_R    = SCENARIOS.pic_binary.params[1];
+const BINARY_VF   = SCENARIOS.pic_binary.params[2];
 
 /* ---- Particle struct layout (gr_particle_t in grlite.h) ----------------
  *  float x, y, px, py, mass, charge, proper_time, [spin, phi_spin, g_factor]
@@ -267,6 +283,7 @@ async function main(): Promise<void> {
     const resetBtn = document.getElementById('reset') as HTMLButtonElement;
     const pauseBtn = document.getElementById('pause') as HTMLButtonElement;
     const stepBtn  = document.getElementById('stepFrame') as HTMLButtonElement;
+    const scenarioSel = document.getElementById('scenario') as HTMLSelectElement;
 
     statusEl.textContent = 'loading WASM…';
     const M = await loadWasm();
@@ -301,7 +318,8 @@ async function main(): Promise<void> {
 
     gl.useProgram(fieldProg);
     gl.uniform1i(gl.getUniformLocation(fieldProg, 'u_field'), 0);
-    gl.uniform1f(gl.getUniformLocation(fieldProg, 'u_scale'), DISPLAY_SCALE);
+    const uScale = gl.getUniformLocation(fieldProg, 'u_scale');
+    gl.uniform1f(uScale, DISPLAY_SCALE);
 
     /* Particle rendering program */
     const pointProg = linkProgram(gl, POINT_VS, POINT_FS);
@@ -334,16 +352,33 @@ async function main(): Promise<void> {
         pauseBtn.textContent = paused ? 'resume' : 'pause';
     });
     stepBtn.addEventListener('click', () => { singleStep = true; });
-    resetBtn.addEventListener('click', () => {
-        const params = new Float32Array([BINARY_MASS, BINARY_R, BINARY_VF]);
-        const ptr = M._malloc(params.byteLength);
-        M.HEAPF32.set(params, ptr >> 2);
-        api.loadScenario(api.sim, 'pic_binary', ptr, params.length);
+    function loadAndWarmup(specName: string): void {
+        const spec = SCENARIOS[specName];
+        if (!spec) { console.error(`unknown scenario: ${specName}`); return; }
+        const arr = new Float32Array(spec.params);
+        const ptr = M._malloc(arr.byteLength);
+        M.HEAPF32.set(arr, ptr >> 2);
+        const rc = api.loadScenario(api.sim, spec.name, ptr, arr.length);
         M._free(ptr);
-        /* Re-converge fields before resuming dynamics. */
+        if (rc !== 0) { console.error(`load_scenario ${spec.name} failed rc=${rc}`); return; }
+        /* v38 §15.9 convergence iteration. */
         api.setParticlesFrozen(api.sim, 1);
         api.stepN(api.sim, WARMUP_STEPS);
         api.setParticlesFrozen(api.sim, 0);
+    }
+    resetBtn.addEventListener('click', () => {
+        loadAndWarmup(scenarioSel.value);
+        paused = true;
+        pauseBtn.textContent = 'resume';
+    });
+    scenarioSel.addEventListener('change', () => {
+        statusEl.textContent = `loading ${scenarioSel.value}…`;
+        requestAnimationFrame(() => {
+            loadAndWarmup(scenarioSel.value);
+            paused = true;
+            pauseBtn.textContent = 'resume';
+            statusEl.textContent = `paused on converged ${scenarioSel.value} (press resume)`;
+        });
     });
 
     function frame(): void {
@@ -359,11 +394,21 @@ async function main(): Promise<void> {
         gl!.texSubImage2D(gl!.TEXTURE_2D, 0, 0, 0, GRID_W, GRID_H,
                           gl!.RED, gl!.FLOAT, data);
 
+        /* Auto-normalize the colormap to the current frame's |Phi_g| range
+         * so a tiny converged Poisson field and a huge over-amplitude
+         * transient both render with visible dynamic range. */
+        let maxAbs = 0;
+        for (let k = 0; k < data.length; k++) {
+            const a = data[k] < 0 ? -data[k] : data[k];
+            if (a > maxAbs) maxAbs = a;
+        }
+        gl!.useProgram(fieldProg);
+        gl!.uniform1f(uScale, maxAbs > 1e-12 ? 1.0 / maxAbs : DISPLAY_SCALE);
+
         /* Render field. */
         gl!.viewport(0, 0, canvas.width, canvas.height);
         gl!.clearColor(0, 0, 0, 1);
         gl!.clear(gl!.COLOR_BUFFER_BIT);
-        gl!.useProgram(fieldProg);
         gl!.bindVertexArray(quadVao);
         gl!.activeTexture(gl!.TEXTURE0);
         gl!.bindTexture(gl!.TEXTURE_2D, fieldTex);
@@ -390,11 +435,19 @@ async function main(): Promise<void> {
             gl!.disable(gl!.BLEND);
         }
 
+        let pmin = Infinity, pmax = -Infinity;
+        for (let k = 0; k < data.length; k++) {
+            const v = data[k];
+            if (v < pmin) pmin = v;
+            if (v > pmax) pmax = v;
+        }
         statusEl.textContent =
+            `${scenarioSel.value}  ` +
             `step ${api.stepCount(api.sim).toString().padStart(6)}  ` +
-            `t = ${api.simTime(api.sim).toFixed(2).padStart(8)}  ` +
-            `particles = ${n}  ` +
-            `grid ${GRID_W}x${GRID_H}  cfl=${CFL.toFixed(4)}`;
+            `t=${api.simTime(api.sim).toFixed(2).padStart(7)}  ` +
+            `Phi_g range [${pmin.toExponential(2)}, ${pmax.toExponential(2)}]  ` +
+            `parts=${n}  ` +
+            `${paused ? '[PAUSED]' : ''}`;
         requestAnimationFrame(frame);
     }
 
