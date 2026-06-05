@@ -1,0 +1,610 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage[expansion=false]{microtype}
+\usepackage{parskip}
+\usepackage{listings}
+\usepackage{mdframed}
+
+\geometry{margin=2.5cm}
+
+\definecolor{deepblue}{RGB}{31,56,100}
+\definecolor{midblue}{RGB}{46,84,150}
+\definecolor{codebg}{RGB}{245,247,250}
+\definecolor{coderule}{RGB}{200,210,225}
+\definecolor{warnred}{RGB}{160,40,40}
+
+\titleformat{\section}{\large\bfseries\color{deepblue}}{{\thesection}}{1em}{}
+\titleformat{\subsection}{\normalsize\bfseries\color{midblue}}{{\thesubsection}}{1em}{}
+\titleformat{\subsubsection}{\normalsize\bfseries}{{\thesubsubsection}}{1em}{}
+
+\lstset{
+  backgroundcolor=\color{codebg},
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{coderule},
+  framesep=6pt,
+  xleftmargin=8pt,
+  xrightmargin=8pt,
+  aboveskip=8pt,
+  belowskip=8pt,
+}
+
+\newmdenv[
+  backgroundcolor=codebg,
+  linecolor=coderule,
+  linewidth=0.5pt,
+  innerleftmargin=10pt,
+  innerrightmargin=10pt,
+  innertopmargin=8pt,
+  innerbottommargin=8pt,
+  skipabove=8pt,
+  skipbelow=8pt,
+]{shaded}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small\color{gray}Linearized GR Sandbox}
+\fancyhead[R]{\small\color{gray}v38 Addendum\,---\,Field Initialization \& Absorbing BCs}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\newcommand{\vv}[1]{\mathbf{#1}}
+\newcommand{\Phig}{\Phi_g}
+\newcommand{\Ag}{\vv{A}_g}
+\newcommand{\order}[1]{\mathcal{O}(#1)}
+\newcommand{\dd}{\mathrm{d}}
+\newcommand{\half}{\tfrac{1}{2}}
+
+%--------------------------------------------------------------------
+\begin{document}
+%--------------------------------------------------------------------
+
+\begin{center}
+  {\Large\bfseries\color{deepblue} v38 Addendum: Field Initialization and \\[2pt]
+   Absorbing Boundary Conditions Revisited\par}
+  \vspace{0.4cm}
+  {\small Linearized GR + EM PIC Sandbox, web-frontend phase\par}
+  \vspace{0.2cm}
+  {\small \today\par}
+\end{center}
+
+\vspace{0.5cm}
+
+\begin{shaded}
+\textbf{Scope.}  This addendum revises three sections of
+gr\_sandbox\_v38.tex that, while internally consistent, were found to
+be physically wrong or numerically broken in the course of building
+the interactive web demo against the v40/v41 simulator core:
+\begin{enumerate}[leftmargin=*,nosep]
+  \item \S 9.6 ``Absorbing boundary layer'': the multiplicative
+    ($\sigma\,\dd t$) damping ring does not absorb the lowest standing
+    mode of the bounded box.  Replace with a derivative-friction
+    (Klein-Gordon-like) absorber.
+  \item \S 15.9 ``Field initialization'': the wave-equation
+    convergence iteration starting from $\Phi=0$ does not converge to
+    a static solution for the same reason -- the lowest standing
+    mode, seeded by the initial transient, is undamped.  Replace
+    with a direct-sum 2D Li{\'e}nard-Wiechert initialization that
+    sets all six potentials analytically.
+  \item Add a new subsection on the DC gauge mode: under Neumann
+    outer BC the constant-everywhere mode of a scalar potential is
+    accelerated by any nonzero source mean and runs away; under
+    Dirichlet the wall pins it.  This was implicit in v38 but the
+    failure mode wasn't called out.
+\end{enumerate}
+The discrete stability analysis of the centered-implicit friction
+form (which the post-step ``bleed'' form is \emph{not}) is included
+because the result is non-trivial and easy to get wrong.
+\end{shaded}
+
+\tableofcontents
+
+\vspace{0.5cm}
+
+%--------------------------------------------------------------------
+\section{Diagnosis of the v38 absorber}
+%--------------------------------------------------------------------
+
+The v38 absorbing ring multiplies the leapfrog update by
+$(1 - \sigma_k\,\dd t)$ in a polynomial-tapered ring of depth $N$
+cells:
+\begin{equation}
+  \Phi_k^{n+1} \;=\; \bigl[2\Phi_k^n - \Phi_k^{n-1}
+                       + c^2\dd t^2\,\bigl(\nabla^2\Phi^n + s_c\,\rho_k\bigr)\bigr]
+                  \,\bigl(1 - \sigma_k\,\dd t\bigr).
+\end{equation}
+This factor does two distinct things: (a) it dissipates outgoing wave
+energy, which is what we want; and (b) it pulls $\Phi$ toward zero
+everywhere inside the ring, which effectively imposes a Dirichlet
+boundary at the wall.  Effect (a) only acts on field amplitude that
+\emph{reaches} the ring; effect (b) is the reason the static
+fixed point of the box is the Dirichlet Poisson solution rather
+than the free-space one.
+
+The failure mode is mode-dependent.  Consider the standing modes
+$\phi_{mn}(x,y) = \sin(m\pi x/L)\sin(n\pi y/L)$ of a square box with
+zero-Dirichlet walls.  The lowest mode $(m,n) = (1,1)$ has its
+\textbf{antinode at the center} and \textbf{nodes at the wall}.  Its
+overlap with the multiplicative damping array, concentrated in the
+outer ring, is suppressed by the eigenfunction's small wall
+amplitude.  Specifically, the per-step decay factor for mode
+$\phi_{mn}$ is approximately
+\begin{equation}
+  1 - \dd t\,\overline{\sigma}_{mn},
+  \qquad
+  \overline{\sigma}_{mn}
+     \;=\;
+     \frac{\int_\Omega \sigma(x,y)\,\phi_{mn}^2\,\dd^2 x}
+          {\int_\Omega \phi_{mn}^2\,\dd^2 x}.
+\end{equation}
+For the lowest mode this average is $\order{N/L}$ times the wall value
+of $\sigma$; for high-$k$ modes (which oscillate with appreciable
+amplitude at the wall) it is $\order{1}$ times the wall value.  At
+$N/L \sim 1/8$ (a typical absorber ring depth) the lowest mode is
+damped roughly an order of magnitude slower than high-$k$ modes.
+
+\textbf{Empirical signature.}  With pic\_static (a single stationary
+particle), particles frozen, and the field initialized by the v38
+\S 15.9 convergence iteration, the value of $\Phig$ at the box center
+oscillates with period $\sim 2L/c$ and amplitude $\sim |\Phig^\text{static}|$
+indefinitely.  The probe trajectory shows envelope swing of
+$\sim 50\%$ of $|\Phig^\text{static}|$ after 4000 steps with no decay
+trend.  The absorbing ring is not absorbing the lowest mode.
+
+\vspace{0.5em}
+The v38 \S 15.9 prescription -- ``iterate the leapfrog with frozen
+particles until the field converges'' -- relies on the absorber to
+remove the transient launched by switching the source on at $t=0$.
+That transient has Fourier content at every mode; the lowest
+component is excited as strongly as any other, and once excited it
+persists.  The convergence iteration therefore does not, in fact,
+converge to the static solution; it converges to the static solution
+\emph{plus} a residual standing-mode oscillation of comparable
+amplitude.
+
+%--------------------------------------------------------------------
+\section{Direct-sum Liénard-Wiechert initialization}
+%--------------------------------------------------------------------
+\label{sec:lw_init}
+
+The correct initialization is to set each perturbation potential at
+$t=0$ to the static Poisson solution of the deposited sources, then
+start the wave equation from there with zero time-derivative.  For an
+isolated $N$-particle configuration in 2D, the static solution is
+known analytically -- it is the 2D Liénard-Wiechert potential, which
+under the Lorenz gauge is built from the same $\ln r$ kernel for all
+six fields:
+\begin{align}
+  \Phig(\vv{x})  &\;=\; -\frac{s_c^g}{2\pi}\,\sum_i m_i\,\ln|\vv{x}-\vv{x}_i|,
+    \label{eq:phig_lw} \\
+  \Ag(\vv{x})  &\;=\; -\frac{s_c^g}{2\pi c^2}\,\sum_i m_i\,\vv{v}_i\,\ln|\vv{x}-\vv{x}_i|,
+    \label{eq:Ag_lw} \\
+  \phi(\vv{x})  &\;=\; -\frac{s_c^{em}}{2\pi}\,\sum_i q_i\,\ln|\vv{x}-\vv{x}_i|,
+    \label{eq:phi_lw} \\
+  \vv{A}(\vv{x})  &\;=\; -\frac{s_c^{em}}{2\pi c^2}\,\sum_i q_i\,\vv{v}_i\,\ln|\vv{x}-\vv{x}_i|,
+    \label{eq:A_lw}
+\end{align}
+where $s_c^g = -4\pi G_{\text{eff}}$ and $s_c^{em} = +4\pi k_e$ are
+the source coefficients from \S 9.2, and $\vv{v}_i = \vv{p}_i/(\gamma_i
+m_i)$.  These follow from the 2D fundamental solution of $\nabla^2$,
+$G(r) = (2\pi)^{-1}\ln r$, applied to point-source charge/mass and
+current distributions $\rho(\vv{y}) = \sum_i Q_i\,\delta(\vv{y}-\vv{x}_i)$.
+The velocity moves from the scalar to the vector exactly as in the
+3D Liénard-Wiechert form; in the static-source limit the scalar
+parts dominate and the vector parts are an $\order{v/c}$ correction.
+
+\subsubsection*{Sub-cell clip}
+
+The logarithm diverges at $\vv{x} = \vv{x}_i$.  Clip the radius at
+$r_{\min} = \half\,\dd x$ (smaller than any cell-particle separation
+that can actually occur on the half-cell-centered deposition lattice)
+when evaluating the analytic sum; the resulting value at the source
+cell is finite and within the floating-point dynamic range of all
+nearby cells.  The clipped value is not the discrete 5-point Poisson
+solution -- see \S\ref{sec:lw_discrete} -- but the residual mismatch is
+handled by the friction absorber introduced below.
+
+\subsubsection*{Boundary taper}
+
+If the outer wall enforces zero-Dirichlet (the v38 convention, kept
+here for reasons discussed in \S\ref{sec:dc_mode}), the L-W field at
+the wall is nonzero and inconsistent with the BC.  Multiply the L-W
+field through the absorbing zone by a smooth taper that brings it to
+zero at the wall:
+\begin{equation}
+  \Phi(\vv{x}) \;\leftarrow\; T(d(\vv{x}))\,\Phi(\vv{x}),
+  \qquad
+  T(d) \;=\;
+  \begin{cases}
+    1 & d \ge N_\text{damp} \\
+    1 - u^2,\; u = (N_\text{damp} - d)/N_\text{damp} & 0 < d < N_\text{damp} \\
+    0 & d \le 0
+  \end{cases}
+\end{equation}
+where $d(\vv{x})$ is the cell-count distance from the nearest wall.
+This matches the polynomial $m=2$ damping profile of \S 9.6.  Under
+Neumann BC the taper must be \emph{omitted}; see \S\ref{sec:dc_mode}.
+
+\subsubsection*{Leapfrog initialization at $t=0$}
+
+After the L-W direct sum is written into the curr buffer of each
+field, also write it into the prev and next buffers:
+\begin{equation}
+  \Phi^{-1}_k \;=\; \Phi^{0}_k \;=\; \Phi^{1}_k \;=\; \Phi^\text{LW}_k.
+\end{equation}
+This makes the discrete time derivative encoded by the leapfrog
+($\Phi^0 - \Phi^{-1}$) exactly zero, so no spurious transient is
+launched by the time-integration startup.  Particle momenta are set
+directly from the scenario initial conditions; the v38 \S 15.9
+half-step back-extrapolation is not needed because the field is
+already at the static solution.
+
+\subsubsection*{Compute cost}
+
+For $N_p$ particles on a $W \times H$ grid the L-W sum is
+$\order{N_p \cdot W \cdot H}$ log evaluations.  At $W=H=384$, $N_p=2$
+this is $\sim 3 \times 10^5$ operations -- sub-millisecond.  For
+$N_p \gtrsim 10^4$ a tree-code or FFT convolution would be needed,
+but the regime the sandbox addresses (a few orbiting test masses)
+does not require it.
+
+%--------------------------------------------------------------------
+\section{Continuum--discrete Poisson mismatch}
+%--------------------------------------------------------------------
+\label{sec:lw_discrete}
+
+The L-W direct sum is the analytic Poisson solution of a sum of Dirac
+delta sources.  The simulation's actual source is not a delta; it is
+the TSC-spread (or BUMP, or CIC) deposition kernel evaluated at the
+particle's sub-cell position.  Inserting the analytic L-W into the
+discrete 5-point leapfrog and evaluating the residual
+$\nabla^2_5 \Phi^\text{LW} + s_c\,\rho^\text{TSC}$ shows that the two
+are not equal at the source.  At a single particle of mass $m$
+centered exactly on a cell, with TSC weights $(9/16, 3/32, 1/64)$ on
+the $3 \times 3$ stamp:
+\begin{equation}
+  \nabla^2_5 \Phi^\text{LW}\bigr|_\text{center}
+  \;=\;
+  -\frac{4\,\Phi^\text{LW}_\text{center}}{\dd x^2}
+  \;\approx\; +5.55 \times 10^{-2}
+  \qquad\text{(at $m = 0.01$, $G_\text{eff}=1$)},
+\end{equation}
+while
+\begin{equation}
+  s_c\,\rho^\text{TSC}_\text{center}
+  \;=\; -4\pi G_\text{eff}\,\frac{m \cdot 9/16}{\dd x^2}
+  \;\approx\; -7.07 \times 10^{-2}.
+\end{equation}
+The residual $-1.5\times 10^{-2}$ is roughly $20\%$ of $|s_c\rho|$ at
+the source cell.  It produces a per-step kick on $\Phig$ at the
+source of $c^2\dd t^2 \times (-1.5\times 10^{-2}) \approx -8\times
+10^{-3}$ -- $\sim 5\%$ of $|\Phig^\text{LW}_\text{center}|$ every
+step.  This is the source-term forcing that the friction absorber
+(next section) must dissipate.
+
+\paragraph{Why not solve the discrete 5-point Poisson exactly?}  An
+SOR sweep on $\nabla^2_5 \Phi = -s_c\,\rho^\text{TSC}$ converges in
+$\order{\max(W,H)}$ iterations to the bit-exact discrete Poisson
+solution and removes this residual entirely.  This was implemented
+and tested.  However, the SOR solution requires a boundary
+condition: zero-Dirichlet at the outer ring is the natural choice,
+but the resulting static field is the Dirichlet-Poisson solution of
+the box, not the free-space 2D log.  The two differ visibly near
+the wall, where the Dirichlet enforcement forces $\Phi \to 0$ rather
+than continuing the $\ln r$ tail.  For the pedagogical sandbox the
+free-space appearance of L-W is preferable, so we accept the small
+discrete-vs-continuum mismatch and rely on the friction absorber to
+dissipate the resulting per-step forcing.
+
+%--------------------------------------------------------------------
+\section{Derivative-friction absorber}
+%--------------------------------------------------------------------
+\label{sec:friction}
+
+Replace the multiplicative damping ring of \S 9.6 with a derivative-
+friction term added to the wave equation:
+\begin{equation}
+  \frac{\partial^2 \Phi}{\partial t^2} \;+\; 2\gamma(\vv{x})\,\frac{\partial \Phi}{\partial t}
+  \;=\; c^2\nabla^2 \Phi \;+\; s_c\,\rho.
+  \label{eq:friction_pde}
+\end{equation}
+The crucial difference from the multiplicative form is that the
+friction term vanishes identically at $\partial_t \Phi = 0$, so the
+static fixed point is exactly the Poisson solution regardless of the
+spatial profile of $\gamma$.  In particular: a uniform friction floor
+$\gamma_0$ everywhere in the box damps all modes -- including the
+lowest standing mode, which has nonzero $\partial_t \Phi$ even though
+its spatial amplitude at the wall is small -- without shifting the
+equilibrium.
+
+\subsection{Mode-by-mode decay rate}
+
+Consider a single eigenmode $\Phi_k(\vv{x},t) = a_k(t)\phi_k(\vv{x})$
+of the spatial operator $-c^2\nabla^2$ with eigenvalue $\omega_k^2$,
+and let $\overline{2\gamma}_k$ denote the eigenmode-averaged
+friction.  In the source-free regime:
+\begin{equation}
+  \ddot a_k + \overline{2\gamma}_k\,\dot a_k + \omega_k^2\,a_k \;=\; 0
+  \quad\Longrightarrow\quad
+  a_k(t) \;\propto\; e^{-\overline{\gamma}_k\,t}\,\cos(\sqrt{\omega_k^2 - \overline{\gamma}_k^2}\,t + \delta).
+\end{equation}
+For $\overline{\gamma}_k < \omega_k$ (the underdamped regime) every
+mode decays at rate $\overline{\gamma}_k$.  The lowest mode's
+eigenmode-averaged friction is
+$\overline{\gamma}_{(1,1)} \sim \gamma_0$ (dominated by the uniform
+floor, since the wall ramp contributes only at the small-amplitude
+boundary).  A uniform $\gamma_0\,\dd t = 10^{-3}$ gives mode-amplitude
+decay to $1/e$ in $\sim 1000$ steps.  Higher-$k$ modes are also
+damped by the wall ramp; combined decay rates approach $\gamma_\text{wall}$
+for modes localized near the boundary.
+
+\subsection{Discrete leapfrog: post-step bleed (UNSTABLE)}
+
+The natural-looking discretization of (\ref{eq:friction_pde}) is to
+run the standard leapfrog and then, after each rotation, bleed the
+prev buffer toward curr:
+\begin{equation}
+  \Phi^{n-1}_{k,\text{bled}} \;:=\; (1-\alpha_k)\,\Phi^{n-1}_k \;+\; \alpha_k\,\Phi^n_k,
+  \qquad \alpha_k = 2\gamma_k\,\dd t.
+  \label{eq:post_bleed}
+\end{equation}
+This appears to reduce the encoded time derivative $\Phi^n - \Phi^{n-1}$
+by a factor $(1-\alpha_k)$ each step without touching the static
+fixed point (where $\Phi^n = \Phi^{n-1}$ and the bleed is a no-op).
+
+\textbf{This form is unconditionally unstable at the 2D Nyquist mode
+for any $\alpha > 0$ when CFL $= 1/\sqrt{2}$.}
+
+The recurrence implied by (\ref{eq:post_bleed}) is
+\begin{equation}
+  \Phi^{n+2} \;=\; (2 - \alpha - s^2)\,\Phi^{n+1} \;-\; (1-\alpha)\,\Phi^n
+  \;+\; c^2\dd t^2 \cdot \text{(source terms)},
+\end{equation}
+where $s^2 = c^2 \dd t^2 |\nabla^2_5|$.  At the 2D Nyquist
+($s^2 = 4$ when CFL $= 1/\sqrt{2}$), the characteristic equation
+$\lambda^2 - (2-\alpha-s^2)\lambda + (1-\alpha) = 0$ has discriminant
+$\alpha^2 + 8\alpha > 0$ for any $\alpha > 0$.  The roots are
+\begin{equation}
+  \lambda_{\pm} \;=\; \frac{-2 - \alpha \;\pm\; \sqrt{\alpha^2 + 8\alpha}}{2}.
+\end{equation}
+For $\alpha = 10^{-3}$, $\lambda_- \approx -1.045$ -- the Nyquist
+mode grows $4.5\%$ per step.  Round-off seeds it; saturation in
+$\sim 100$ steps.
+
+Empirically (the failure mode that prompted this addendum): on a
+$384 \times 384$ grid with L-W initialization and post-step-bleed
+friction at $\alpha = 0.04$ near the wall, a coherent wavefront
+appears at the boundary within a few hundred steps, propagates
+inward, and dominates the entire field within a few thousand.  The
+``absorbing layer'' is acting as a generator.
+
+\subsection{Centered-implicit discretization (STABLE)}
+
+Discretize the friction term at the leapfrog midpoint, so the friction
+gradient term $\partial_t \Phi$ uses $(\Phi^{n+1} - \Phi^{n-1})/(2\dd
+t)$:
+\begin{equation}
+  \frac{\Phi^{n+1} - 2\Phi^n + \Phi^{n-1}}{\dd t^2}
+  \;+\;
+  2\gamma\,\frac{\Phi^{n+1} - \Phi^{n-1}}{2\,\dd t}
+  \;=\;
+  c^2\nabla^2_5 \Phi^n \;+\; s_c\,\rho^n.
+\end{equation}
+Solving for $\Phi^{n+1}$ with $\beta = \gamma\,\dd t$:
+\begin{equation}
+  (1 + \beta)\,\Phi^{n+1} \;=\; 2\Phi^n \;-\; (1-\beta)\,\Phi^{n-1}
+  \;+\; \dd t^2\,\bigl(c^2\nabla^2_5 \Phi^n + s_c\,\rho^n\bigr).
+  \label{eq:centered}
+\end{equation}
+At the static fixed point $\Phi^{n+1} = \Phi^n = \Phi^{n-1}$ the
+LHS factor $(1+\beta)$ and the RHS coefficient $-(1-\beta) + 2 = 1+\beta$
+match identically -- the static is preserved.
+
+\paragraph{Stability at 2D Nyquist.}  The characteristic equation
+\begin{equation}
+  (1+\beta)\lambda^2 \;-\; (2 - s^2)\lambda \;+\; (1-\beta) \;=\; 0
+\end{equation}
+at $s^2 = 4$ has discriminant
+$(2 - 4)^2 - 4(1-\beta)(1+\beta) = 4\beta^2$, giving real roots
+\begin{equation}
+  \lambda_+ \;=\; -\frac{1 - \beta}{1 + \beta},
+  \qquad
+  \lambda_- \;=\; -1.
+\end{equation}
+$|\lambda_+| < 1$ for $\beta > 0$; $|\lambda_-| = 1$.  The Nyquist
+mode is marginally stable on one branch and damped on the other --
+unconditionally non-growing for any $\beta \ge 0$.  At lower-$k$ modes
+the discriminant is negative and $|\lambda|^2 = (1-\beta)/(1+\beta) <
+1$ for $\beta > 0$: every interior mode strictly decays.
+
+\paragraph{Post-leapfrog correction implementation.}  Equation
+(\ref{eq:centered}) is equivalent to running the standard (un-friction)
+leapfrog and then applying a per-cell post-correction \emph{before}
+the buffer rotation:
+\begin{equation}
+  \Phi^{n+1}_k \;\leftarrow\; \frac{\Phi^{n+1}_{k,\text{std}}
+                                    \;+\; \beta_k\,\Phi^{n-1}_k}{1 + \beta_k}.
+  \label{eq:centered_post}
+\end{equation}
+This is the form actually used in the implementation: no leapfrog
+kernel needs to be modified, only a single $\order{N_\text{cells}}$
+sweep per field per step.  At $\beta_k = 0$ the formula reduces to
+$\Phi^{n+1}_{k,\text{std}}$ identically, preserving backward
+compatibility for tests that do not use the friction array.
+
+\subsection{Per-cell profile}
+
+The implementation stores $\beta_k = \gamma_k\,\dd t$ as a single
+floating-point array \texttt{friction\_d[k]}.  A practical profile is
+a small uniform floor plus a polynomial ramp to a larger value at
+the wall:
+\begin{equation}
+  \beta_k \;=\;
+  \begin{cases}
+    \beta_\text{floor} & d_k \ge N_\text{damp} \\
+    \beta_\text{floor} + (\beta_\text{wall} - \beta_\text{floor})\,u^2,\; u = (N_\text{damp} - d_k)/N_\text{damp} & 0 \le d_k < N_\text{damp}
+  \end{cases}
+\end{equation}
+with $d_k$ the cell-count distance from the nearest wall.  Sensible
+values for the web demo on a $384 \times 384$ grid with absorber
+depth $N_\text{damp} = 48$:
+\begin{equation}
+  \beta_\text{floor} \;=\; 10^{-3},
+  \qquad
+  \beta_\text{wall}  \;=\; 2 \times 10^{-2}.
+\end{equation}
+Mode lifetimes: lowest standing mode $\sim 1000$ steps; modes
+localized within the ring $\sim 50$ steps.  At
+CFL $= 1/\sqrt{2}$ this is well inside the stability region for both
+the bulk and the wall.
+
+%--------------------------------------------------------------------
+\section{The DC mode under each boundary condition}
+%--------------------------------------------------------------------
+\label{sec:dc_mode}
+
+The friction absorber damps every mode with nonzero
+$\partial_t \Phi$.  The constant-everywhere mode $\Phi_{DC}(\vv{x},t) =
+a(t)$ has $\partial_t a$ that is \emph{not} zero in general -- the
+wave equation drives it via the spatial mean of the source:
+\begin{equation}
+  \ddot a \;=\; s_c\,\bar\rho,
+  \qquad
+  \bar\rho \;=\; \frac{1}{|\Omega|}\int_\Omega \rho\,\dd^2 x.
+\end{equation}
+For a net-nonzero source $\bar\rho \ne 0$ (any scenario with nonzero
+total mass or charge), $a$ undergoes constant acceleration:
+$a(t) = \half s_c\,\bar\rho\,t^2$ plus initial conditions.
+
+\subsection{Dirichlet outer wall}
+
+Zero-Dirichlet at the outermost ring forces $a(t) \equiv 0$ at the
+wall, which under enforcement at every step pins the DC mode for the
+entire box.  The friction term then sees no DC content, and the
+static fixed point is the discrete Dirichlet-Poisson solution.  The
+\emph{near-wall} value of $\Phi$ is forced to zero rather than
+continuing the L-W $\ln r$ tail; the L-W initialization must be
+tapered through the absorbing zone to match.
+
+This is the configuration recommended for net-nonzero sources, and
+is what the v38 \S 9.6 absorber implicitly relied on (the
+multiplicative form does the pinning automatically).
+
+\subsection{Neumann outer wall}
+
+Zero-Neumann ($\partial_n \Phi = 0$ at the wall) leaves the DC mode
+unconstrained.  With $\bar\rho \ne 0$ the DC mode runs away
+quadratically in time.  For the demo's pic\_binary
+($m_\text{total} = 0.02$, $W H = 147456$) at $\bar\rho \sim
+10^{-7}$ and $s_c \sim 10$, the DC component grows past $|\Phi^\text{static}|
+\sim 10^{-1}$ in $\sim 10^3$ steps -- visually rapid.
+
+Two gauge-fix options:
+\begin{enumerate}[leftmargin=*,nosep]
+\item \textbf{Zero-mean each step.}  After the leapfrog rotation,
+  subtract the spatial mean of $\Phig$ (and $\phi_{em}$) from prev and
+  curr.  This is gauge-equivalent (Poisson is defined up to a
+  constant; forces depend on gradients only).  Tested implementation:
+  works for pic\_static but exhibits a small bulk-momentum drift in
+  multi-particle scenarios -- the per-step constant subtraction
+  apparently interacts with the centered-friction term in a way
+  that bleeds momentum out of the conserved sector.  Cause not yet
+  isolated; flagged for follow-up.
+\item \textbf{Pin one cell.}  Force $\Phi$ at a single fixed cell to
+  zero each step.  Equivalent to a one-point Dirichlet condition;
+  preserves Neumann elsewhere.  Not implemented in v42.
+\end{enumerate}
+The pragmatic choice in v42 is to use \textbf{Dirichlet outer BC}
+plus friction.  The friction does the work the multiplicative
+damping was supposed to do (absorbing the lowest mode), and the
+Dirichlet condition does the work the multiplicative damping was
+\emph{also} doing as a side effect (pinning the DC).  Separation of
+concerns.
+
+%--------------------------------------------------------------------
+\section{Summary of replacement algorithms}
+%--------------------------------------------------------------------
+
+\subsection*{Replacement for v38 \S 15.9 (field initialization)}
+
+\begin{algsteps}
+  \item Place all particles at their scenario IC positions and momenta.
+  \item Evaluate Eqs.~(\ref{eq:phig_lw})-(\ref{eq:A_lw}) at every grid
+    cell for every particle.  Clip $r$ at $\half\dd x$ to avoid the
+    log singularity at the source.
+  \item If the outer BC is Dirichlet, multiply through by the
+    polynomial-$m=2$ taper that brings the field smoothly to zero at
+    the wall over the depth of the absorbing zone.  If Neumann, do
+    not taper -- the discontinuity would launch an inward wave on
+    step 1.
+  \item Copy the resulting curr buffer into prev and next so the
+    encoded time derivative is identically zero.
+  \item Begin the wave-equation evolution.  No half-step momentum
+    back-extrapolation is needed because the field is already at the
+    static fixed point.
+\end{algsteps}
+
+\subsection*{Replacement for v38 \S 9.6 (absorbing boundary layer)}
+
+\begin{algsteps}
+  \item Allocate \texttt{friction\_d[k]} of size $W \times H$.
+  \item Populate with a tapered profile: $\beta_\text{floor}$ in the
+    interior, smoothly increasing to $\beta_\text{wall}$ over the
+    last $N_\text{damp}$ cells from each wall.
+  \item In \texttt{gr\_sim\_step}, after the standard leapfrog
+    computes \texttt{next} for every field but \emph{before} the
+    three-pointer rotation, apply the per-cell correction
+    (\ref{eq:centered_post}).
+  \item Outer-wall boundary: zero-Dirichlet (\texttt{next[outer ring]
+    = 0}) is recommended for net-nonzero sources.  Neumann is
+    available as a flag but requires an additional gauge fix; see
+    \S\ref{sec:dc_mode}.
+  \item No multiplicative damping is applied -- the entire absorber
+    function is carried by the friction.
+\end{algsteps}
+
+%--------------------------------------------------------------------
+\section{Status \& open items}
+%--------------------------------------------------------------------
+
+\paragraph{What works.}  The friction absorber + Dirichlet + L-W
+initialization combination reaches a stable post-transient
+configuration on both pic\_static (single mass) and pic\_binary (two
+orbiting masses):
+\begin{itemize}[leftmargin=*,nosep]
+  \item Initial Dirichlet-induced inward wave from the L-W taper at
+    the wall damps within a few hundred steps.
+  \item No lowest-mode trap; no inversion oscillation.
+  \item The bound binary keeps orbiting after the transient.
+  \item Discrete-Dirichlet-Poisson static is reached and held.
+\end{itemize}
+
+\paragraph{Open follow-ups.}  Tracked separately:
+\begin{itemize}[leftmargin=*,nosep]
+  \item \emph{COM drift on pic\_binary.}  After the boundary transient
+    damps, the two-body center of mass moves at small constant
+    velocity.  Suspected cause: the transient imparts a momentum
+    impulse to the pair that is not exactly equal and opposite due
+    to sub-cell grid alignment of the particles.  Fix is to make the
+    L-W IC consistent with the discrete Dirichlet equilibrium so no
+    transient is launched, either via TSC-convolved L-W or via a few
+    SOR sweeps applied to the L-W as a smoother.
+  \item \emph{Continuum-discrete Poisson residual.}  See
+    \S\ref{sec:lw_discrete}.  Currently dissipated by friction; could
+    be eliminated by TSC-convolved L-W.
+  \item \emph{Neumann + zero-mean momentum bleed.}  See
+    \S\ref{sec:dc_mode}, item 1.  Currently worked around by using
+    Dirichlet.
+\end{itemize}
+
+\end{document}
