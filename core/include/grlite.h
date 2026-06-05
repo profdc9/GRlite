@@ -520,6 +520,15 @@ int  gr_sim_get_field_evolution(const gr_sim_t* sim);
 void gr_sim_set_particles_frozen(gr_sim_t* sim, int frozen);
 int  gr_sim_get_particles_frozen(const gr_sim_t* sim);
 
+/* Direct Poisson solver for Phi_g via SOR.  Bypasses the wave-equation
+ * convergence iteration -- which leaves the lowest standing mode of the
+ * absorber-bounded box undamped at ~50% of |Phi_static| amplitude --
+ * and computes the static solution in ~max(W,H) iterations.  Sets
+ * Phi_prev = Phi_curr so the subsequent wave-equation evolution starts
+ * from a true zero-time-derivative state.  rho_matter must already
+ * contain the deposited source. */
+void gr_sim_relax_phi_g_poisson(gr_sim_t* sim, int n_iters);
+
 /* Stage 10 — enable automatic per-step deposition of every particle's mass
  * and current (rho_matter, J_mx, J_my) and, if charged, charge and current
  * (rho_q, J_qx, J_qy) onto the grid before each gr_sim_step's leapfrog runs.

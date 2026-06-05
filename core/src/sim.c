@@ -632,6 +632,72 @@ int gr_sim_get_particles_frozen(const gr_sim_t* sim) {
     return sim ? sim->particles_frozen : 0;
 }
 
+/* Direct Poisson solver for Phi_g via SOR (Successive Over-Relaxation).
+ *
+ * The wave-equation convergence iteration from v38 §15.9 does not
+ * actually damp the lowest standing mode of the absorber-bounded box --
+ * that mode has nodes at the wall and an antinode at the center, so the
+ * absorbing ring sees essentially no energy from it.  Running for many
+ * mode periods leaves residual oscillation of order |Phi_static| (Dan,
+ * 2026-06-04: stability probe shows swing ~50% of Phi_static even after
+ * 5400-step warmup).
+ *
+ * This routine bypasses the wave equation entirely and solves the
+ * static Poisson equation directly:
+ *
+ *     Lap Phi_g = -source_coeff * rho_matter        (per leapfrog form)
+ *
+ * 5-point Laplacian, zero-Dirichlet on the outer boundary, SOR with
+ * omega = 2 / (1 + sin(pi / max(W,H))) which converges in ~max(W,H)
+ * iterations.  After convergence prev := curr so the wave-equation
+ * leapfrog continues from a true static state (zero time-derivative,
+ * no excitation of standing modes).
+ *
+ * rho_matter must already be deposited (call gr_sim_step with frozen
+ * particles or gr_sim_deposit_point_mass first). */
+void gr_sim_relax_phi_g_poisson(gr_sim_t* sim, int n_iters) {
+    if (!sim || n_iters <= 0) return;
+    gr_field_state_t* f = &sim->fields[GR_FIELD_PHI_GRAV];
+    const float* src = f->source;
+    const float  sc  = f->source_coeff;
+    if (!src) return;
+    const int   W   = sim->width;
+    const int   H   = sim->height;
+    const float dx2 = sim->dx * sim->dx;
+    float* phi = f->curr;
+    const size_t ncells = (size_t) W * (size_t) H;
+
+    /* Zero-Dirichlet on the outer edge (matches leapfrog_field_critical). */
+    for (int i = 0; i < W; i++) { phi[i] = 0.0f; phi[(H - 1) * W + i] = 0.0f; }
+    for (int j = 0; j < H; j++) { phi[j * W] = 0.0f; phi[j * W + (W - 1)] = 0.0f; }
+
+    const int N_for_omega = (W > H) ? W : H;
+    const float omega = 2.0f / (1.0f + sinf((float) M_PI / (float) N_for_omega));
+
+    /* Red-black Gauss-Seidel ordering would be friendlier to vectorization;
+     * for clarity use plain row-major Gauss-Seidel with in-place updates. */
+    for (int it = 0; it < n_iters; it++) {
+        for (int j = 1; j < H - 1; j++) {
+            const int row = j * W;
+            for (int i = 1; i < W - 1; i++) {
+                const int k = row + i;
+                /* 5-pt Poisson: Lap Phi = -sc*src
+                 *   (phi[k-1]+phi[k+1]+phi[k-W]+phi[k+W] - 4 phi[k]) / dx^2 = -sc * src[k]
+                 * => phi[k] = (sum_neighbors + sc * src[k] * dx^2) / 4
+                 * SOR update applied. */
+                const float gauss = 0.25f * (phi[k - 1] + phi[k + 1]
+                                            + phi[k - W] + phi[k + W]
+                                            + sc * src[k] * dx2);
+                phi[k] += omega * (gauss - phi[k]);
+            }
+        }
+    }
+
+    /* Lock as static: zero the wave-equation time derivative. */
+    memcpy(f->prev, f->curr, ncells * sizeof(float));
+    memcpy(f->next, f->curr, ncells * sizeof(float));
+}
+
 /* Stage 8 — skip the per-step leapfrog when no perturbation dynamics are
  * active. The perturbation fields stay at zero (as initialized) and the
  * particle pusher reads only the background array. */
