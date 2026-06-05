@@ -3,27 +3,40 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GRlite — Stage 1: scalar wave</title>
+    <title>GRlite — binary orbit</title>
     <style>
       :root { color-scheme: dark; }
-      body { margin: 0; background: #111; color: #ddd; font: 14px system-ui, sans-serif; }
-      header { padding: 10px 16px; background: #1a1a1a; border-bottom: 1px solid #222; }
+      body { margin: 0; background: #0c0c0e; color: #ddd;
+             font: 14px system-ui, sans-serif; }
+      header { padding: 10px 16px; background: #15151a;
+               border-bottom: 1px solid #222; }
       header h1 { margin: 0; font-size: 15px; font-weight: 500; color: #eee; }
-      main { display: flex; flex-direction: column; align-items: center; padding: 24px; gap: 12px; }
-      canvas { background: #000; image-rendering: pixelated; border: 1px solid #333; }
-      #status { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; color: #999; }
+      header .sub { font-size: 12px; color: #888; margin-top: 2px; }
+      main { display: flex; flex-direction: column; align-items: center;
+             padding: 24px; gap: 12px; }
+      canvas { background: #000; image-rendering: auto;
+               border: 1px solid #2a2a2a; box-shadow: 0 0 12px rgba(0,0,0,0.6); }
+      #status { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+                font-size: 12px; color: #999; }
       .controls { display: flex; gap: 8px; }
-      button { background: #222; color: #ddd; border: 1px solid #444; padding: 4px 12px; font-size: 12px; cursor: pointer; }
-      button:hover { background: #2a2a2a; }
+      button { background: #1f1f25; color: #ddd; border: 1px solid #3a3a45;
+               padding: 5px 14px; font-size: 12px; cursor: pointer;
+               border-radius: 3px; }
+      button:hover { background: #2a2a32; }
+      button:active { background: #303040; }
     </style>
   </head>
   <body>
-    <header><h1>GRlite — Stage 1: scalar wave propagation (Phi_grav)</h1></header>
+    <header>
+      <h1>GRlite — pic_binary (two-body via FDTD gravity)</h1>
+      <div class="sub">v40+v41 simulator core; background colormap = Φ<sub>g</sub>; white dots = particles.</div>
+    </header>
     <main>
-      <canvas id="view" width="512" height="512"></canvas>
+      <canvas id="view" width="640" height="640"></canvas>
       <div class="controls">
-        <button id="reset">reset pulse</button>
+        <button id="reset">reset scenario</button>
         <button id="pause">pause</button>
+        <button id="stepFrame">step 1</button>
       </div>
       <div id="status">initializing&hellip;</div>
     </main>
