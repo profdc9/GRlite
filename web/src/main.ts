@@ -24,18 +24,14 @@ const CFL = 1.0 / Math.sqrt(2);
  * the typical Stage 02 layer). */
 const N_DAMPING = 48;
 const STEPS_PER_FRAME = 4;
-/* v38 §15.9 "Field initialization": iterate the field leapfrog with the
- * particles' positions and velocities held fixed so the perturbation
- * fields converge to the static Poisson solution at the initial
- * configuration.  The transient needs several domain-crossing times to
- * propagate to the absorber and die.  One crossing at c_eff = 1 with
- * CFL = 1/sqrt(2) takes max(W,H) * sqrt(2) steps; ~10 crossings (≈14x
- * the largest dimension) is comfortably in the doc's 1000-3000-for-N=256
- * recommendation band. */
-const WARMUP_CROSSINGS = 10;
-const WARMUP_STEPS = Math.ceil(
-    WARMUP_CROSSINGS * Math.max(GRID_W, GRID_H) * (1.0 / CFL),
-);
+/* Field-init settle: after the boundary-mean Liénard-Wiechert direct sum
+ * (a close initial guess), run this many steps with the particles frozen
+ * and the derivative-friction absorber on, relaxing the residual near-
+ * source discrete-vs-continuum mismatch to round-off.  Releasing then
+ * launches no startup transient.  stage62 shows ~100 steps already drives
+ * the symmetric-binary momentum impulse to round-off; max(W,H) gives ample
+ * margin and is still a sub-second one-time cost. */
+const N_SETTLE = Math.max(GRID_W, GRID_H);
 /* Colormap gain on Phi_g.  Picked so the log-r far field is visible (not
  * clamped) and the near-zone cyan wells are still bright. */
 const DISPLAY_SCALE = 5.0;
@@ -84,6 +80,7 @@ interface SimAPI {
     relaxPhiGPoisson: (sim: number, nIters: number) => void;
     initPotentialsLW: (sim: number) => void;
     initPotentialsLWTaper: (sim: number, taperInner: number, taperOuter: number) => void;
+    initPotentialsSettled: (sim: number, nSettle: number) => void;
     setOuterBcNeumann: (sim: number, neumann: number) => void;
     setVolumeFrictionTaper: (sim: number, uniform: number, taperMax: number, taperDepth: number) => void;
     setZeroMeanScalarPotentials: (sim: number, enabled: number) => void;
@@ -152,6 +149,11 @@ function bindApi(M: GRliteModule): SimAPI {
     const initPotentialsLWTaper = M.cwrap(
         'gr_sim_init_potentials_lienard_wiechert_with_taper',
         null, ['number','number','number']) as unknown as CFnVoid;
+    const initPotentialsSettled = M.cwrap('gr_sim_init_potentials_settled',
+        null, ['number','number']) as unknown as CFnVoid;
+    if (typeof initPotentialsSettled !== 'function') {
+        throw new Error('gr_sim_init_potentials_settled missing from WASM exports — rebuild grlite.wasm');
+    }
     const setOuterBcNeumann = M.cwrap('gr_sim_set_outer_bc_neumann', null,
         ['number','number']) as unknown as CFnVoid;
     const setVolumeFrictionTaper = M.cwrap('gr_sim_set_volume_friction_taper',
@@ -252,7 +254,8 @@ function bindApi(M: GRliteModule): SimAPI {
 
     return { sim, step, stepN, fieldPtr, loadScenario, setDamping,
              setParticlesFrozen, relaxPhiGPoisson, initPotentialsLW,
-             initPotentialsLWTaper, setOuterBcNeumann, setVolumeFrictionTaper,
+             initPotentialsLWTaper, initPotentialsSettled,
+             setOuterBcNeumann, setVolumeFrictionTaper,
              setZeroMeanScalarPotentials, stepCount, simTime, particleCount,
              getParticle, clearParticles, particleStrideF32: stride };
 }
@@ -424,12 +427,11 @@ async function main(): Promise<void> {
         const rc = api.loadScenario(api.sim, spec.name, ptr, arr.length);
         M._free(ptr);
         if (rc !== 0) { console.error(`load_scenario ${spec.name} failed rc=${rc}`); return; }
-        /* Field initialization: direct-sum L-W with the default taper
-         * across the damping ring depth.  With Dirichlet outer BC,
-         * Phi(wall) is pinned to 0, so the L-W IC needs to taper to 0
-         * through the absorbing zone to avoid a first-step boundary
-         * shock.  Polynomial m=2 taper, matching the friction ramp. */
-        api.initPotentialsLW(api.sim);   /* taper_inner = n_damping, taper_outer = 0 */
+        /* Field initialization: boundary-mean Liénard-Wiechert direct sum
+         * (gauge-shifted to ~0 at the Dirichlet wall) followed by an
+         * N_SETTLE frozen-friction settle to the exact discrete fixed
+         * point, so releasing the particles launches no startup transient. */
+        api.initPotentialsSettled(api.sim, N_SETTLE);
     }
 
     /* Field-stability probe: run N extra steps with particles still
@@ -595,20 +597,18 @@ async function main(): Promise<void> {
         console.log(`[${label}]   radial profile y=cy: ${profile.join(' ')}`);
     }
 
-    /* v38 §15.9 convergence iteration: freeze the particles in place
-     * (positions AND velocities pinned to scenario IC), iterate the field
-     * leapfrog until Phi_g, A_g, etc. converge to their static Poisson
-     * solutions for those sources, then unfreeze and begin dynamics.  The
-     * displayed field at t=0 of the visible run is already quasi-static --
-     * no switch-on wavefront. */
+    /* Field initialization: boundary-mean Liénard-Wiechert direct sum +
+     * frozen-friction settle to the exact discrete fixed point.  After this
+     * the field is static and releasing the particles launches no startup
+     * transient (no spurious COM impulse on symmetric configurations). */
     snapshotParticles('pre-init');
     snapshotPhi('pre-init');
-    statusEl.textContent = `direct-sum L-W initialization…`;
+    statusEl.textContent = `L-W init + ${N_SETTLE}-step friction settle…`;
     /* Yield to the browser so the status text actually paints, then run. */
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
-    api.initPotentialsLW(api.sim);   /* taper across damping ring -> Phi(wall) = 0 */
+    api.initPotentialsSettled(api.sim, N_SETTLE);
     snapshotParticles('post-init (should be IDENTICAL to pre)');
-    snapshotPhi('post-init (L-W tapered, Dirichlet + friction absorber)');
+    snapshotPhi('post-init (boundary-mean L-W + friction settle)');
 
     /* Optional field-stability probe: gated behind the "probe" button
      * so it doesn't add ~5 seconds to every page load.  Enable via the

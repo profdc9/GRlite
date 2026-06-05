@@ -594,6 +594,14 @@ void gr_sim_init_potentials_lienard_wiechert_with_taper(gr_sim_t* sim,
                                                          int taper_inner,
                                                          int taper_outer);
 
+/* Boundary-mean L-W init followed by an n_settle-step frozen-particle
+ * friction settle to the exact discrete fixed point, so releasing the
+ * particles launches no startup transient (and imparts no spurious COM
+ * impulse on a symmetric configuration).  Requires friction configured
+ * and particle source deposition on.  ~200-400 settle steps suffices on a
+ * few-hundred-cell grid; step_count is reset to 0 afterward. */
+void gr_sim_init_potentials_settled(gr_sim_t* sim, int n_settle);
+
 /* Stage 10 — enable automatic per-step deposition of every particle's mass
  * and current (rho_matter, J_mx, J_my) and, if charged, charge and current
  * (rho_q, J_qx, J_qy) onto the grid before each gr_sim_step's leapfrog runs.

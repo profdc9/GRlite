@@ -860,10 +860,14 @@ void gr_sim_relax_phi_g_poisson(gr_sim_t* sim, int n_iters) {
  * gauge with v = const, the vector potential reduces to v/c^2 times the
  * scalar potential -- which is the 2D Liénard-Wiechert form.
  *
- * A taper matching the polynomial m=2 damping profile (1 - (depth/N)^2)
- * is applied inside the absorbing ring so the IC smoothly goes to zero
- * at the outer Dirichlet edge, leaving the wave equation no boundary
- * shock to launch.
+ * Each particle's contribution is shifted by the mean of ln r over the
+ * boundary ring (a pure gauge constant -- no gradient, hence no force,
+ * is changed) so the summed field is ~0 at the Dirichlet wall and is
+ * consistent with the discrete Dirichlet fixed point, leaving the wave
+ * equation almost no boundary shock to launch.  This replaces the old
+ * multiplicative taper (which distorted gradients in the ring); the
+ * taper_inner/taper_outer args are retained for diagnostics but the
+ * default path passes 0 (taper off).
  *
  * .prev = .curr = .next is set for every field so the wave equation
  * starts with bit-exact zero time derivative.
@@ -923,6 +927,55 @@ void gr_sim_init_potentials_lienard_wiechert_with_taper(gr_sim_t* sim,
         const int do_m = (p->mass   != 0.0f);
         const int do_q = (p->charge != 0.0f);
 
+        /* Per-particle boundary-mean subtraction.  The 2D log GROWS toward
+         * the wall: ln|x-x_p| ~ ln(R_wall) >> the near-field structure, so
+         * the bare L-W is large and positive at the Dirichlet wall (forced
+         * to 0), which launches the dominant startup transient.  Subtract
+         * the mean of ln r over the boundary ring from this particle's
+         * contribution, so the summed field is ~0 (mean) at the wall and
+         * consistent with the Dirichlet fixed point.  This is a pure
+         * constant (gauge) shift -- it changes no gradient, hence no force,
+         * anywhere -- applied uniformly to all six components (the scalar
+         * shift maps to A via the same v/c^2 factor).  Replaces the old
+         * multiplicative taper, which distorted gradients in the ring. */
+        double sum_lr = 0.0;
+        long   n_b    = 0;
+        for (int i = 0; i < W; i++) {
+            const float dxx = (float) i * dx - xp;
+            /* top row j=0 */
+            {
+                const float dyt = -yp;
+                float r = sqrtf(dxx * dxx + dyt * dyt);
+                if (r < r_min) r = r_min;
+                sum_lr += (double) logf(r); n_b++;
+            }
+            /* bottom row j=H-1 */
+            {
+                const float dyb = (float)(H - 1) * dx - yp;
+                float r = sqrtf(dxx * dxx + dyb * dyb);
+                if (r < r_min) r = r_min;
+                sum_lr += (double) logf(r); n_b++;
+            }
+        }
+        for (int j = 1; j < H - 1; j++) {
+            const float dyj = (float) j * dx - yp;
+            /* left col i=0 */
+            {
+                const float dxl = -xp;
+                float r = sqrtf(dxl * dxl + dyj * dyj);
+                if (r < r_min) r = r_min;
+                sum_lr += (double) logf(r); n_b++;
+            }
+            /* right col i=W-1 */
+            {
+                const float dxr = (float)(W - 1) * dx - xp;
+                float r = sqrtf(dxr * dxr + dyj * dyj);
+                if (r < r_min) r = r_min;
+                sum_lr += (double) logf(r); n_b++;
+            }
+        }
+        const float bmean = (n_b > 0) ? (float)(sum_lr / (double) n_b) : 0.0f;
+
         for (int j = 0; j < H; j++) {
             const float yc = (float) j * dx;
             const float dy = yc - yp;
@@ -934,7 +987,7 @@ void gr_sim_init_potentials_lienard_wiechert_with_taper(gr_sim_t* sim,
                 float r2 = dxx * dxx + dy2;
                 float r  = sqrtf(r2);
                 if (r < r_min) r = r_min;
-                const float lr = logf(r);
+                const float lr = logf(r) - bmean;   /* boundary-mean-subtracted */
                 const int k = row + i;
                 if (do_m) {
                     phi_g[k] += kg  * lr;
@@ -1011,10 +1064,47 @@ void gr_sim_init_potentials_lienard_wiechert_with_taper(gr_sim_t* sim,
     }
 }
 
-/* Default-args entry: taper across the damping ring. */
+/* Default-args entry: no taper.  Per-particle boundary-mean subtraction
+ * (always applied inside _with_taper) makes the L-W field ~0 at the wall,
+ * which is what consistency with the Dirichlet fixed point needs; the old
+ * multiplicative taper is no longer used on the default path. */
 void gr_sim_init_potentials_lienard_wiechert(gr_sim_t* sim) {
     if (!sim) return;
-    gr_sim_init_potentials_lienard_wiechert_with_taper(sim, sim->n_damping, 0);
+    gr_sim_init_potentials_lienard_wiechert_with_taper(sim, 0, 0);
+}
+
+/* v42: boundary-mean L-W init + a frozen-particle friction settle to the
+ * exact discrete fixed point.
+ *
+ * The boundary-mean L-W field is a close initial guess but not the discrete
+ * fixed point -- it differs from it by the near-source discrete-vs-continuum
+ * mismatch (5-point Laplacian of the analytic log vs the deposited TSC
+ * blob) plus the residual boundary spatial variation, ~4% peak.  Running
+ * the field with the particles FROZEN and the derivative-friction absorber
+ * on relaxes that residual to round-off in a few hundred steps (the friction
+ * now damps every mode, including the lowest standing mode that the old
+ * multiplicative ring missed -- this is what makes the v38 sec:15.9
+ * convergence iteration finally work).  Releasing the particles then
+ * launches no startup transient, so a symmetric configuration receives no
+ * spurious center-of-mass impulse.
+ *
+ * Measured (stage62, 256x256 pic_binary): the quarter-orbit total-momentum
+ * impulse drops from 2.3e-3 of m*v_orb with no settle to ~3e-5 (round-off)
+ * with as few as 100 settle steps.  Requires friction configured
+ * (gr_sim_set_volume_friction_taper) and particle source deposition on.
+ *
+ * step_count is reset to 0 after the settle so the released simulation
+ * begins at t=0.  n_settle <= 0 reduces to a plain L-W init. */
+void gr_sim_init_potentials_settled(gr_sim_t* sim, int n_settle) {
+    if (!sim) return;
+    gr_sim_init_potentials_lienard_wiechert(sim);
+    if (n_settle > 0) {
+        const int was_frozen = sim->particles_frozen;
+        sim->particles_frozen = 1;
+        for (int s = 0; s < n_settle; s++) gr_sim_step(sim);
+        sim->particles_frozen = was_frozen;
+    }
+    sim->step_count = 0;
 }
 
 /* Stage 8 — skip the per-step leapfrog when no perturbation dynamics are
