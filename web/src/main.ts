@@ -395,18 +395,47 @@ async function main(): Promise<void> {
         requestAnimationFrame(frame);
     }
 
+    /* --- Diagnostic helpers ------------------------------------------- */
+    function snapshotParticles(label: string): void {
+        const n = api.particleCount(api.sim);
+        for (let i = 0; i < n; i++) {
+            const p = new Float32Array(M.HEAPF32.buffer, api.getParticle(api.sim, i), 4);
+            console.log(`[${label}] particle ${i}: x=${p[0].toFixed(4)} y=${p[1].toFixed(4)} px=${p[2].toFixed(4)} py=${p[3].toFixed(4)}`);
+        }
+    }
+    function snapshotPhi(label: string): void {
+        const ptr = api.fieldPtr(api.sim, /* GR_FIELD_PHI_GRAV */ 0);
+        const phi = new Float32Array(M.HEAPF32.buffer, ptr, GRID_W * GRID_H);
+        const at = (i: number, j: number) => phi[j * GRID_W + i];
+        const cx = GRID_W >> 1;
+        const cy = GRID_H >> 1;
+        const r = Math.round(BINARY_R / DX);
+        let max = -Infinity, min = Infinity;
+        for (let v of phi) { if (v < min) min = v; if (v > max) max = v; }
+        console.log(`[${label}] Phi_g min=${min.toExponential(3)} max=${max.toExponential(3)}`);
+        console.log(`[${label}]   center=${at(cx, cy).toExponential(3)}`);
+        console.log(`[${label}]   at p0 (cx-r,cy)=${at(cx - r, cy).toExponential(3)}`);
+        console.log(`[${label}]   at p1 (cx+r,cy)=${at(cx + r, cy).toExponential(3)}`);
+        console.log(`[${label}]   at (cx,cy+r)=${at(cx, cy + r).toExponential(3)} (perp axis)`);
+        console.log(`[${label}]   at (16,16) corner=${at(16, 16).toExponential(3)}`);
+    }
+
     /* v38 §15.9 convergence iteration: freeze the particles in place
      * (positions AND velocities pinned to scenario IC), iterate the field
      * leapfrog until Phi_g, A_g, etc. converge to their static Poisson
      * solutions for those sources, then unfreeze and begin dynamics.  The
      * displayed field at t=0 of the visible run is already quasi-static --
      * no switch-on wavefront. */
+    snapshotParticles('pre-warmup');
+    snapshotPhi('pre-warmup');
     statusEl.textContent = `converging fields (${WARMUP_STEPS} frozen steps)…`;
     /* Yield to the browser so the status text actually paints, then run. */
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
     api.setParticlesFrozen(api.sim, 1);
     api.stepN(api.sim, WARMUP_STEPS);
     api.setParticlesFrozen(api.sim, 0);
+    snapshotParticles('post-warmup (should be IDENTICAL to pre)');
+    snapshotPhi('post-warmup (should resemble 2D-log Poisson)');
 
     statusEl.textContent = 'running pic_binary';
     frame();
