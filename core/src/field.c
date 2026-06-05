@@ -35,6 +35,42 @@
 #include "grlite.h"
 #include "sim_internal.h"
 
+/* Outer-boundary post-pass for the non-periodic leapfrog variants.
+ *
+ *   neumann == 0 (default): Dirichlet -- next[outer ring] = 0.  Waves
+ *     reflect with a sign flip and the discrete static solution is the
+ *     zero-Dirichlet Poisson solution of the deposited rho.  Standing
+ *     modes have antinodes at the center, which overlap strongly with
+ *     a centered Liénard-Wiechert IC and make the lowest-mode trap
+ *     hard to escape.
+ *
+ *   neumann != 0:           Neumann -- next[outer ring] = next[next-
+ *     inward neighbor].  Waves reflect WITHOUT a sign flip.  Standing
+ *     modes have antinodes at the WALL (where the damping ring lives),
+ *     so the absorber damps them effectively.  Discrete static solution
+ *     more closely approximates the 2D free-space log Green's function. */
+static void apply_outer_bc(float* next, int W, int H, int neumann) {
+    if (neumann) {
+        for (int i = 0; i < W; i++) {
+            next[i]              = next[W + i];
+            next[(H - 1) * W + i] = next[(H - 2) * W + i];
+        }
+        for (int j = 0; j < H; j++) {
+            next[j * W]              = next[j * W + 1];
+            next[j * W + (W - 1)]    = next[j * W + (W - 2)];
+        }
+    } else {
+        for (int i = 0; i < W; i++) {
+            next[i] = 0.0f;
+            next[(H - 1) * W + i] = 0.0f;
+        }
+        for (int j = 0; j < H; j++) {
+            next[j * W] = 0.0f;
+            next[j * W + (W - 1)] = 0.0f;
+        }
+    }
+}
+
 /* Generic per-cell leapfrog body, parameterized on the four neighbor reads.
  * Used to share the leapfrog logic between zero-Dirichlet (interior loop +
  * boundary-zeroing) and periodic (full-grid loop with wrap-around indexing)
@@ -64,7 +100,8 @@ static inline void leapfrog_cell(float* next, const float* prev, const float* cu
  * exponential screening we want; in the interior gamma=1 means the
  * mass term vanishes and we recover the wave equation. */
 static void leapfrog_field_critical(gr_field_state_t* f, const float* damp,
-                                    int W, int H, float c2dt2, float inv_dx2) {
+                                    int W, int H, float c2dt2, float inv_dx2,
+                                    int neumann) {
     const float* prev = f->prev;
     const float* curr = f->curr;
     float*       next = f->next;
@@ -81,18 +118,12 @@ static void leapfrog_field_critical(gr_field_state_t* f, const float* damp,
                       + c2dt2 * (lap + sc * src[k]);
         }
     }
-    for (int i = 0; i < W; i++) {
-        next[i] = 0.0f;
-        next[(H - 1) * W + i] = 0.0f;
-    }
-    for (int j = 0; j < H; j++) {
-        next[j * W] = 0.0f;
-        next[j * W + (W - 1)] = 0.0f;
-    }
+    apply_outer_bc(next, W, H, neumann);
 }
 
 static void leapfrog_field_damped(gr_field_state_t* f, const float* damp,
-                                  int W, int H, float c2dt2, float inv_dx2) {
+                                  int W, int H, float c2dt2, float inv_dx2,
+                                  int neumann) {
     const float* prev = f->prev;
     const float* curr = f->curr;
     float*       next = f->next;
@@ -107,20 +138,12 @@ static void leapfrog_field_damped(gr_field_state_t* f, const float* damp,
                           damp[k], c2dt2, inv_dx2, /*damped=*/1);
         }
     }
-    /* Zero-Dirichlet boundary; the damping layer absorbs incident energy
-     * before it reaches the wall (§9.6). */
-    for (int i = 0; i < W; i++) {
-        next[i] = 0.0f;
-        next[(H - 1) * W + i] = 0.0f;
-    }
-    for (int j = 0; j < H; j++) {
-        next[j * W] = 0.0f;
-        next[j * W + (W - 1)] = 0.0f;
-    }
+    apply_outer_bc(next, W, H, neumann);
 }
 
 static void leapfrog_field_undamped(gr_field_state_t* f,
-                                    int W, int H, float c2dt2, float inv_dx2) {
+                                    int W, int H, float c2dt2, float inv_dx2,
+                                    int neumann) {
     const float* prev = f->prev;
     const float* curr = f->curr;
     float*       next = f->next;
@@ -135,14 +158,7 @@ static void leapfrog_field_undamped(gr_field_state_t* f,
                           0.0f, c2dt2, inv_dx2, /*damped=*/0);
         }
     }
-    for (int i = 0; i < W; i++) {
-        next[i] = 0.0f;
-        next[(H - 1) * W + i] = 0.0f;
-    }
-    for (int j = 0; j < H; j++) {
-        next[j * W] = 0.0f;
-        next[j * W + (W - 1)] = 0.0f;
-    }
+    apply_outer_bc(next, W, H, neumann);
 }
 
 /* Shapiro variant of the leapfrog: per-cell wave-speed c_local^2(x) on
@@ -167,7 +183,7 @@ static void leapfrog_field_undamped(gr_field_state_t* f,
 static void leapfrog_field_shapiro_damped(gr_field_state_t* f, const float* damp,
                                           const float* c_local2,
                                           int W, int H, float c2, float dt2,
-                                          float inv_dx2) {
+                                          float inv_dx2, int neumann) {
     const float* prev = f->prev;
     const float* curr = f->curr;
     float*       next = f->next;
@@ -185,20 +201,13 @@ static void leapfrog_field_shapiro_damped(gr_field_state_t* f, const float* damp
             next[k] = damped ? upd * (1.0f - damp[k]) : upd;
         }
     }
-    for (int i = 0; i < W; i++) {
-        next[i] = 0.0f;
-        next[(H - 1) * W + i] = 0.0f;
-    }
-    for (int j = 0; j < H; j++) {
-        next[j * W] = 0.0f;
-        next[j * W + (W - 1)] = 0.0f;
-    }
+    apply_outer_bc(next, W, H, neumann);
 }
 
 static void leapfrog_field_shapiro_critical(gr_field_state_t* f, const float* damp,
                                             const float* c_local2,
                                             int W, int H, float c2, float dt2,
-                                            float inv_dx2) {
+                                            float inv_dx2, int neumann) {
     const float* prev = f->prev;
     const float* curr = f->curr;
     float*       next = f->next;
@@ -215,14 +224,7 @@ static void leapfrog_field_shapiro_critical(gr_field_state_t* f, const float* da
                       + dt2 * (c_local2[k] * lap + c2 * sc * src[k]);
         }
     }
-    for (int i = 0; i < W; i++) {
-        next[i] = 0.0f;
-        next[(H - 1) * W + i] = 0.0f;
-    }
-    for (int j = 0; j < H; j++) {
-        next[j * W] = 0.0f;
-        next[j * W + (W - 1)] = 0.0f;
-    }
+    apply_outer_bc(next, W, H, neumann);
 }
 
 static void leapfrog_field_shapiro_periodic(gr_field_state_t* f, const float* damp,
@@ -315,17 +317,18 @@ void gr_field_leapfrog_step_self(struct gr_sim* sim, gr_self_field_set_t* s) {
             leapfrog_field_periodic(&s->fields[f], damp, W, H, c2dt2, inv_dx2);
         return;
     }
+    const int neumann = sim->outer_bc_neumann;
     if (damp) {
         if (sim->damp_time_form == GR_DAMP_TIME_CRITICAL) {
             for (int f = 0; f < GR_FIELD_COUNT; f++)
-                leapfrog_field_critical(&s->fields[f], damp, W, H, c2dt2, inv_dx2);
+                leapfrog_field_critical(&s->fields[f], damp, W, H, c2dt2, inv_dx2, neumann);
             return;
         }
         for (int f = 0; f < GR_FIELD_COUNT; f++)
-            leapfrog_field_damped(&s->fields[f], damp, W, H, c2dt2, inv_dx2);
+            leapfrog_field_damped(&s->fields[f], damp, W, H, c2dt2, inv_dx2, neumann);
     } else {
         for (int f = 0; f < GR_FIELD_COUNT; f++)
-            leapfrog_field_undamped(&s->fields[f], W, H, c2dt2, inv_dx2);
+            leapfrog_field_undamped(&s->fields[f], W, H, c2dt2, inv_dx2, neumann);
     }
 }
 
@@ -350,6 +353,7 @@ void gr_field_leapfrog_step_all(struct gr_sim* sim) {
         }
         return;
     }
+    const int neumann = sim->outer_bc_neumann;
     if (damp) {
         if (sim->damp_time_form == GR_DAMP_TIME_CRITICAL) {
             for (int f = 0; f < GR_FIELD_COUNT; f++) {
@@ -357,9 +361,9 @@ void gr_field_leapfrog_step_all(struct gr_sim* sim) {
                 const float* c_loc2 = shapiro_c_local2_for(sim, f);
                 if (c_loc2) {
                     leapfrog_field_shapiro_critical(&sim->fields[f], damp, c_loc2,
-                                                    W, H, c2, dt2, inv_dx2);
+                                                    W, H, c2, dt2, inv_dx2, neumann);
                 } else {
-                    leapfrog_field_critical(&sim->fields[f], damp, W, H, c2dt2, inv_dx2);
+                    leapfrog_field_critical(&sim->fields[f], damp, W, H, c2dt2, inv_dx2, neumann);
                 }
             }
             return;
@@ -373,9 +377,9 @@ void gr_field_leapfrog_step_all(struct gr_sim* sim) {
             const float* c_loc2 = shapiro_c_local2_for(sim, f);
             if (c_loc2) {
                 leapfrog_field_shapiro_damped(&sim->fields[f], damp, c_loc2,
-                                              W, H, c2, dt2, inv_dx2);
+                                              W, H, c2, dt2, inv_dx2, neumann);
             } else {
-                leapfrog_field_damped(&sim->fields[f], damp, W, H, c2dt2, inv_dx2);
+                leapfrog_field_damped(&sim->fields[f], damp, W, H, c2dt2, inv_dx2, neumann);
             }
         }
     } else {
@@ -384,9 +388,9 @@ void gr_field_leapfrog_step_all(struct gr_sim* sim) {
             const float* c_loc2 = shapiro_c_local2_for(sim, f);
             if (c_loc2) {
                 leapfrog_field_shapiro_damped(&sim->fields[f], /*damp=*/NULL, c_loc2,
-                                              W, H, c2, dt2, inv_dx2);
+                                              W, H, c2, dt2, inv_dx2, neumann);
             } else {
-                leapfrog_field_undamped(&sim->fields[f], W, H, c2dt2, inv_dx2);
+                leapfrog_field_undamped(&sim->fields[f], W, H, c2dt2, inv_dx2, neumann);
             }
         }
     }

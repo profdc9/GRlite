@@ -83,6 +83,7 @@ interface SimAPI {
     setParticlesFrozen: (sim: number, frozen: number) => void;
     relaxPhiGPoisson: (sim: number, nIters: number) => void;
     initPotentialsLW: (sim: number) => void;
+    setOuterBcNeumann: (sim: number, neumann: number) => void;
     stepCount: (sim: number) => number;
     simTime: (sim: number) => number;
     particleCount: (sim: number) => number;
@@ -145,6 +146,8 @@ function bindApi(M: GRliteModule): SimAPI {
         ['number','number']) as unknown as CFnVoid;
     const initPotentialsLW = M.cwrap('gr_sim_init_potentials_lienard_wiechert',
         null, ['number']) as unknown as CFnVoid;
+    const setOuterBcNeumann = M.cwrap('gr_sim_set_outer_bc_neumann', null,
+        ['number','number']) as unknown as CFnVoid;
     /* Hard-fail if any expected symbol didn't resolve -- otherwise cwrap
      * silently returns a no-op and we get a confusing "is not a function"
      * deep inside the warmup later. */
@@ -212,10 +215,15 @@ function bindApi(M: GRliteModule): SimAPI {
         console.warn(`unexpected particle stride: ${stride} floats`);
     }
 
+    /* Enable Neumann outer BC by default for the web demo so that
+     * outgoing waves reflect without sign flip and standing-mode
+     * antinodes sit at the absorber instead of at the center. */
+    setOuterBcNeumann(sim, 1);
+
     return { sim, step, stepN, fieldPtr, loadScenario, setDamping,
              setParticlesFrozen, relaxPhiGPoisson, initPotentialsLW,
-             stepCount, simTime, particleCount, getParticle,
-             clearParticles, particleStrideF32: stride };
+             setOuterBcNeumann, stepCount, simTime, particleCount,
+             getParticle, clearParticles, particleStrideF32: stride };
 }
 
 /* ---- WebGL2 plumbing ---------------------------------------------------- */

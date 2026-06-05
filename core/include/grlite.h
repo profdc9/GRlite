@@ -520,6 +520,16 @@ int  gr_sim_get_field_evolution(const gr_sim_t* sim);
 void gr_sim_set_particles_frozen(gr_sim_t* sim, int frozen);
 int  gr_sim_get_particles_frozen(const gr_sim_t* sim);
 
+/* Outer-wall boundary condition for the wave-equation leapfrog.
+ *   0 = zero-Dirichlet (default; outer ring forced to 0 each step).
+ *   1 = zero-Neumann (outer ring mirrors the next-inward neighbor,
+ *       making dPhi/dn = 0 at the wall).
+ * Neumann puts standing-mode antinodes at the wall where the damping
+ * ring lives so the absorber damps them, instead of trapping them
+ * with antinodes at the center as Dirichlet does. */
+void gr_sim_set_outer_bc_neumann(gr_sim_t* sim, int neumann);
+int  gr_sim_get_outer_bc_neumann(const gr_sim_t* sim);
+
 /* Direct Poisson solver for Phi_g via SOR.  Bypasses the wave-equation
  * convergence iteration -- which leaves the lowest standing mode of the
  * absorber-bounded box undamped at ~50% of |Phi_static| amplitude --

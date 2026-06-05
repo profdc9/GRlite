@@ -632,6 +632,14 @@ int gr_sim_get_particles_frozen(const gr_sim_t* sim) {
     return sim ? sim->particles_frozen : 0;
 }
 
+void gr_sim_set_outer_bc_neumann(gr_sim_t* sim, int neumann) {
+    if (!sim) return;
+    sim->outer_bc_neumann = neumann ? 1 : 0;
+}
+int gr_sim_get_outer_bc_neumann(const gr_sim_t* sim) {
+    return sim ? sim->outer_bc_neumann : 0;
+}
+
 /* Direct Poisson solver for Phi_g via SOR (Successive Over-Relaxation).
  *
  * The wave-equation convergence iteration from v38 §15.9 does not

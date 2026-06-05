@@ -153,6 +153,16 @@ struct gr_sim {
      * Default 0 (particles push every step). */
     int particles_frozen;
 
+    /* Outer-wall boundary condition for the wave-equation leapfrog.
+     *   0 = zero-Dirichlet (Phi=0 at the outermost ring -- default,
+     *       matches gr_sandbox_v38.tex §9.6).
+     *   1 = zero-Neumann (Phi[outer] mirrors Phi[next-inner]; dPhi/dn = 0).
+     * Neumann puts standing-mode antinodes at the wall (where the damping
+     * ring lives) so the absorber damps them effectively, and avoids the
+     * opposite-sign reflection that the centered L-W IC excites strongly
+     * with Dirichlet.  Default 0 for backward compatibility. */
+    int outer_bc_neumann;
+
     /* Stage 10: when nonzero, gr_sim_step auto-deposits every particle's
      * mass, charge, and currents onto the source arrays before each field
      * leapfrog runs.  Default 0 (no automatic deposition; scenarios deposit
