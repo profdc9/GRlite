@@ -733,8 +733,13 @@ void gr_sim_relax_phi_g_poisson(gr_sim_t* sim, int n_iters) {
  * Velocity is taken as v = p / (gamma m), matching the deposit code's
  * convention.  Particles with m == 0 contribute nothing to Phi_g/A_g;
  * particles with q == 0 contribute nothing to phi/A. */
-void gr_sim_init_potentials_lienard_wiechert(gr_sim_t* sim) {
+void gr_sim_init_potentials_lienard_wiechert_with_taper(gr_sim_t* sim,
+                                                         int taper_inner,
+                                                         int taper_outer) {
     if (!sim) return;
+    if (taper_inner < 0) taper_inner = 0;
+    if (taper_outer < 0) taper_outer = 0;
+    if (taper_outer >= taper_inner) taper_inner = taper_outer + 1;
     const int   W       = sim->width;
     const int   H       = sim->height;
     const float dx      = sim->dx;
@@ -803,26 +808,44 @@ void gr_sim_init_potentials_lienard_wiechert(gr_sim_t* sim) {
         }
     }
 
-    /* Boundary taper matching the polynomial m=2 damping profile:
-     * taper(u) = 1 - u^2 where u = depth/N_damp, depth=0 at inner edge
-     * and depth=N at the wall.  Smoothly drops the IC to zero at the
-     * Dirichlet wall so the wave equation has no boundary shock. */
-    const int Nd = sim->n_damping;
-    if (Nd > 0) {
+    /* Boundary taper: smoothly drop the field to zero so the IC matches
+     * the wave equation's wall BC and the L-W log-tail doesn't have to
+     * be supported by the leapfrog all the way to the absorber.
+     *
+     *   taper(d) = 1 - u^2 where d = depth-from-nearest-wall in cells,
+     *   u = (taper_inner - d) / (taper_inner - taper_outer) clipped to
+     *   [0, 1].
+     *
+     *   d >= taper_inner            -> full L-W
+     *   taper_outer < d < taper_inner -> smooth ramp
+     *   d <= taper_outer            -> zero field
+     *
+     * Default (call to gr_sim_init_potentials_lienard_wiechert with no
+     * taper args): taper_inner = n_damping, taper_outer = 0.  That
+     * tapers across the damping ring, matching the wall to zero.
+     *
+     * Pulling the taper inward (larger taper_outer) gives a buffer of
+     * zero field between the taper and the absorber -- useful as a
+     * diagnostic for whether the boundary handling is responsible for
+     * residual oscillation. */
+    if (taper_inner > 0 && taper_inner > taper_outer) {
+        const float taper_width = (float)(taper_inner - taper_outer);
         for (int j = 0; j < H; j++) {
-            int dy = 0;
-            if (j < Nd)              dy = Nd - j;
-            else if (j >= H - Nd)    dy = j - (H - Nd) + 1;
+            int dy = j;
+            if (H - 1 - j < dy) dy = H - 1 - j;
             const int row = j * W;
             for (int i = 0; i < W; i++) {
-                int dxi = 0;
-                if (i < Nd)              dxi = Nd - i;
-                else if (i >= W - Nd)    dxi = i - (W - Nd) + 1;
-                const int depth = (dxi > dy) ? dxi : dy;
-                if (depth == 0) continue;
-                float u = (float) depth / (float) Nd;
-                if (u > 1.0f) u = 1.0f;
-                const float taper = 1.0f - u * u;
+                int dxi = i;
+                if (W - 1 - i < dxi) dxi = W - 1 - i;
+                const int depth = (dxi < dy) ? dxi : dy;
+                if (depth >= taper_inner) continue;
+                float taper;
+                if (depth <= taper_outer) {
+                    taper = 0.0f;
+                } else {
+                    const float u = (float)(taper_inner - depth) / taper_width;
+                    taper = 1.0f - u * u;
+                }
                 const int k = row + i;
                 phi_g[k] *= taper;
                 a_gx[k]  *= taper;
@@ -844,6 +867,12 @@ void gr_sim_init_potentials_lienard_wiechert(gr_sim_t* sim) {
         if (sim->fields[f].curr && sim->fields[f].next)
             memcpy(sim->fields[f].next, sim->fields[f].curr, ncells * sizeof(float));
     }
+}
+
+/* Default-args entry: taper across the damping ring. */
+void gr_sim_init_potentials_lienard_wiechert(gr_sim_t* sim) {
+    if (!sim) return;
+    gr_sim_init_potentials_lienard_wiechert_with_taper(sim, sim->n_damping, 0);
 }
 
 /* Stage 8 — skip the per-step leapfrog when no perturbation dynamics are

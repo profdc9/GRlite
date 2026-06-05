@@ -550,6 +550,14 @@ void gr_sim_relax_phi_g_poisson(gr_sim_t* sim, int n_iters);
  * subsequent dynamics. */
 void gr_sim_init_potentials_lienard_wiechert(gr_sim_t* sim);
 
+/* Variant that takes explicit taper bounds (in cells from the nearest
+ * wall).  depth >= taper_inner is full L-W, depth <= taper_outer is
+ * zero, smooth (1 - u^2) ramp between.  Useful as a diagnostic for
+ * pulling the IC's log-tail off the absorber by hand. */
+void gr_sim_init_potentials_lienard_wiechert_with_taper(gr_sim_t* sim,
+                                                         int taper_inner,
+                                                         int taper_outer);
+
 /* Stage 10 — enable automatic per-step deposition of every particle's mass
  * and current (rho_matter, J_mx, J_my) and, if charged, charge and current
  * (rho_q, J_qx, J_qy) onto the grid before each gr_sim_step's leapfrog runs.

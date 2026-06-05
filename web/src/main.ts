@@ -83,6 +83,7 @@ interface SimAPI {
     setParticlesFrozen: (sim: number, frozen: number) => void;
     relaxPhiGPoisson: (sim: number, nIters: number) => void;
     initPotentialsLW: (sim: number) => void;
+    initPotentialsLWTaper: (sim: number, taperInner: number, taperOuter: number) => void;
     setOuterBcNeumann: (sim: number, neumann: number) => void;
     stepCount: (sim: number) => number;
     simTime: (sim: number) => number;
@@ -146,6 +147,9 @@ function bindApi(M: GRliteModule): SimAPI {
         ['number','number']) as unknown as CFnVoid;
     const initPotentialsLW = M.cwrap('gr_sim_init_potentials_lienard_wiechert',
         null, ['number']) as unknown as CFnVoid;
+    const initPotentialsLWTaper = M.cwrap(
+        'gr_sim_init_potentials_lienard_wiechert_with_taper',
+        null, ['number','number','number']) as unknown as CFnVoid;
     const setOuterBcNeumann = M.cwrap('gr_sim_set_outer_bc_neumann', null,
         ['number','number']) as unknown as CFnVoid;
     /* Hard-fail if any expected symbol didn't resolve -- otherwise cwrap
@@ -222,8 +226,9 @@ function bindApi(M: GRliteModule): SimAPI {
 
     return { sim, step, stepN, fieldPtr, loadScenario, setDamping,
              setParticlesFrozen, relaxPhiGPoisson, initPotentialsLW,
-             setOuterBcNeumann, stepCount, simTime, particleCount,
-             getParticle, clearParticles, particleStrideF32: stride };
+             initPotentialsLWTaper, setOuterBcNeumann, stepCount,
+             simTime, particleCount, getParticle, clearParticles,
+             particleStrideF32: stride };
 }
 
 /* ---- WebGL2 plumbing ---------------------------------------------------- */
@@ -394,13 +399,21 @@ async function main(): Promise<void> {
         M._free(ptr);
         if (rc !== 0) { console.error(`load_scenario ${spec.name} failed rc=${rc}`); return; }
         /* Field initialization: direct-sum 2D Liénard-Wiechert potentials
-         * for all six fields, with a damping-ring taper so the IC reaches
-         * zero at the outer Dirichlet wall without launching a boundary
-         * shock.  Sets prev = curr = next so the wave equation starts from
-         * bit-exact zero time derivative.  This is the "true open-BC"
-         * initial condition the wave equation would converge toward,
-         * computed analytically rather than via iterative relaxation. */
-        api.initPotentialsLW(api.sim);
+         * for all six fields, with the taper pulled INWARD as a diagnostic
+         * for boundary-vs-bulk responsibility for residual oscillation.
+         *
+         * Half-box dimension = ~min(W,H)/2.  Damping ring depth = N_DAMPING.
+         * Active interior depth range = [N_DAMPING, ~half-box].  Pulling
+         * the taper to roughly halfway through the active region:
+         *   taper_inner = 3/4 of half-box, taper_outer = 1/2 of half-box.
+         * That puts a ring of literally-zero L-W field BETWEEN the
+         * tapered L-W and the absorbing layer -- so whatever the absorber
+         * does to that zero field is decoupled from what we see in the
+         * bulk.  If oscillation persists, the boundary is innocent. */
+        const halfBox = Math.min(GRID_W, GRID_H) / 2;
+        const taperInner = Math.floor(halfBox * 0.75);
+        const taperOuter = Math.floor(halfBox * 0.50);
+        api.initPotentialsLWTaper(api.sim, taperInner, taperOuter);
     }
 
     /* Field-stability probe: run N extra steps with particles still
@@ -577,9 +590,15 @@ async function main(): Promise<void> {
     statusEl.textContent = `direct-sum L-W initialization…`;
     /* Yield to the browser so the status text actually paints, then run. */
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
-    api.initPotentialsLW(api.sim);
+    {
+        const halfBox = Math.min(GRID_W, GRID_H) / 2;
+        const taperInner = Math.floor(halfBox * 0.75);
+        const taperOuter = Math.floor(halfBox * 0.50);
+        console.log(`[init] L-W taper: full L-W for depth >= ${taperInner}, zero for depth <= ${taperOuter} (halfBox=${halfBox})`);
+        api.initPotentialsLWTaper(api.sim, taperInner, taperOuter);
+    }
     snapshotParticles('post-init (should be IDENTICAL to pre)');
-    snapshotPhi('post-init (2D L-W direct-sum + damping-ring taper)');
+    snapshotPhi('post-init (L-W tapered halfway, big zero buffer to absorber)');
 
     /* Optional field-stability probe: gated behind the "probe" button
      * so it doesn't add ~5 seconds to every page load.  Enable via the
