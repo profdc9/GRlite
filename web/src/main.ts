@@ -104,17 +104,40 @@ function bindApi(M: GRliteModule): SimAPI {
     const clearParticles = M.cwrap('gr_sim_clear_particles', null, ['number']) as unknown as CFnVoid;
 
     const sim = create(GRID_W, GRID_H, DX, C_EFF, CFL);
+    console.log('gr_sim_create returned sim=', sim);
     if (!sim) throw new Error('gr_sim_create returned NULL');
-    setDamping(sim, N_DAMPING);
 
-    /* Load the pic_binary scenario.  The scenario clears existing particles
-     * and sets the two-body initial conditions internally. */
+    /* Load the scenario FIRST -- pic_binary configures damping internally
+     * (the May-17 WASM's set_damping has been observed to throw out-of-
+     * bounds when called on a freshly-created sim before any scenario,
+     * which suggests the damping allocator depends on scenario state). */
     const params = new Float32Array([BINARY_MASS, BINARY_R, BINARY_VF]);
     const paramsPtr = M._malloc(params.byteLength);
+    console.log('alloc params at', paramsPtr);
     M.HEAPF32.set(params, paramsPtr >> 2);
     const rc = loadScenario(sim, 'pic_binary', paramsPtr, params.length);
     M._free(paramsPtr);
-    if (rc !== 0) throw new Error(`load_scenario 'pic_binary' failed: rc=${rc}`);
+    console.log('load_scenario pic_binary returned rc=', rc);
+    if (rc !== 0) {
+        /* Fall back to wave_pulse if pic_binary isn't registered in this
+         * older WASM. */
+        const wp = new Float32Array([4.0 * DX, 1.0]);
+        const wpPtr = M._malloc(wp.byteLength);
+        M.HEAPF32.set(wp, wpPtr >> 2);
+        const rc2 = loadScenario(sim, 'wave_pulse', wpPtr, wp.length);
+        M._free(wpPtr);
+        console.log('fallback load_scenario wave_pulse returned rc=', rc2);
+        if (rc2 !== 0) throw new Error(`no scenario could be loaded (binary rc=${rc}, wave rc=${rc2})`);
+    }
+
+    /* Apply damping AFTER the scenario.  Wrap in try/catch in case of
+     * compatibility issues. */
+    try {
+        setDamping(sim, N_DAMPING);
+        console.log('setDamping ok');
+    } catch (e) {
+        console.warn('setDamping failed; continuing without damping ring:', e);
+    }
 
     /* Probe particle stride: if any particle exists, distance between
      * successive particle pointers reveals the struct stride. */
