@@ -1147,7 +1147,11 @@ void gr_sim_set_damping_config(gr_sim_t* sim, const gr_damp_config_t* cfg) {
         }
     }
 
-    float fx[16384], fy[16384];
+    /* Heap-allocate fx/fy: at W=H=16384 these would be 128KB on the
+     * stack, which overflows Emscripten's default 64KB stack. */
+    float* fx = (float*) malloc((size_t) W * sizeof(float));
+    float* fy = (float*) malloc((size_t) H * sizeof(float));
+    if (!fx || !fy) { free(fx); free(fy); return; }
     for (int i = 0; i < W; i++) {
         int depth = 0;
         if (i < n_damping)            depth = n_damping - i;
@@ -1171,6 +1175,8 @@ void gr_sim_set_damping_config(gr_sim_t* sim, const gr_damp_config_t* cfg) {
             sim->damping_d[row + i] = sigma_max_dt * f_max;
         }
     }
+    free(fx);
+    free(fy);
 
     sim->n_damping              = n_damping;
     sim->damp_kind              = kind;
