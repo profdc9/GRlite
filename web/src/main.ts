@@ -232,33 +232,23 @@ function bindApi(M: GRliteModule): SimAPI {
         console.warn(`unexpected particle stride: ${stride} floats`);
     }
 
-    /* v42 derivative-friction absorber configuration:
-     *   - Neumann outer BC: no Dirichlet pull-to-zero at the wall.
-     *   - Disable the multiplicative damping ring entirely.
-     *   - Enable derivative friction with a uniform interior floor
-     *     (catches the lowest standing mode, which the absorber ring
-     *     missed) plus a polynomial-m=2 taper to a larger value at the
-     *     wall (so radiative wave packets attenuate as they propagate
-     *     into the ring).
-     *
-     * Magnitudes chosen so the lowest mode (period ~ 2L/c) damps with
-     * a time constant of ~1/(2*γ_floor*dt) ~ a few thousand steps,
-     * fast enough to settle visible oscillation within seconds. */
-    setOuterBcNeumann(sim, 1);
+    /* v42 absorber configuration:
+     *   - Dirichlet outer BC: Phi pinned to 0 at the outermost ring,
+     *     which also pins the DC mode (no gauge runaway).
+     *   - Disable the legacy multiplicative damping ring entirely.
+     *   - Enable centered-implicit derivative friction: small uniform
+     *     floor that damps the lowest standing mode (the one the
+     *     Dirichlet absorber misses because it has nodes at the wall),
+     *     plus a tapered ramp to a larger value at the wall so
+     *     radiative wave packets attenuate as they propagate into the
+     *     ring.  Stable at CFL = 1/sqrt(2) for any beta. */
+    setOuterBcNeumann(sim, 0);                               // Dirichlet
     setDamping(sim, 0);                                      // disable multiplicative ring
-    /* beta = gamma * dt per cell.  |lambda| ~ 1 - beta per step, so a
-     * mode decays to 1/e in ~1/beta steps.  Centered-implicit form
-     * (post-leapfrog correction) is stable at CFL=1/sqrt(2) for any
-     * beta >= 0 -- unlike the post-step bleed which destabilized the
-     * Nyquist mode for any beta > 0. */
-    const FRICTION_UNIFORM   = 0.001;   // interior floor
+    const FRICTION_UNIFORM   = 0.001;   // interior floor (beta = gamma * dt)
     const FRICTION_TAPER_MAX = 0.02;    // at the wall
     const FRICTION_TAPER_DEPTH = N_DAMPING;
     setVolumeFrictionTaper(sim, FRICTION_UNIFORM, FRICTION_TAPER_MAX, FRICTION_TAPER_DEPTH);
-    /* Under Neumann BC the DC mode of the scalar potentials is
-     * unconstrained.  Zero-mean each step so any nonzero rho_avg
-     * doesn't accelerate Phi_DC -> -infty. */
-    setZeroMeanScalarPotentials(sim, 1);
+    setZeroMeanScalarPotentials(sim, 0);                     // Dirichlet pins DC already
 
     return { sim, step, stepN, fieldPtr, loadScenario, setDamping,
              setParticlesFrozen, relaxPhiGPoisson, initPotentialsLW,
@@ -434,13 +424,12 @@ async function main(): Promise<void> {
         const rc = api.loadScenario(api.sim, spec.name, ptr, arr.length);
         M._free(ptr);
         if (rc !== 0) { console.error(`load_scenario ${spec.name} failed rc=${rc}`); return; }
-        /* Field initialization: direct-sum L-W with NO taper.  With
-         * Neumann outer BC + derivative friction, tapering Phi to zero
-         * at the wall is incompatible (Neumann forces Phi(wall) =
-         * Phi(wall-1) which is nonzero from L-W) and launches a wave
-         * inward on every step.  Let the L-W extend all the way to
-         * the wall; the friction handles outgoing radiation. */
-        api.initPotentialsLWTaper(api.sim, 0, 0);
+        /* Field initialization: direct-sum L-W with the default taper
+         * across the damping ring depth.  With Dirichlet outer BC,
+         * Phi(wall) is pinned to 0, so the L-W IC needs to taper to 0
+         * through the absorbing zone to avoid a first-step boundary
+         * shock.  Polynomial m=2 taper, matching the friction ramp. */
+        api.initPotentialsLW(api.sim);   /* taper_inner = n_damping, taper_outer = 0 */
     }
 
     /* Field-stability probe: run N extra steps with particles still
@@ -617,9 +606,9 @@ async function main(): Promise<void> {
     statusEl.textContent = `direct-sum L-W initialization…`;
     /* Yield to the browser so the status text actually paints, then run. */
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
-    api.initPotentialsLWTaper(api.sim, 0, 0);  /* no taper */
+    api.initPotentialsLW(api.sim);   /* taper across damping ring -> Phi(wall) = 0 */
     snapshotParticles('post-init (should be IDENTICAL to pre)');
-    snapshotPhi('post-init (L-W, no taper, Neumann + friction absorber)');
+    snapshotPhi('post-init (L-W tapered, Dirichlet + friction absorber)');
 
     /* Optional field-stability probe: gated behind the "probe" button
      * so it doesn't add ~5 seconds to every page load.  Enable via the
