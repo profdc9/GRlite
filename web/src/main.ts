@@ -82,6 +82,7 @@ interface SimAPI {
     setDamping: (sim: number, nDamping: number) => void;
     setParticlesFrozen: (sim: number, frozen: number) => void;
     relaxPhiGPoisson: (sim: number, nIters: number) => void;
+    initPotentialsLW: (sim: number) => void;
     stepCount: (sim: number) => number;
     simTime: (sim: number) => number;
     particleCount: (sim: number) => number;
@@ -137,6 +138,8 @@ function bindApi(M: GRliteModule): SimAPI {
         ['number','number']) as unknown as CFnVoid;
     const relaxPhiGPoisson = M.cwrap('gr_sim_relax_phi_g_poisson', null,
         ['number','number']) as unknown as CFnVoid;
+    const initPotentialsLW = M.cwrap('gr_sim_init_potentials_lienard_wiechert',
+        null, ['number']) as unknown as CFnVoid;
     const stepCount = M.cwrap('gr_sim_step_count', 'number', ['number']) as unknown as CFn;
     const simTime = M.cwrap('gr_sim_time', 'number', ['number']) as unknown as CFn;
     const particleCount = M.cwrap('gr_sim_particle_count', 'number', ['number']) as unknown as CFn;
@@ -193,9 +196,9 @@ function bindApi(M: GRliteModule): SimAPI {
     }
 
     return { sim, step, stepN, fieldPtr, loadScenario, setDamping,
-             setParticlesFrozen, relaxPhiGPoisson, stepCount, simTime,
-             particleCount, getParticle, clearParticles,
-             particleStrideF32: stride };
+             setParticlesFrozen, relaxPhiGPoisson, initPotentialsLW,
+             stepCount, simTime, particleCount, getParticle,
+             clearParticles, particleStrideF32: stride };
 }
 
 /* ---- WebGL2 plumbing ---------------------------------------------------- */
@@ -365,14 +368,14 @@ async function main(): Promise<void> {
         const rc = api.loadScenario(api.sim, spec.name, ptr, arr.length);
         M._free(ptr);
         if (rc !== 0) { console.error(`load_scenario ${spec.name} failed rc=${rc}`); return; }
-        /* Field initialization: freeze particles, run one step so rho_matter
-         * gets deposited, then call the direct SOR Poisson solver to set
-         * Phi_g to its exact static solution.  Bypasses the v38 §15.9
-         * convergence iteration's lowest-mode trap. */
-        api.setParticlesFrozen(api.sim, 1);
-        api.stepN(api.sim, 1);                          /* deposit pass */
-        api.relaxPhiGPoisson(api.sim, Math.max(GRID_W, GRID_H) * 4);
-        api.setParticlesFrozen(api.sim, 0);
+        /* Field initialization: direct-sum 2D Liénard-Wiechert potentials
+         * for all six fields, with a damping-ring taper so the IC reaches
+         * zero at the outer Dirichlet wall without launching a boundary
+         * shock.  Sets prev = curr = next so the wave equation starts from
+         * bit-exact zero time derivative.  This is the "true open-BC"
+         * initial condition the wave equation would converge toward,
+         * computed analytically rather than via iterative relaxation. */
+        api.initPotentialsLW(api.sim);
     }
 
     /* Field-stability probe: run N extra steps with particles still
@@ -533,15 +536,12 @@ async function main(): Promise<void> {
      * no switch-on wavefront. */
     snapshotParticles('pre-init');
     snapshotPhi('pre-init');
-    statusEl.textContent = `Poisson-relaxing Phi_g…`;
+    statusEl.textContent = `direct-sum L-W initialization…`;
     /* Yield to the browser so the status text actually paints, then run. */
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
-    api.setParticlesFrozen(api.sim, 1);
-    api.stepN(api.sim, 1);   /* deposit pass */
-    api.relaxPhiGPoisson(api.sim, Math.max(GRID_W, GRID_H) * 4);
-    api.setParticlesFrozen(api.sim, 0);
+    api.initPotentialsLW(api.sim);
     snapshotParticles('post-init (should be IDENTICAL to pre)');
-    snapshotPhi('post-init (exact 5-point Poisson solution)');
+    snapshotPhi('post-init (2D L-W direct-sum + damping-ring taper)');
 
     /* Field-stability probe: confirm or refute whether the converged
      * field is actually a static fixed point of the wave equation. */

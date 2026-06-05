@@ -698,6 +698,146 @@ void gr_sim_relax_phi_g_poisson(gr_sim_t* sim, int n_iters) {
     memcpy(f->next, f->curr, ncells * sizeof(float));
 }
 
+/* 2D Liénard-Wiechert initialization of all six perturbation potentials.
+ *
+ * For each particle p, every cell gets a contribution
+ *
+ *   Phi_g(x)  += -(sc_grav / 2pi)         * m_p     * ln |x - x_p|
+ *   A_g_x(x)  += -(sc_grav / 2pi c^2)     * m_p v_x * ln |x - x_p|
+ *   A_g_y(x)  += -(sc_grav / 2pi c^2)     * m_p v_y * ln |x - x_p|
+ *   phi(x)    += -(sc_em   / 2pi)         * q_p     * ln |x - x_p|
+ *   A_x(x)    += -(sc_em   / 2pi c^2)     * q_p v_x * ln |x - x_p|
+ *   A_y(x)    += -(sc_em   / 2pi c^2)     * q_p v_y * ln |x - x_p|
+ *
+ * which is the 2D fundamental-solution Poisson result for each field's
+ * wave-equation static limit ( Lap Phi = -sc * src ).  In the static
+ * gauge with v = const, the vector potential reduces to v/c^2 times the
+ * scalar potential -- which is the 2D Liénard-Wiechert form.
+ *
+ * A taper matching the polynomial m=2 damping profile (1 - (depth/N)^2)
+ * is applied inside the absorbing ring so the IC smoothly goes to zero
+ * at the outer Dirichlet edge, leaving the wave equation no boundary
+ * shock to launch.
+ *
+ * .prev = .curr = .next is set for every field so the wave equation
+ * starts with bit-exact zero time derivative.
+ *
+ * Velocity is taken as v = p / (gamma m), matching the deposit code's
+ * convention.  Particles with m == 0 contribute nothing to Phi_g/A_g;
+ * particles with q == 0 contribute nothing to phi/A. */
+void gr_sim_init_potentials_lienard_wiechert(gr_sim_t* sim) {
+    if (!sim) return;
+    const int   W       = sim->width;
+    const int   H       = sim->height;
+    const float dx      = sim->dx;
+    const float c_eff   = sim->c_eff;
+    const float inv_c2  = 1.0f / (c_eff * c_eff);
+    const float inv_2pi = 1.0f / (2.0f * (float) M_PI);
+    const float r_min   = 0.5f * dx;
+    const size_t ncells = (size_t) W * (size_t) H;
+
+    const float sc_grav = sim->fields[GR_FIELD_PHI_GRAV].source_coeff;
+    const float sc_em   = sim->fields[GR_FIELD_PHI_EM  ].source_coeff;
+
+    for (int f = 0; f < 6; f++) {
+        if (sim->fields[f].curr) memset(sim->fields[f].curr, 0, ncells * sizeof(float));
+    }
+
+    float* phi_g = sim->fields[GR_FIELD_PHI_GRAV].curr;
+    float* a_gx  = sim->fields[GR_FIELD_A_GX].curr;
+    float* a_gy  = sim->fields[GR_FIELD_A_GY].curr;
+    float* phi_e = sim->fields[GR_FIELD_PHI_EM].curr;
+    float* a_x   = sim->fields[GR_FIELD_A_X].curr;
+    float* a_y   = sim->fields[GR_FIELD_A_Y].curr;
+
+    /* Direct sum over particles. */
+    for (int pi = 0; pi < sim->n_particles; pi++) {
+        const gr_particle_t* p = &sim->particles[pi];
+        const float xp = p->x, yp = p->y;
+        const float pmag2 = p->px * p->px + p->py * p->py;
+        const float gamma = (p->mass > 0.0f)
+            ? sqrtf(1.0f + pmag2 / (p->mass * p->mass * c_eff * c_eff))
+            : 1.0f;
+        const float vx = (p->mass > 0.0f) ? (p->px / (gamma * p->mass)) : 0.0f;
+        const float vy = (p->mass > 0.0f) ? (p->py / (gamma * p->mass)) : 0.0f;
+
+        const float kg   = -sc_grav * inv_2pi          * p->mass;
+        const float kgA  = -sc_grav * inv_2pi * inv_c2 * p->mass;
+        const float kqe  = -sc_em   * inv_2pi          * p->charge;
+        const float kqA  = -sc_em   * inv_2pi * inv_c2 * p->charge;
+        const int do_m = (p->mass   != 0.0f);
+        const int do_q = (p->charge != 0.0f);
+
+        for (int j = 0; j < H; j++) {
+            const float yc = (float) j * dx;
+            const float dy = yc - yp;
+            const float dy2 = dy * dy;
+            const int row = j * W;
+            for (int i = 0; i < W; i++) {
+                const float xc  = (float) i * dx;
+                const float dxx = xc - xp;
+                float r2 = dxx * dxx + dy2;
+                float r  = sqrtf(r2);
+                if (r < r_min) r = r_min;
+                const float lr = logf(r);
+                const int k = row + i;
+                if (do_m) {
+                    phi_g[k] += kg  * lr;
+                    a_gx[k]  += kgA * vx * lr;
+                    a_gy[k]  += kgA * vy * lr;
+                }
+                if (do_q) {
+                    phi_e[k] += kqe * lr;
+                    a_x[k]   += kqA * vx * lr;
+                    a_y[k]   += kqA * vy * lr;
+                }
+            }
+        }
+    }
+
+    /* Boundary taper matching the polynomial m=2 damping profile:
+     * taper(u) = 1 - u^2 where u = depth/N_damp, depth=0 at inner edge
+     * and depth=N at the wall.  Smoothly drops the IC to zero at the
+     * Dirichlet wall so the wave equation has no boundary shock. */
+    const int Nd = sim->n_damping;
+    if (Nd > 0) {
+        for (int j = 0; j < H; j++) {
+            int dy = 0;
+            if (j < Nd)              dy = Nd - j;
+            else if (j >= H - Nd)    dy = j - (H - Nd) + 1;
+            const int row = j * W;
+            for (int i = 0; i < W; i++) {
+                int dxi = 0;
+                if (i < Nd)              dxi = Nd - i;
+                else if (i >= W - Nd)    dxi = i - (W - Nd) + 1;
+                const int depth = (dxi > dy) ? dxi : dy;
+                if (depth == 0) continue;
+                float u = (float) depth / (float) Nd;
+                if (u > 1.0f) u = 1.0f;
+                const float taper = 1.0f - u * u;
+                const int k = row + i;
+                phi_g[k] *= taper;
+                a_gx[k]  *= taper;
+                a_gy[k]  *= taper;
+                phi_e[k] *= taper;
+                a_x[k]   *= taper;
+                a_y[k]   *= taper;
+            }
+        }
+    }
+
+    /* Lock as static: zero the wave-equation time derivative on every
+     * potential.  prev = curr means no implicit d/dt; next = curr keeps
+     * the next-buffer consistent with the rotation that gr_sim_step
+     * applies after each leapfrog. */
+    for (int f = 0; f < 6; f++) {
+        if (sim->fields[f].curr && sim->fields[f].prev)
+            memcpy(sim->fields[f].prev, sim->fields[f].curr, ncells * sizeof(float));
+        if (sim->fields[f].curr && sim->fields[f].next)
+            memcpy(sim->fields[f].next, sim->fields[f].curr, ncells * sizeof(float));
+    }
+}
+
 /* Stage 8 — skip the per-step leapfrog when no perturbation dynamics are
  * active. The perturbation fields stay at zero (as initialized) and the
  * particle pusher reads only the background array. */

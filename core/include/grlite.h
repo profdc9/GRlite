@@ -529,6 +529,17 @@ int  gr_sim_get_particles_frozen(const gr_sim_t* sim);
  * contain the deposited source. */
 void gr_sim_relax_phi_g_poisson(gr_sim_t* sim, int n_iters);
 
+/* 2D Liénard-Wiechert direct-sum initialization of all six perturbation
+ * potentials: Phi_g, A_g_{x,y}, phi, A_{x,y}.  For each particle and
+ * each cell, accumulates the 2D Green's-function (log-r) contribution
+ * to the wave equation's static limit, then applies a (1-(depth/N)^2)
+ * taper through the absorbing ring so the IC reaches zero at the outer
+ * Dirichlet wall with no boundary shock.  Sets prev = curr = next on
+ * every field so the wave equation starts with bit-exact zero time
+ * derivative.  Use ONCE at scenario init -- the wave equation handles
+ * subsequent dynamics. */
+void gr_sim_init_potentials_lienard_wiechert(gr_sim_t* sim);
+
 /* Stage 10 — enable automatic per-step deposition of every particle's mass
  * and current (rho_matter, J_mx, J_my) and, if charged, charge and current
  * (rho_q, J_qx, J_qy) onto the grid before each gr_sim_step's leapfrog runs.
