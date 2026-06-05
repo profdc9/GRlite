@@ -27,9 +27,15 @@ const STEPS_PER_FRAME = 4;
 /* v38 §15.9 "Field initialization": iterate the field leapfrog with the
  * particles' positions and velocities held fixed so the perturbation
  * fields converge to the static Poisson solution at the initial
- * configuration.  The doc estimates ~1000-3000 steps for N=256; we use
- * a few domain-crossing times at our N=384 grid. */
-const WARMUP_STEPS = 2400;
+ * configuration.  The transient needs several domain-crossing times to
+ * propagate to the absorber and die.  One crossing at c_eff = 1 with
+ * CFL = 1/sqrt(2) takes max(W,H) * sqrt(2) steps; ~10 crossings (≈14x
+ * the largest dimension) is comfortably in the doc's 1000-3000-for-N=256
+ * recommendation band. */
+const WARMUP_CROSSINGS = 10;
+const WARMUP_STEPS = Math.ceil(
+    WARMUP_CROSSINGS * Math.max(GRID_W, GRID_H) * (1.0 / CFL),
+);
 /* Colormap gain on Phi_g.  Picked so the log-r far field is visible (not
  * clamped) and the near-zone cyan wells are still bright. */
 const DISPLAY_SCALE = 5.0;
