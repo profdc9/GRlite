@@ -438,15 +438,28 @@ async function main(): Promise<void> {
         statusEl.textContent = `loading ${scenarioSel.value}…`;
         requestAnimationFrame(() => {
             loadAndWarmup(scenarioSel.value);
-            snapshotParticles(`post-warmup ${scenarioSel.value}`);
-            snapshotPhi(`post-warmup ${scenarioSel.value}`);
-            fieldStabilityProbe(
-                `${scenarioSel.value} post-warmup, particles frozen`, 20, 200);
+            snapshotParticles(`post-init ${scenarioSel.value}`);
+            snapshotPhi(`post-init ${scenarioSel.value}`);
             paused = true;
             pauseBtn.textContent = 'resume';
-            statusEl.textContent = `paused on converged ${scenarioSel.value} (press resume)`;
+            statusEl.textContent = `paused on initialized ${scenarioSel.value} (press resume)`;
         });
     });
+
+    /* Stability probe button: runs the 4000-frozen-step diagnostic on
+     * demand when chasing residual oscillation.  Off by default to
+     * keep page load and scenario switches snappy. */
+    const probeBtn = document.getElementById('probe') as HTMLButtonElement | null;
+    if (probeBtn) {
+        probeBtn.addEventListener('click', () => {
+            statusEl.textContent = 'running stability probe (4000 frozen steps)…';
+            requestAnimationFrame(() => {
+                fieldStabilityProbe(
+                    `${scenarioSel.value} on-demand probe`, 20, 200);
+                statusEl.textContent = `probe complete -- see console for trajectory`;
+            });
+        });
+    }
 
     function frame(): void {
         if (!paused || singleStep) {
@@ -568,9 +581,9 @@ async function main(): Promise<void> {
     snapshotParticles('post-init (should be IDENTICAL to pre)');
     snapshotPhi('post-init (2D L-W direct-sum + damping-ring taper)');
 
-    /* Field-stability probe: confirm or refute whether the converged
-     * field is actually a static fixed point of the wave equation. */
-    fieldStabilityProbe('post-warmup, particles frozen', 20, 200);
+    /* Optional field-stability probe: gated behind the "probe" button
+     * so it doesn't add ~5 seconds to every page load.  Enable via the
+     * UI when chasing residual oscillation. */
 
     statusEl.textContent = 'running pic_binary';
     frame();
