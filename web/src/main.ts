@@ -97,27 +97,32 @@ async function loadWasm(): Promise<GRliteModule> {
      * by injecting a <script type="module"> into the DOM and stashing
      * the factory on the window.  This bypasses Vite's import analyzer
      * entirely and keeps grlite.js + grlite.wasm in /public/ where
-     * Emscripten's relative-URL .wasm fetch works correctly. */
+     * Emscripten's relative-URL .wasm fetch works correctly.
+     *
+     * Cache-bust the URL on every load so an out-of-date grlite.js
+     * cannot get reused across `mingw32-make wasm` rebuilds during
+     * dev.  Always force a fresh factory (no window-cache shortcut)
+     * for the same reason. */
     const W = window as unknown as { __GRliteFactory?: () => Promise<GRliteModule> };
-    if (!W.__GRliteFactory) {
-        await new Promise<void>((resolve, reject) => {
-            const script = document.createElement('script');
-            script.type = 'module';
-            script.textContent =
-                `import GRlite from '/grlite/grlite.js';` +
-                `window.__GRliteFactory = GRlite;` +
-                `window.dispatchEvent(new Event('grlite-ready'));`;
-            const onReady = () => { window.removeEventListener('grlite-error', onError); resolve(); };
-            const onError = (e: Event) => { window.removeEventListener('grlite-ready', onReady); reject(new Error(String(e))); };
-            window.addEventListener('grlite-ready', onReady, { once: true });
-            window.addEventListener('grlite-error', onError, { once: true });
-            script.onerror = (e) => reject(new Error(`script load failed: ${String(e)}`));
-            document.head.appendChild(script);
-        });
-    }
+    W.__GRliteFactory = undefined;
+    const cacheBuster = Date.now();
+    await new Promise<void>((resolve, reject) => {
+        const script = document.createElement('script');
+        script.type = 'module';
+        script.textContent =
+            `import GRlite from '/grlite/grlite.js?v=${cacheBuster}';` +
+            `window.__GRliteFactory = GRlite;` +
+            `window.dispatchEvent(new Event('grlite-ready'));`;
+        const onReady = () => { window.removeEventListener('grlite-error', onError); resolve(); };
+        const onError = (e: Event) => { window.removeEventListener('grlite-ready', onReady); reject(new Error(String(e))); };
+        window.addEventListener('grlite-ready', onReady, { once: true });
+        window.addEventListener('grlite-error', onError, { once: true });
+        script.onerror = (e) => reject(new Error(`script load failed: ${String(e)}`));
+        document.head.appendChild(script);
+    });
     const factory = W.__GRliteFactory;
     if (!factory) throw new Error('GRlite factory not set on window');
-    return factory();
+    return (factory as () => Promise<GRliteModule>)();
 }
 
 function bindApi(M: GRliteModule): SimAPI {
@@ -140,6 +145,18 @@ function bindApi(M: GRliteModule): SimAPI {
         ['number','number']) as unknown as CFnVoid;
     const initPotentialsLW = M.cwrap('gr_sim_init_potentials_lienard_wiechert',
         null, ['number']) as unknown as CFnVoid;
+    /* Hard-fail if any expected symbol didn't resolve -- otherwise cwrap
+     * silently returns a no-op and we get a confusing "is not a function"
+     * deep inside the warmup later. */
+    if (typeof initPotentialsLW !== 'function') {
+        throw new Error('gr_sim_init_potentials_lienard_wiechert missing from WASM exports — rebuild grlite.wasm');
+    }
+    if (typeof relaxPhiGPoisson !== 'function') {
+        throw new Error('gr_sim_relax_phi_g_poisson missing from WASM exports — rebuild grlite.wasm');
+    }
+    if (typeof setParticlesFrozen !== 'function') {
+        throw new Error('gr_sim_set_particles_frozen missing from WASM exports — rebuild grlite.wasm');
+    }
     const stepCount = M.cwrap('gr_sim_step_count', 'number', ['number']) as unknown as CFn;
     const simTime = M.cwrap('gr_sim_time', 'number', ['number']) as unknown as CFn;
     const particleCount = M.cwrap('gr_sim_particle_count', 'number', ['number']) as unknown as CFn;
