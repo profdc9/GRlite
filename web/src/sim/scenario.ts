@@ -54,6 +54,13 @@ export interface GlobalSpec {
     switches: Switches;
     rhoSmooth: number;
     jSmooth: number;
+    /* Self-field subtraction (anti-heating) applied to every particle unless
+     * the particle overrides via its own `selfField`.  Default on. */
+    selfFieldDefault: boolean;
+    /* No-radiation mode: forces the inductive (radiation-reaction) pieces
+     * off (emInductive + gravitomagneticInductive), to separate genuine
+     * radiation-reaction inspiral from numerical heating when debugging. */
+    noRadiation: boolean;
 }
 
 export interface BackgroundSpec {
@@ -120,6 +127,8 @@ export function defaultGlobal(): GlobalSpec {
         switches: defaultSwitches(),
         rhoSmooth: 0,
         jSmooth: 0,
+        selfFieldDefault: true,
+        noRadiation: false,
     };
 }
 

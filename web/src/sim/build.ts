@@ -30,10 +30,13 @@ export function applyScenario(world: World, scn: Scenario): void {
     c.setForceInterp(s, forceId(g.forceInterp));
 
     const sw = g.switches;
+    /* No-radiation mode forces the inductive (radiation-reaction) pieces off. */
+    const gmInductive = sw.gravitomagneticInductive && !g.noRadiation;
+    const emInductive = sw.emInductive && !g.noRadiation;
     c.setGravitomagneticForce(s, b(sw.gravitomagneticForce));
-    c.setGravitomagneticInductive(s, b(sw.gravitomagneticInductive));
+    c.setGravitomagneticInductive(s, b(gmInductive));
     c.setEmLorentz(s, b(sw.emLorentz));
-    c.setEmInductive(s, b(sw.emInductive));
+    c.setEmInductive(s, b(emInductive));
     c.setEmElectrostatic(s, b(sw.emElectrostatic));
     c.setEmMagnetic(s, b(sw.emMagnetic));
     c.setEmStressEnergy(s, b(sw.emStressEnergy));
@@ -56,7 +59,9 @@ export function applyScenario(world: World, scn: Scenario): void {
     scn.particles.forEach((p, i) => {
         c.addParticle(s, p.x, p.y, p.mass, p.charge, p.vx, p.vy);
         if (p.spin) c.setParticleSpin(s, i, p.spin, p.gFactor ?? 2.0);
-        if (p.selfField) {
+        /* Per-particle selfField overrides the global default. */
+        const selfOn = p.selfField !== undefined ? p.selfField : g.selfFieldDefault;
+        if (selfOn) {
             c.particleEnableSelfField(s, i);
             if (p.selfFieldEps) c.particleSetSelfFieldEpsilon(s, i, p.selfFieldEps[0], p.selfFieldEps[1]);
         }
