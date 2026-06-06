@@ -13,6 +13,7 @@ export type ShapeName = 'cic' | 'tsc' | 'bump';
 export type ForceInterpName = 'legacy' | 'lewis-birdsall';
 export type OuterBCName = 'dirichlet' | 'neumann';
 export type InitMethod = 'lw-settled' | 'lw' | 'none';
+export type BgModeName = 'sampled' | 'analytic';
 
 export interface GridSpec {
     W: number; H: number; dx: number; cEff: number; cfl: number;
@@ -54,6 +55,11 @@ export interface GlobalSpec {
     switches: Switches;
     rhoSmooth: number;
     jSmooth: number;
+    /* How a background field (background[]) is felt by particles: 'sampled'
+     * interpolates the field off the grid; 'analytic' evaluates the closed
+     * form at the particle's exact position (cleaner for Lense-Thirring /
+     * frame-dragging tests where grid sampling smears a sharp source). */
+    bgMode: BgModeName;
     /* Self-field subtraction (anti-heating) applied to every particle unless
      * the particle overrides via its own `selfField`.  Default on. */
     selfFieldDefault: boolean;
@@ -127,6 +133,7 @@ export function defaultGlobal(): GlobalSpec {
         switches: defaultSwitches(),
         rhoSmooth: 0,
         jSmooth: 0,
+        bgMode: 'sampled',
         selfFieldDefault: true,
         noRadiation: false,
     };

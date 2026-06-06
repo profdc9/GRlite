@@ -46,9 +46,11 @@ export function particleReport(world: World): string {
     const ps = world.particles();
     const lines = ps.map((p) => {
         const v = Math.hypot(p.px, p.py) / (p.mass || 1);
+        const spin = p.spin !== 0
+            ? ` spin=${p.spin} phi_spin=${p.phiSpin.toExponential(3)}` : '';
         return `  p${p.index}: x=(${p.x.toFixed(3)},${p.y.toFixed(3)}) ` +
                `p=(${p.px.toExponential(3)},${p.py.toExponential(3)}) ` +
-               `m=${p.mass} q=${p.charge} |v|=${v.toExponential(3)} tau=${p.properTime.toFixed(3)}`;
+               `m=${p.mass} q=${p.charge} |v|=${v.toExponential(3)} tau=${p.properTime.toFixed(3)}${spin}`;
     });
     return lines.join('\n');
 }

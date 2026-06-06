@@ -1,0 +1,47 @@
+{
+  "program": "grlite",
+  "format": "grlite-scenario",
+  "version": 1,
+  "name": "frame-dragging gyroscopes (Lense-Thirring)",
+  "grid": { "W": 128, "H": 128, "dx": 1.0, "cEff": 1.0, "cfl": 0.7071067811865476 },
+  "global": {
+    "gEff": 1.0,
+    "kE": 1.0,
+    "shape": "bump",
+    "kernelRadius": 8,
+    "forceInterp": "lewis-birdsall",
+    "absorber": { "outerBC": "dirichlet", "frictionFloor": 0.0, "frictionWall": 0.02, "frictionDepth": 24, "zeroMeanScalar": false },
+    "init": { "method": "none", "settleSteps": 0 },
+    "switches": {
+      "gravitomagneticForce": true,
+      "gravitomagneticInductive": false,
+      "emLorentz": false,
+      "emInductive": false,
+      "emElectrostatic": false,
+      "emMagnetic": false,
+      "emStressEnergy": false,
+      "emShapiro": false,
+      "fieldEvolution": false,
+      "particleSourceDeposition": false,
+      "esirkepov": false,
+      "periodicBC": false
+    },
+    "rhoSmooth": 0,
+    "jSmooth": 0,
+    "bgMode": "analytic",
+    "selfFieldDefault": false,
+    "noRadiation": false
+  },
+  "background": [
+    { "type": "spinning-mass", "x": 63.5, "y": 63.5, "GM": 0.0, "epsilon": 8.0, "Jz": 4.0 }
+  ],
+  "particles": [
+    { "x": 63.5, "y": 63.5, "vx": 0.0, "vy": 0.0, "mass": 20.0, "charge": 0.0, "spin": 0.2, "gFactor": 2.0 },
+    { "x": 71.5, "y": 63.5, "vx": 0.0, "vy": 0.0, "mass": 20.0, "charge": 0.0, "spin": 0.2, "gFactor": 2.0 },
+    { "x": 79.5, "y": 63.5, "vx": 0.0, "vy": 0.0, "mass": 20.0, "charge": 0.0, "spin": 0.2, "gFactor": 2.0 },
+    { "x": 87.5, "y": 63.5, "vx": 0.0, "vy": 0.0, "mass": 20.0, "charge": 0.0, "spin": 0.2, "gFactor": 2.0 },
+    { "x": 95.5, "y": 63.5, "vx": 0.0, "vy": 0.0, "mass": 20.0, "charge": 0.0, "spin": 0.2, "gFactor": 2.0 },
+    { "x": 63.5, "y": 71.5, "vx": 0.0, "vy": 0.0, "mass": 20.0, "charge": 0.0, "spin": 0.2, "gFactor": 2.0 }
+  ],
+  "view": { "field": 0, "showTrails": false, "showVelocity": false }
+}

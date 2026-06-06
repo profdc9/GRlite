@@ -48,6 +48,7 @@ export function applyScenario(world: World, scn: Scenario): void {
     c.setRhoSmoothPasses(s, g.rhoSmooth);
     c.setJSmoothPasses(s, g.jSmooth);
 
+    c.setBgMode(s, g.bgMode === 'analytic' ? 1 : 0);
     for (const bg of scn.background) {
         if (bg.type === 'spinning-mass') {
             c.setBackgroundSpinningPointMass(s, bg.x, bg.y, bg.GM, bg.epsilon, bg.Jz ?? 0);

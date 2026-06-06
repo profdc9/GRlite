@@ -50,6 +50,7 @@ export interface GRliteCore {
     particleSetSelfFieldEpsilon: (sim: number, idx: number, ex: number, ey: number) => void;
     setBackgroundPointMass: (sim: number, x: number, y: number, GM: number, eps: number) => void;
     setBackgroundSpinningPointMass: (sim: number, x: number, y: number, GM: number, eps: number, Jz: number) => void;
+    setBgMode: (sim: number, mode: number) => void;
     setGEff: (sim: number, gEff: number) => void;
     setKE: (sim: number, kE: number) => void;
     addParticle: (sim: number, x: number, y: number, mass: number, charge: number, vx: number, vy: number) => number;
@@ -140,6 +141,7 @@ function bindCore(M: GRliteModule): GRliteCore {
         particleSetSelfFieldEpsilon: vfn('gr_sim_particle_set_self_field_epsilon', ['number','number','number','number']),
         setBackgroundPointMass: vfn('gr_sim_set_background_point_mass', ['number','number','number','number','number']),
         setBackgroundSpinningPointMass: vfn('gr_sim_set_background_spinning_point_mass', ['number','number','number','number','number','number']),
+        setBgMode: vfn('gr_sim_set_bg_mode', ['number','number']),
         setGEff: vfn('gr_sim_set_G_eff', ['number','number']),
         setKE: vfn('gr_sim_set_k_e', ['number','number']),
         addParticle: M.cwrap('gr_sim_add_particle', 'number',

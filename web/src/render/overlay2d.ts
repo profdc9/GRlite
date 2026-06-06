@@ -103,6 +103,22 @@ export class Overlay2D {
                 this.arrowHead(ex, ey, Math.atan2(ey - y, ex - x), ctx.strokeStyle);
             }
 
+            /* Gyroscope spin indicator: a "hand" through the particle at angle
+             * phi_spin.  As the spin precesses (Lense-Thirring), the hand
+             * rotates -- frame-dragging made literally visible.  A dot marks
+             * the +phi tip so the 180-deg ambiguity is broken. */
+            if (p.spin !== 0) {
+                const L = 20;
+                const hx = Math.cos(p.phiSpin) * L;
+                const hy = -Math.sin(p.phiSpin) * L;   // sim y is +up, canvas +down
+                ctx.strokeStyle = '#66ffcc';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(x - hx, y - hy); ctx.lineTo(x + hx, y + hy); ctx.stroke();
+                ctx.fillStyle = '#66ffcc';
+                ctx.beginPath(); ctx.arc(x + hx, y + hy, 3, 0, Math.PI * 2); ctx.fill();
+            }
+
             /* Marker. */
             const sel = p.index === opts.selected;
             ctx.beginPath();
