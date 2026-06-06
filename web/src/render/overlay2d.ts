@@ -142,7 +142,12 @@ export class Overlay2D {
     /* Quiver: arrows on a `spacing`-cell grid showing the local field
      * direction + magnitude.  Lengths are normalized so the strongest sampled
      * arrow spans ~0.9 of the cell gap; alpha fades with relative magnitude so
-     * weak regions recede.  Arrows are centered on their sample point. */
+     * weak regions recede.  Arrows are centered on their sample point.
+     *
+     * Performance: arrows are bucketed by relative magnitude into a few
+     * opacity levels, each accumulated into one Path2D, so the whole quiver
+     * costs ~2*BUCKETS canvas calls instead of one stroke+fill per arrow
+     * (which is what made dense grids slow). */
     private drawVectors(v: VectorData, spacing: number): void {
         const ctx = this.ctx;
         const W = this.W, H = this.H;
@@ -163,7 +168,12 @@ export class Overlay2D {
         const spacingPx = step * (this.cw / W);
         const scale = (spacingPx * 0.9) / max;   // px per field unit
         const head = Math.min(5, spacingPx * 0.22);
-        ctx.lineWidth = 1.25;
+
+        const BUCKETS = 6;
+        const lines: Path2D[] = [];
+        const heads: Path2D[] = [];
+        for (let b = 0; b < BUCKETS; b++) { lines.push(new Path2D()); heads.push(new Path2D()); }
+        const invMax = 1 / max;
 
         for (let j = start; j < H; j += step) {
             for (let i = start; i < W; i += step) {
@@ -171,16 +181,29 @@ export class Overlay2D {
                 const fx = v.vx[k], fy = v.vy[k];
                 const m = Math.hypot(fx, fy);
                 if (m <= 0) continue;
+                const rel = m * invMax;
+                const b = Math.min(BUCKETS - 1, (rel * BUCKETS) | 0);
                 const px = this.sx(i + 0.5), py = this.sy(j + 0.5);
                 const dx = fx * scale, dy = -fy * scale;   // sim y is +up
                 const x0 = px - dx * 0.5, y0 = py - dy * 0.5;
                 const x1 = px + dx * 0.5, y1 = py + dy * 0.5;
-                const a = (0.2 + 0.7 * (m / max)).toFixed(3);
-                ctx.strokeStyle = `rgba(255,210,74,${a})`;
-                ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-                this.arrowHead(x1, y1, Math.atan2(y1 - y0, x1 - x0),
-                               `rgba(255,210,74,${a})`, head);
+                const lp = lines[b];
+                lp.moveTo(x0, y0); lp.lineTo(x1, y1);
+                const ang = Math.atan2(dy, dx);
+                const hp = heads[b];
+                hp.moveTo(x1, y1);
+                hp.lineTo(x1 - head * Math.cos(ang - 0.4), y1 - head * Math.sin(ang - 0.4));
+                hp.lineTo(x1 - head * Math.cos(ang + 0.4), y1 - head * Math.sin(ang + 0.4));
+                hp.closePath();
             }
+        }
+
+        ctx.lineWidth = 1.25;
+        for (let b = 0; b < BUCKETS; b++) {
+            const a = (0.2 + 0.7 * ((b + 0.5) / BUCKETS)).toFixed(3);
+            const color = `rgba(255,210,74,${a})`;
+            ctx.strokeStyle = color; ctx.fillStyle = color;
+            ctx.stroke(lines[b]); ctx.fill(heads[b]);
         }
     }
 

@@ -185,6 +185,13 @@ async function main(): Promise<void> {
         });
     }
 
+    /* Field-view caches: the colormap + vector arrays only change when the sim
+     * advances or the view selection changes, so we skip the W*H CPU passes on
+     * static (paused) frames and just re-draw the cached data. */
+    let cmCache: Float32Array | null = null;
+    let vecCache: ReturnType<typeof computeVectorField> = null;
+    let viewKey = '';
+
     function frame(): void {
         const advanced = !state.paused || state.singleStep;
         if (advanced) {
@@ -192,16 +199,26 @@ async function main(): Promise<void> {
             state.singleStep = false;
         }
 
+        const key = `${state.viewField}|${state.viewSource}|${state.vectorField}`;
+        const recompute = advanced || key !== viewKey || cmCache === null;
+        viewKey = key;
+
         gl!.viewport(0, 0, canvas.width, canvas.height);
         gl!.clearColor(0, 0, 0, 1);
         gl!.clear(gl!.COLOR_BUFFER_BIT);
         if (state.viewSource !== 'none') {
-            fieldPass.render(computeView(world, state.viewField, state.viewSource));
+            if (recompute) cmCache = computeView(world, state.viewField, state.viewSource);
+            fieldPass.render(cmCache!);
+        } else {
+            cmCache = null;
         }
 
-        const vec = (state.vectorField > 0 && state.viewSource !== 'none')
-            ? computeVectorField(world, state.vectorField, state.viewSource)
-            : null;
+        if (recompute) {
+            vecCache = (state.vectorField > 0 && state.viewSource !== 'none')
+                ? computeVectorField(world, state.vectorField, state.viewSource)
+                : null;
+        }
+        const vec = vecCache;
 
         const parts = world.particles();
         if (advanced && state.showTrails) trails.push(parts);
