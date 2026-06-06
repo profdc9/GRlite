@@ -73,17 +73,31 @@ export interface GlobalSpec {
     noRadiation: boolean;
 }
 
+/* A single unified "compact body" background, parameterized by the three
+ * no-hair quantities.  The classic metrics are special cases:
+ *   GM only            -> Schwarzschild
+ *   GM + Q             -> Reissner-Nordstrom
+ *   GM + Jz            -> Kerr
+ *   GM + Q + Jz        -> Kerr-Newman
+ * (linearized GEM+EM analog -- see gr_sim_set_background_body).  A scenario
+ * holds 0 or 1 of these. */
 export interface BackgroundSpec {
-    type: 'point-mass' | 'spinning-mass' | 'point-charge';
     x: number; y: number; epsilon: number;
-    /* Gravitational mass (point-mass / spinning-mass). */
-    GM: number;
-    /* Angular momentum (spinning-mass) -> gravitomagnetic A_g. */
-    Jz?: number;
-    /* Electric charge (point-charge) -> Coulomb phi^bg.  Note the C setters
-     * are mutually exclusive (each clears any prior background), so one
-     * background body is gravitational OR electric, not both. */
-    Q?: number;
+    GM: number;   // gravitational mass  -> Phi_g
+    Q: number;    // electric charge     -> phi_em (Coulomb)
+    Jz: number;   // angular momentum    -> A_g (frame dragging)
+    /* Legacy discriminator from the pre-unification schema; ignored on load
+     * (the body is whatever GM/Q/Jz say).  Kept optional for old scenes/URLs. */
+    type?: string;
+}
+
+/* The classic-metric name implied by which hairs are nonzero (display only). */
+export function backgroundLabel(b: BackgroundSpec | undefined): string {
+    if (!b || (b.GM === 0 && b.Q === 0 && b.Jz === 0)) return 'none';
+    if (b.Q !== 0 && b.Jz !== 0) return 'Kerr–Newman';
+    if (b.Jz !== 0) return 'Kerr';
+    if (b.Q !== 0) return 'Reissner–Nordström';
+    return 'Schwarzschild';
 }
 
 export interface ParticleSpec {
@@ -203,7 +217,16 @@ export function validate(obj: unknown): Scenario {
             init: { ...base.global.init, ...(o.global?.init ?? {}) },
             switches: { ...base.global.switches, ...(o.global?.switches ?? {}) },
         },
-        background: o.background ?? [],
+        /* Normalize each background to the unified (GM,Q,Jz,eps) body, filling
+         * defaults so older type-discriminated scenes load unchanged. */
+        background: (o.background ?? []).map((b) => ({
+            x: b.x ?? base.grid.W * 0.5,
+            y: b.y ?? base.grid.H * 0.5,
+            epsilon: b.epsilon ?? 8,
+            GM: b.GM ?? 0,
+            Q: (b as Partial<BackgroundSpec>).Q ?? 0,
+            Jz: (b as Partial<BackgroundSpec>).Jz ?? 0,
+        })),
         particles: o.particles ?? [],
         view: { ...base.view, ...(o.view ?? {}) },
     } as Scenario;

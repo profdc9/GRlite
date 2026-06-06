@@ -49,14 +49,10 @@ export function applyScenario(world: World, scn: Scenario): void {
     c.setJSmoothPasses(s, g.jSmooth);
 
     c.setBgMode(s, g.bgMode === 'analytic' ? 1 : 0);
+    /* Unified compact body (M, Q, Jz) -- superposes grav + Coulomb + frame
+     * dragging in one background.  The classic metrics are special cases. */
     for (const bg of scn.background) {
-        if (bg.type === 'spinning-mass') {
-            c.setBackgroundSpinningPointMass(s, bg.x, bg.y, bg.GM, bg.epsilon, bg.Jz ?? 0);
-        } else if (bg.type === 'point-charge') {
-            c.setBackgroundPointCharge(s, bg.x, bg.y, bg.Q ?? 0, bg.epsilon);
-        } else {
-            c.setBackgroundPointMass(s, bg.x, bg.y, bg.GM, bg.epsilon);
-        }
+        c.setBackgroundBody(s, bg.x, bg.y, bg.GM ?? 0, bg.Q ?? 0, bg.Jz ?? 0, bg.epsilon);
     }
 
     scn.particles.forEach((p, i) => {

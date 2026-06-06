@@ -33,7 +33,7 @@
     "noRadiation": false
   },
   "background": [
-    { "type": "spinning-mass", "x": 63.5, "y": 63.5, "GM": 0.0, "epsilon": 8.0, "Jz": 4.0 }
+    { "x": 63.5, "y": 63.5, "GM": 0.0, "Q": 0.0, "Jz": 4.0, "epsilon": 8.0 }
   ],
   "particles": [
     { "x": 63.5, "y": 63.5, "vx": 0.0, "vy": 0.0, "mass": 20.0, "charge": 0.0, "spin": 0.2, "gFactor": 2.0 },

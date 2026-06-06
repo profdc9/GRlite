@@ -33,7 +33,7 @@
     "noRadiation": false
   },
   "background": [
-    { "type": "point-charge", "x": 127.5, "y": 127.5, "Q": 1.0, "epsilon": 4.0, "GM": 0.0 }
+    { "x": 127.5, "y": 127.5, "GM": 0.0, "Q": 1.0, "Jz": 0.0, "epsilon": 4.0 }
   ],
   "particles": [
     { "x": 157.5, "y": 127.5, "vx": 0.0, "vy": 0.1802, "mass": 0.01, "charge": -0.01 }

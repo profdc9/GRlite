@@ -52,6 +52,7 @@ export interface GRliteCore {
     setBackgroundPointMass: (sim: number, x: number, y: number, GM: number, eps: number) => void;
     setBackgroundSpinningPointMass: (sim: number, x: number, y: number, GM: number, eps: number, Jz: number) => void;
     setBackgroundPointCharge: (sim: number, x: number, y: number, Q: number, eps: number) => void;
+    setBackgroundBody: (sim: number, x: number, y: number, GM: number, Q: number, Jz: number, eps: number) => void;
     setBgMode: (sim: number, mode: number) => void;
     setGEff: (sim: number, gEff: number) => void;
     setKE: (sim: number, kE: number) => void;
@@ -145,6 +146,7 @@ function bindCore(M: GRliteModule): GRliteCore {
         setBackgroundPointMass: vfn('gr_sim_set_background_point_mass', ['number','number','number','number','number']),
         setBackgroundSpinningPointMass: vfn('gr_sim_set_background_spinning_point_mass', ['number','number','number','number','number','number']),
         setBackgroundPointCharge: vfn('gr_sim_set_background_point_charge', ['number','number','number','number','number']),
+        setBackgroundBody: vfn('gr_sim_set_background_body', ['number','number','number','number','number','number','number']),
         setBgMode: vfn('gr_sim_set_bg_mode', ['number','number']),
         setGEff: vfn('gr_sim_set_G_eff', ['number','number']),
         setKE: vfn('gr_sim_set_k_e', ['number','number']),

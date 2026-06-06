@@ -73,6 +73,77 @@ static float* ensure_bg_alloc(gr_sim_t* sim, gr_field_id_t which) {
     return *slot;
 }
 
+/* ---- Shared field generators (fill arrays; no clear, no param store) -------
+ * Each writes one component's analytic field onto its Yee sublattice.  The
+ * public setters below clear + call these + store the generator params; the
+ * unified gr_sim_set_background_body clears ONCE and calls all three so the
+ * components superpose. */
+
+/* Phi_g^{bg}(x) = -GM / sqrt(r^2 + eps^2) on the CORNER sublattice. */
+static void fill_bg_grav_scalar(gr_sim_t* sim, float x0, float y0,
+                                float GM, float epsilon) {
+    float* phi_bg = ensure_bg_alloc(sim, GR_FIELD_PHI_GRAV);
+    if (!phi_bg) return;
+    const int W = sim->width, H = sim->height;
+    const float dx = sim->dx, eps2 = epsilon * epsilon;
+    for (int j = 0; j < H; j++) {
+        const float y = (float) j * dx, dy = y - y0;
+        const int row = j * W;
+        for (int i = 0; i < W; i++) {
+            const float xx = (float) i * dx, dxi = xx - x0;
+            phi_bg[row + i] = -GM / sqrtf(dxi * dxi + dy * dy + eps2);
+        }
+    }
+}
+
+/* Gravitomagnetic dipole A_g = (G Jz / 2c^2) (J x r)/s^{3/2}.  Agx on X_EDGE
+ * (i+0.5, j), Agy on Y_EDGE (i, j+0.5). */
+static void fill_bg_gravomag_dipole(gr_sim_t* sim, float x0, float y0,
+                                    float Jz, float epsilon) {
+    float* Agx = ensure_bg_alloc(sim, GR_FIELD_A_GX);
+    float* Agy = ensure_bg_alloc(sim, GR_FIELD_A_GY);
+    if (!Agx || !Agy) return;
+    const int W = sim->width, H = sim->height;
+    const float dx = sim->dx, eps2 = epsilon * epsilon;
+    const float coeff = sim->G_eff * Jz / (2.0f * sim->c_eff * sim->c_eff);
+    for (int j = 0; j < H; j++) {
+        const float y = (float) j * dx, dyc = y - y0;
+        const int row = j * W;
+        for (int i = 0; i < W; i++) {
+            const float xc = ((float) i + 0.5f) * dx, dxc = xc - x0;
+            const float s2 = dxc * dxc + dyc * dyc + eps2;
+            Agx[row + i] = -coeff * dyc / (s2 * sqrtf(s2));
+        }
+    }
+    for (int j = 0; j < H; j++) {
+        const float y = ((float) j + 0.5f) * dx, dyc = y - y0;
+        const int row = j * W;
+        for (int i = 0; i < W; i++) {
+            const float xc = (float) i * dx, dxc = xc - x0;
+            const float s2 = dxc * dxc + dyc * dyc + eps2;
+            Agy[row + i] = +coeff * dxc / (s2 * sqrtf(s2));
+        }
+    }
+}
+
+/* Coulomb phi^{bg}(x) = +k_e Q / sqrt(r^2 + eps^2) on the CORNER sublattice. */
+static void fill_bg_coulomb(gr_sim_t* sim, float x0, float y0,
+                            float Q, float epsilon) {
+    float* phi = ensure_bg_alloc(sim, GR_FIELD_PHI_EM);
+    if (!phi) return;
+    const int W = sim->width, H = sim->height;
+    const float dx = sim->dx, eps2 = epsilon * epsilon;
+    const float coeff = sim->k_e * Q;
+    for (int j = 0; j < H; j++) {
+        const float y = (float) j * dx, dy = y - y0;
+        const int row = j * W;
+        for (int i = 0; i < W; i++) {
+            const float xx = (float) i * dx, dxi = xx - x0;
+            phi[row + i] = coeff / sqrtf(dxi * dxi + dy * dy + eps2);
+        }
+    }
+}
+
 /* Eq. (eq:bg_softened_point_mass) — gr_sandbox_vNN.tex §12.6.
  *
  *   Phi_g^{bg}(x) = -G_eff * M / sqrt(|x - x0|^2 + epsilon^2)
@@ -84,26 +155,7 @@ void gr_sim_set_background_point_mass(gr_sim_t* sim,
                                       float x0, float y0,
                                       float GM, float epsilon) {
     if (!sim) return;
-    float* phi_bg = ensure_bg_alloc(sim, GR_FIELD_PHI_GRAV);
-    if (!phi_bg) return;
-
-    const int   W    = sim->width;
-    const int   H    = sim->height;
-    const float dx   = sim->dx;
-    const float eps2 = epsilon * epsilon;
-
-    /* CORNER sublattice: nodes at (i, j) * dx — no offset. */
-    for (int j = 0; j < H; j++) {
-        const float y  = (float) j * dx;
-        const float dy = y - y0;
-        const int   row = j * W;
-        for (int i = 0; i < W; i++) {
-            const float x   = (float) i * dx;
-            const float dxi = x - x0;
-            const float r2  = dxi * dxi + dy * dy;
-            phi_bg[row + i] = -GM / sqrtf(r2 + eps2);
-        }
-    }
+    fill_bg_grav_scalar(sim, x0, y0, GM, epsilon);
     /* Store generator parameters for the analytic-mode evaluator. */
     sim->bg_kind = GR_BG_KIND_POINT_MASS;
     sim->bg_x0   = x0;
@@ -134,53 +186,15 @@ void gr_sim_set_background_spinning_point_mass(gr_sim_t* sim,
                                                float GM, float epsilon,
                                                float Jz) {
     if (!sim) return;
-    /* First fill the scalar piece using the same generator as the
-     * non-spinning case (and stash kind/params), then overwrite kind and
-     * fill the vector potential arrays. */
-    gr_sim_set_background_point_mass(sim, x0, y0, GM, epsilon);
+    /* Scalar (grav) piece + gravitomagnetic dipole, via the shared generators. */
+    fill_bg_grav_scalar(sim, x0, y0, GM, epsilon);
+    fill_bg_gravomag_dipole(sim, x0, y0, Jz, epsilon);
     sim->bg_kind = GR_BG_KIND_SPINNING_POINT_MASS;
+    sim->bg_x0   = x0;
+    sim->bg_y0   = y0;
+    sim->bg_GM   = GM;
+    sim->bg_eps  = epsilon;
     sim->bg_Jz   = Jz;
-
-    float* Agx = ensure_bg_alloc(sim, GR_FIELD_A_GX);
-    float* Agy = ensure_bg_alloc(sim, GR_FIELD_A_GY);
-    if (!Agx || !Agy) return;
-
-    const int   W      = sim->width;
-    const int   H      = sim->height;
-    const float dx     = sim->dx;
-    const float eps2   = epsilon * epsilon;
-    /* Dipole coefficient: A_g = (k/(s^{3/2})) * (J × r),
-     * with k = G_eff J_z / (2 c^2).  We also include the G_eff factor here
-     * for consistency with the rest of the GEM-source convention. */
-    const float coeff  = sim->G_eff * Jz
-                       / (2.0f * sim->c_eff * sim->c_eff);
-
-    /* X_EDGE sublattice for Agx: nodes at (i + 0.5, j) * dx. */
-    for (int j = 0; j < H; j++) {
-        const float y  = (float) j * dx;
-        const float dyc = y - y0;
-        const int   row = j * W;
-        for (int i = 0; i < W; i++) {
-            const float xc   = ((float) i + 0.5f) * dx;
-            const float dxc  = xc - x0;
-            const float s2   = dxc * dxc + dyc * dyc + eps2;
-            const float inv_s3 = 1.0f / (s2 * sqrtf(s2));
-            Agx[row + i] = -coeff * dyc * inv_s3;
-        }
-    }
-    /* Y_EDGE sublattice for Agy: nodes at (i, j + 0.5) * dx. */
-    for (int j = 0; j < H; j++) {
-        const float y  = ((float) j + 0.5f) * dx;
-        const float dyc = y - y0;
-        const int   row = j * W;
-        for (int i = 0; i < W; i++) {
-            const float xc   = (float) i * dx;
-            const float dxc  = xc - x0;
-            const float s2   = dxc * dxc + dyc * dyc + eps2;
-            const float inv_s3 = 1.0f / (s2 * sqrtf(s2));
-            Agy[row + i] = +coeff * dxc * inv_s3;
-        }
-    }
 }
 
 /* Uniform gravitomagnetic background.  Symmetric-gauge potentials produce
@@ -384,26 +398,7 @@ void gr_sim_set_background_point_charge(gr_sim_t* sim,
                                         float Q, float epsilon) {
     if (!sim) return;
     gr_sim_clear_background(sim);
-    float* phi = ensure_bg_alloc(sim, GR_FIELD_PHI_EM);
-    if (!phi) return;
-
-    const int   W    = sim->width;
-    const int   H    = sim->height;
-    const float dx   = sim->dx;
-    const float eps2 = epsilon * epsilon;
-    const float coeff = sim->k_e * Q;     /* +k_e Q out front of 1/sqrt(s) */
-
-    for (int j = 0; j < H; j++) {
-        const float y  = (float) j * dx;
-        const float dy = y - y0;
-        const int   row = j * W;
-        for (int i = 0; i < W; i++) {
-            const float x   = (float) i * dx;
-            const float dxi = x - x0;
-            const float r2  = dxi * dxi + dy * dy;
-            phi[row + i] = coeff / sqrtf(r2 + eps2);
-        }
-    }
+    fill_bg_coulomb(sim, x0, y0, Q, epsilon);
 
     sim->bg_kind  = GR_BG_KIND_POINT_CHARGE;
     sim->bg_x0    = x0;
@@ -418,6 +413,32 @@ void gr_sim_set_background_point_charge(gr_sim_t* sim,
     sim->bg_charge = Q;
 }
 
+/* Unified compact body (M, Q, J_z) -- see header.  Clears once, then
+ * superposes the grav scalar, gravitomagnetic dipole, and Coulomb generators.
+ * Components with a zero coefficient are skipped (the sampled path treats a
+ * NULL array as zero; the analytic evaluators use the stored zero param). */
+void gr_sim_set_background_body(gr_sim_t* sim,
+                                float x0, float y0,
+                                float GM, float Q, float Jz, float epsilon) {
+    if (!sim) return;
+    gr_sim_clear_background(sim);
+    if (GM != 0.0f) fill_bg_grav_scalar(sim, x0, y0, GM, epsilon);
+    if (Jz != 0.0f) fill_bg_gravomag_dipole(sim, x0, y0, Jz, epsilon);
+    if (Q  != 0.0f) fill_bg_coulomb(sim, x0, y0, Q, epsilon);
+
+    sim->bg_kind   = GR_BG_KIND_COMPACT_BODY;
+    sim->bg_x0     = x0;
+    sim->bg_y0     = y0;
+    sim->bg_GM     = GM;
+    sim->bg_eps    = epsilon;
+    sim->bg_Jz     = Jz;
+    sim->bg_charge = Q;
+    sim->bg_B0     = 0.0f;
+    sim->bg_B0_em  = 0.0f;
+    sim->bg_Ex_em  = 0.0f;
+    sim->bg_Ey_em  = 0.0f;
+}
+
 /* Analytic-mode evaluation of the installed background generator at the
  * particle's exact (x, y).  See gr_sandbox §12.6 / §12.8 for the rationale:
  * the sampled CIC+FD path introduces an O((dx/r)^2) tangential force error
@@ -430,8 +451,9 @@ int gr_bg_eval_analytic(const struct gr_sim* sim, float x, float y,
 
     switch (sim->bg_kind) {
     case GR_BG_KIND_POINT_MASS:
-    case GR_BG_KIND_SPINNING_POINT_MASS: {
-        /* Scalar piece is identical for both kinds — only A_g differs. */
+    case GR_BG_KIND_SPINNING_POINT_MASS:
+    case GR_BG_KIND_COMPACT_BODY: {
+        /* Scalar (grav) piece uses bg_GM for all three kinds. */
         /*   Phi(x,y) = -G*M / sqrt(r^2 + eps^2)                    */
         /*   grad     =  G*M * (r - r0) / (r^2 + eps^2)^{3/2}       */
         const float dxi = x - sim->bg_x0;
@@ -470,8 +492,9 @@ int gr_bg_eval_A_g(const struct gr_sim* sim, float x, float y,
         return 0;
     }
     switch (sim->bg_kind) {
-    case GR_BG_KIND_SPINNING_POINT_MASS: {
-        /* Same dipole formula used in the sampler. */
+    case GR_BG_KIND_SPINNING_POINT_MASS:
+    case GR_BG_KIND_COMPACT_BODY: {
+        /* Same dipole formula used in the sampler (bg_Jz=0 => zero A_g). */
         const float dxi = x - sim->bg_x0;
         const float dyi = y - sim->bg_y0;
         const float s2  = dxi * dxi + dyi * dyi + sim->bg_eps * sim->bg_eps;
@@ -512,7 +535,8 @@ int gr_bg_eval_B_g(const struct gr_sim* sim, float x, float y,
         *Bgz_out = sim->bg_B0;
         return 1;
     }
-    case GR_BG_KIND_SPINNING_POINT_MASS: {
+    case GR_BG_KIND_SPINNING_POINT_MASS:
+    case GR_BG_KIND_COMPACT_BODY: {
         /* Differentiating A_g = coeff * (J × r) / s^{3/2} gives
          *   B_g_z = coeff * (2 r^2 + 3 eps^2 - r^2) / s^{5/2}  ... let me just
          * recompute from scratch using the explicit form below.
@@ -735,8 +759,9 @@ int gr_bg_eval_phi_em(const struct gr_sim* sim, float x, float y,
         *gy_out  = -sim->bg_Ey_em;
         return 1;
     }
-    case GR_BG_KIND_POINT_CHARGE: {
-        /* phi(x,y) = +k_e Q / sqrt(r^2 + eps^2),
+    case GR_BG_KIND_POINT_CHARGE:
+    case GR_BG_KIND_COMPACT_BODY: {
+        /* phi(x,y) = +k_e Q / sqrt(r^2 + eps^2)  (bg_charge=0 => zero E),
          * grad     = -k_e Q (r - r0) / (r^2 + eps^2)^{3/2}. */
         const float dxi = x - sim->bg_x0;
         const float dyi = y - sim->bg_y0;

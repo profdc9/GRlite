@@ -869,6 +869,25 @@ void gr_sim_set_background_point_charge(gr_sim_t* sim,
                                         float x0, float y0,
                                         float Q, float epsilon);
 
+/* Unified compact body — superposes the three "no-hair" sources of a
+ * stationary body in ONE background (the others above are special cases):
+ *
+ *   mass GM         -> Phi_g^bg  (gravitoelectric / Newtonian well)
+ *   angular mom. Jz -> A_g^bg    (gravitomagnetic dipole / frame dragging)
+ *   charge Q        -> phi^bg    (Coulomb)
+ *
+ * In this LINEARIZED GEM+EM simulator the potentials superpose, so this is
+ * exactly the sum of set_background_point_mass + the spinning A_g + the
+ * point-charge phi (no clearing between them).  It is the weak-field analog
+ * of Kerr-Newman: (GM,0,0)=Schwarzschild, (GM,Q,0)=Reissner-Nordstrom,
+ * (GM,0,Jz)=Kerr, (GM,Q,Jz)=Kerr-Newman.  NOT the exact metric: no horizon /
+ * ergosphere / strong-field nonlinearity.  The magnetic dipole of a spinning
+ * charge is intentionally NOT included.  Works in both bg modes (analytic
+ * evaluators recognize GR_BG_KIND_COMPACT_BODY). */
+void gr_sim_set_background_body(gr_sim_t* sim,
+                                float x0, float y0,
+                                float GM, float Q, float Jz, float epsilon);
+
 /* ----------------------------------------------------------------------------
  * Background evaluation mode
  *
@@ -900,8 +919,11 @@ typedef enum {
     GR_BG_KIND_UNIFORM_MAGNETIC        = 4,
     GR_BG_KIND_UNIFORM_ELECTRIC        = 5,
     GR_BG_KIND_POINT_CHARGE            = 6,
-    GR_BG_KIND_LINEAR_MAGNETIC         = 7  /* v40 -- B_z(x) = B0 + B' (x - x0) */
-    /* Future: CHARGED_POINT_MASS, KERR_NEWMAN, ... */
+    GR_BG_KIND_LINEAR_MAGNETIC         = 7, /* v40 -- B_z(x) = B0 + B' (x - x0) */
+    GR_BG_KIND_COMPACT_BODY            = 8  /* unified (M, Q, J_z) body: grav
+                                            * scalar + gravitomagnetic dipole +
+                                            * Coulomb superposed (linearized
+                                            * Kerr-Newman analog) */
 } gr_bg_kind_t;
 
 typedef enum {

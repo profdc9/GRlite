@@ -8,7 +8,8 @@
 
 import type { World } from '../sim/world';
 import type { AppState } from '../state';
-import type { Scenario, BackgroundSpec } from '../sim/scenario';
+import type { Scenario } from '../sim/scenario';
+import { backgroundLabel } from '../sim/scenario';
 
 export interface InspectorHandlers {
     getScenario: () => Scenario;
@@ -42,19 +43,14 @@ function checkRow(label: string, checked: boolean,
     return row;
 }
 
-/* Set the single background body's kind, preserving existing params (filling
- * defaults for any missing field).  'none' removes the background. */
-function setBackgroundType(sc: Scenario, type: string): void {
-    if (type === 'none') { sc.background = []; return; }
-    const p = sc.background[0];
+/* Add or remove the single (unified) background body.  When adding, seed a
+ * Schwarzschild-ish body at the grid center (mass only; user dials in Q/Jz). */
+function setBackgroundPresent(sc: Scenario, present: boolean): void {
+    if (!present) { sc.background = []; return; }
+    if (sc.background[0]) return;
     sc.background = [{
-        type: type as BackgroundSpec['type'],
-        x: p?.x ?? sc.grid.W * 0.5,
-        y: p?.y ?? sc.grid.H * 0.5,
-        epsilon: p?.epsilon ?? 8,
-        GM: p?.GM ?? 0.01,
-        Jz: p?.Jz ?? 0,
-        Q: p?.Q ?? 0,
+        x: sc.grid.W * 0.5, y: sc.grid.H * 0.5, epsilon: 8,
+        GM: 0.01, Q: 0, Jz: 0,
     }];
 }
 
@@ -115,27 +111,20 @@ export class Inspector {
             sc.global.switches.particleSourceDeposition = v;
         })));
 
-        /* ---- Background body ---- */
-        this.globalEl.appendChild(header('background'));
+        /* ---- Background body (unified M, Q, Jz -- see backgroundLabel) ---- */
         const bg = s.background[0];
-        const bgType = bg?.type ?? 'none';
-        this.globalEl.appendChild(selRow('type', bgType,
-            ['none', 'point-mass', 'spinning-mass', 'point-charge'],
-            (v) => edit((sc) => setBackgroundType(sc, v))));
+        this.globalEl.appendChild(header(`background — ${backgroundLabel(bg)}`));
+        this.globalEl.appendChild(checkRow('present', !!bg,
+            (v) => edit((sc) => setBackgroundPresent(sc, v))));
         if (bg) {
             this.globalEl.appendChild(selRow('bg mode', s.global.bgMode, ['sampled', 'analytic'],
                 (v) => edit((sc) => { sc.global.bgMode = v as Scenario['global']['bgMode']; })));
+            this.globalEl.appendChild(numRow('mass GM', bg.GM, 0.001, (v) => edit((sc) => { sc.background[0].GM = v; })));
+            this.globalEl.appendChild(numRow('charge Q', bg.Q, 0.001, (v) => edit((sc) => { sc.background[0].Q = v; })));
+            this.globalEl.appendChild(numRow('ang.mom. Jz', bg.Jz, 0.1, (v) => edit((sc) => { sc.background[0].Jz = v; })));
+            this.globalEl.appendChild(numRow('softening ε', bg.epsilon, 0.5, (v) => edit((sc) => { sc.background[0].epsilon = v; })));
             this.globalEl.appendChild(numRow('x', bg.x, 1, (v) => edit((sc) => { sc.background[0].x = v; })));
             this.globalEl.appendChild(numRow('y', bg.y, 1, (v) => edit((sc) => { sc.background[0].y = v; })));
-            this.globalEl.appendChild(numRow('softening ε', bg.epsilon, 0.5, (v) => edit((sc) => { sc.background[0].epsilon = v; })));
-            if (bg.type === 'point-charge') {
-                this.globalEl.appendChild(numRow('charge Q', bg.Q ?? 0, 0.001, (v) => edit((sc) => { sc.background[0].Q = v; })));
-            } else {
-                this.globalEl.appendChild(numRow('mass GM', bg.GM, 0.001, (v) => edit((sc) => { sc.background[0].GM = v; })));
-                if (bg.type === 'spinning-mass') {
-                    this.globalEl.appendChild(numRow('ang.mom. Jz', bg.Jz ?? 0, 0.1, (v) => edit((sc) => { sc.background[0].Jz = v; })));
-                }
-            }
         }
 
         const gl = document.createElement('div'); gl.className = 'live'; gl.textContent = '—';
