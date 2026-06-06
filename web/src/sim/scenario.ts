@@ -95,9 +95,6 @@ export interface BackgroundSpec {
      * from moment mu = gFactor*(Q/2M)*Jz.  Default 2 (Kerr-Newman); 0 = no
      * EM magnetic field.  Needs GM != 0 (moment undefined for a massless body). */
     gFactor: number;
-    /* Legacy discriminator from the pre-unification schema; ignored on load
-     * (the body is whatever GM/Q/Jz say).  Kept optional for old scenes/URLs. */
-    type?: string;
 }
 
 /* The classic-metric name implied by which hairs are nonzero (display only). */
@@ -206,6 +203,12 @@ export function defaultGrid(): GridSpec {
     return { W: 384, H: 384, dx: 1.0, cEff: 1.0, cfl: 1.0 / Math.sqrt(2) };
 }
 
+/* Default unified compact body (centered, mass-free).  x/y default to the grid
+ * center so a body added without coordinates lands sensibly. */
+export function defaultBackground(W: number, H: number): BackgroundSpec {
+    return { x: W * 0.5, y: H * 0.5, epsilon: 8, GM: 0, Q: 0, Jz: 0, gFactor: 2 };
+}
+
 export function emptyScenario(name = 'untitled'): Scenario {
     return {
         program: SCENARIO_PROGRAM, format: SCENARIO_FORMAT, version: SCENARIO_VERSION,
@@ -248,18 +251,17 @@ export function validate(obj: unknown): Scenario {
             init: { ...base.global.init, ...(o.global?.init ?? {}) },
             switches: { ...base.global.switches, ...(o.global?.switches ?? {}) },
         },
-        /* Normalize each background to the unified (GM,Q,Jz,eps) body, filling
-         * defaults so older type-discriminated scenes load unchanged. */
-        background: (o.background ?? []).map((b) => ({
-            x: b.x ?? base.grid.W * 0.5,
-            y: b.y ?? base.grid.H * 0.5,
-            epsilon: b.epsilon ?? 8,
-            GM: b.GM ?? 0,
-            Q: (b as Partial<BackgroundSpec>).Q ?? 0,
-            Jz: (b as Partial<BackgroundSpec>).Jz ?? 0,
-            gFactor: (b as Partial<BackgroundSpec>).gFactor ?? 2,
-        })),
+        /* Spread-merge each background over the default body, so every JSON key
+         * maps straight to the object (and a new BackgroundSpec field round-trips
+         * without editing validate) -- same pattern as global/view above. */
+        background: (o.background ?? []).map(
+            (b) => ({ ...defaultBackground(base.grid.W, base.grid.H), ...b })),
         particles: o.particles ?? [],
-        view: { ...base.view, ...(o.view ?? {}) },
+        view: {
+            ...base.view, ...(o.view ?? {}),
+            /* deep-merge so a partial hand-authored forceArrows still gets the
+             * other three components defaulted to false (like switches above). */
+            forceArrows: { ...base.view.forceArrows, ...(o.view?.forceArrows ?? {}) },
+        },
     } as Scenario;
 }

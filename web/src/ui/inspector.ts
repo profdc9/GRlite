@@ -9,7 +9,7 @@
 import type { World } from '../sim/world';
 import type { AppState } from '../state';
 import type { Scenario } from '../sim/scenario';
-import { backgroundLabel } from '../sim/scenario';
+import { backgroundLabel, defaultBackground } from '../sim/scenario';
 
 export interface InspectorHandlers {
     getScenario: () => Scenario;
@@ -51,10 +51,8 @@ function checkRow(label: string, checked: boolean,
 function setBackgroundPresent(sc: Scenario, present: boolean): void {
     if (!present) { sc.background = []; return; }
     if (sc.background[0]) return;
-    sc.background = [{
-        x: sc.grid.W * 0.5, y: sc.grid.H * 0.5, epsilon: 8,
-        GM: 0.01, Q: 0, Jz: 0, gFactor: 2,
-    }];
+    /* Seed from the canonical default body (mass 0.01 so it's visible). */
+    sc.background = [{ ...defaultBackground(sc.grid.W, sc.grid.H), GM: 0.01 }];
 }
 
 function header(text: string): HTMLElement {
