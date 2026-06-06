@@ -15,8 +15,10 @@ import { computeView } from './sim/fieldViews';
 import { fullReport, stabilityProbe } from './dev/diagnostics';
 import { STEPS_PER_FRAME } from './sim/config';
 import { applyScenario } from './sim/build';
-import { BUILTINS, builtinBinary, validate, type Scenario } from './sim/scenario';
+import { emptyScenario, validate, type Scenario } from './sim/scenario';
 import { readFromHash, writeToHash, downloadScenario } from './sim/serialization';
+
+const DEFAULT_SCENARIO = 'pic_binary';
 
 async function main(): Promise<void> {
     const canvas = document.getElementById('view') as HTMLCanvasElement;
@@ -34,7 +36,7 @@ async function main(): Promise<void> {
     let overlay!: Overlay2D;
     let trails!: Trails;
     let core!: GRliteCore;
-    let current: Scenario = builtinBinary();
+    let current: Scenario = emptyScenario('—');   // placeholder until first load
 
     function setupGrid(g: Scenario['grid']): void {
         world = new World(core, g.W, g.H, g.dx, g.cEff, g.cfl);
@@ -64,16 +66,18 @@ async function main(): Promise<void> {
         controls.setStatus(`paused on ${scn.name} (press resume)`);
     }
 
-    /* Load a scenario by name from the JSON library (public/scenes/<name>.json),
-     * falling back to the in-code builtin if the file is unavailable. */
+    /* Load a scenario by name from the JSON library (public/scenes/<name>.json).
+     * The JSON files are the single source of truth -- there is no in-code copy. */
     async function buildByName(name: string): Promise<void> {
         try {
             const res = await fetch(`/scenes/${name}.json`, { cache: 'no-cache' });
-            if (res.ok) { loadScenario(validate(await res.json())); return; }
-        } catch (e) { console.warn(`scene fetch failed for ${name}:`, (e as Error).message); }
-        const make = BUILTINS[name];
-        if (make) loadScenario(make());
-        else console.error(`unknown scenario: ${name}`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            loadScenario(validate(await res.json()));
+        } catch (e) {
+            const msg = `failed to load /scenes/${name}.json: ${(e as Error).message}`;
+            console.error(msg);
+            controls.setStatus(msg);
+        }
     }
 
     const controls = wireControls({
@@ -112,9 +116,11 @@ async function main(): Promise<void> {
         state.selected = overlay.pick(px, py, world.particles());
     });
 
-    /* Initial scenario: URL hash if present, else the binary builtin. */
+    /* Initial scenario: URL hash if present, else the default library file. */
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
-    loadScenario(readFromHash() ?? builtinBinary());
+    const hashScn = readFromHash();
+    if (hashScn) loadScenario(hashScn);
+    else await buildByName(DEFAULT_SCENARIO);
 
     /* Debug bridge (dev only). */
     if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {

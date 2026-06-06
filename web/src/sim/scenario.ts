@@ -133,33 +133,10 @@ export function emptyScenario(name = 'untitled'): Scenario {
     };
 }
 
-/* ---- built-in scenarios (JSON counterparts of the C scenarios) ---- */
-
-export function builtinBinary(): Scenario {
-    const s = emptyScenario('binary orbit');
-    s.global.switches.gravitomagneticInductive = true;   // pic_binary turns this on
-    const cx = (384 - 1) * 0.5, cy = (384 - 1) * 0.5;
-    const m = 0.01, r = 15.0;
-    const v = 1.05 * Math.sqrt(s.global.gEff * m);        // BUMP-R8 calibrated
-    s.particles = [
-        { x: cx - r, y: cy, vx: 0, vy: +v, mass: m, charge: 0 },
-        { x: cx + r, y: cy, vx: 0, vy: -v, mass: m, charge: 0 },
-    ];
-    return s;
-}
-
-export function builtinStatic(): Scenario {
-    const s = emptyScenario('single stationary mass');
-    const cx = (384 - 1) * 0.5, cy = (384 - 1) * 0.5;
-    s.particles = [{ x: cx, y: cy, vx: 0, vy: 0, mass: 0.01, charge: 0 }];
-    return s;
-}
-
-/* Keyed by the scenario-selector value. */
-export const BUILTINS: { [k: string]: () => Scenario } = {
-    pic_binary: builtinBinary,
-    pic_static: builtinStatic,
-};
+/* Scenarios are NOT defined in code -- they live as JSON files under
+ * public/scenes/ and are the single source of truth (loaded via fetch in
+ * main.ts).  emptyScenario() above is only a placeholder / starting point
+ * for the Phase-3 editor; it is not a stand-in for a real scenario. */
 
 /* ---- validation / migration ---- */
 
