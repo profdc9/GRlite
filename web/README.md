@@ -76,7 +76,10 @@ client (`src/dev/bridge.ts`) is dev-only and auto-reconnects.
 - **1c** ✅ field selector, particle trails, velocity arrows, read-only
   inspector, click-to-select.
 - **1c.1** ⬜ force-vector overlay (needs a per-particle force readout from C).
-- **2** ⬜ JSON source of truth: schema, build-from-JSON, URL-hash
-  load/save, scenario library mirroring the C scenarios.
+- **2** ✅ JSON source of truth: `sim/scenario.ts` schema (+validate),
+  `sim/build.ts` applyScenario via the WASM API, `sim/serialization.ts`
+  URL-hash + JSON download, `public/scenes/*.json` library (selector fetches
+  them, builtin fallback), full physics-switch surface exported to WASM.
+  copy-link / save-.json toolbar buttons.
 - **3** ⬜ editable inspectors + live edits + undo.
 - **4** ⬜ JSON + HTML test harness (reuses the bridge).

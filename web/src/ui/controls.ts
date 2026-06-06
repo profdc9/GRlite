@@ -9,6 +9,8 @@ export interface ControlHandlers {
     onScenarioChange: (name: string) => void;
     onFieldChange: (index: number) => void;
     onToggleTrails: () => void;
+    onCopyLink?: () => void;
+    onSaveJson?: () => void;
     onProbe?: () => void;
 }
 
@@ -44,6 +46,10 @@ export function wireControls(h: ControlHandlers): Controls {
     scenarioSel.addEventListener('change', () => h.onScenarioChange(scenarioSel.value));
     fieldSel.addEventListener('change', () => h.onFieldChange(parseInt(fieldSel.value, 10)));
     trailsBtn.addEventListener('click', h.onToggleTrails);
+    const copyBtn = document.getElementById('copylink') as HTMLButtonElement | null;
+    const saveBtn = document.getElementById('savejson') as HTMLButtonElement | null;
+    if (copyBtn && h.onCopyLink) copyBtn.addEventListener('click', h.onCopyLink);
+    if (saveBtn && h.onSaveJson) saveBtn.addEventListener('click', h.onSaveJson);
     if (probeBtn && h.onProbe) probeBtn.addEventListener('click', h.onProbe);
 
     return {

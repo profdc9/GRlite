@@ -16,7 +16,7 @@ import { fullReport, stabilityProbe } from './dev/diagnostics';
 import { STEPS_PER_FRAME } from './sim/config';
 import { applyScenario } from './sim/build';
 import { BUILTINS, builtinBinary, validate, type Scenario } from './sim/scenario';
-import { readFromHash, writeToHash } from './sim/serialization';
+import { readFromHash, writeToHash, downloadScenario } from './sim/serialization';
 
 async function main(): Promise<void> {
     const canvas = document.getElementById('view') as HTMLCanvasElement;
@@ -83,6 +83,12 @@ async function main(): Promise<void> {
         onScenarioChange: (name) => { void buildByName(name); },
         onFieldChange: (i) => { state.viewField = i; },
         onToggleTrails: () => { state.showTrails = !state.showTrails; controls.setTrails(state.showTrails); },
+        onCopyLink: () => {
+            writeToHash(current);
+            void navigator.clipboard?.writeText(location.href);
+            controls.setStatus('copied shareable URL to clipboard');
+        },
+        onSaveJson: () => downloadScenario(current),
         onProbe: () => {
             controls.setStatus('running stability probe…');
             requestAnimationFrame(() => {
