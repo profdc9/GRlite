@@ -61,6 +61,7 @@ void gr_sim_clear_background(gr_sim_t* sim) {
     sim->bg_B_prime_em = 0.0f;
     sim->bg_Ex_em      = 0.0f;
     sim->bg_Ey_em  = 0.0f;
+    sim->bg_g_em   = 0.0f;
 }
 
 /* Lazily allocate and zero a background array if not already present. */
@@ -124,6 +125,45 @@ static void fill_bg_gravomag_dipole(gr_sim_t* sim, float x0, float y0,
             Agy[row + i] = +coeff * dxc / (s2 * sqrtf(s2));
         }
     }
+}
+
+/* EM magnetic dipole A_em = (k_e mu_z / c^2) (z_hat x r)/s^{3/2} from a
+ * magnetic moment mu_z (the EM analog of fill_bg_gravomag_dipole).  Ax on
+ * X_EDGE (i+0.5, j), Ay on Y_EDGE (i, j+0.5). */
+static void fill_bg_magnetic_dipole(gr_sim_t* sim, float x0, float y0,
+                                    float mu_z, float epsilon) {
+    float* Ax = ensure_bg_alloc(sim, GR_FIELD_A_X);
+    float* Ay = ensure_bg_alloc(sim, GR_FIELD_A_Y);
+    if (!Ax || !Ay) return;
+    const int W = sim->width, H = sim->height;
+    const float dx = sim->dx, eps2 = epsilon * epsilon;
+    const float coeff = sim->k_e * mu_z / (sim->c_eff * sim->c_eff);
+    for (int j = 0; j < H; j++) {
+        const float y = (float) j * dx, dyc = y - y0;
+        const int row = j * W;
+        for (int i = 0; i < W; i++) {
+            const float xc = ((float) i + 0.5f) * dx, dxc = xc - x0;
+            const float s2 = dxc * dxc + dyc * dyc + eps2;
+            Ax[row + i] = -coeff * dyc / (s2 * sqrtf(s2));
+        }
+    }
+    for (int j = 0; j < H; j++) {
+        const float y = ((float) j + 0.5f) * dx, dyc = y - y0;
+        const int row = j * W;
+        for (int i = 0; i < W; i++) {
+            const float xc = (float) i * dx, dxc = xc - x0;
+            const float s2 = dxc * dxc + dyc * dyc + eps2;
+            Ay[row + i] = +coeff * dxc / (s2 * sqrtf(s2));
+        }
+    }
+}
+
+/* EM magnetic moment of a spinning charged body: mu_z = g (Q/2M) Jz, with the
+ * parameter GM = G_eff*M => mu_z = g*Q*Jz*G_eff/(2*GM).  Zero if GM==0. */
+static float compact_body_mu_z(const gr_sim_t* sim,
+                               float GM, float Q, float Jz, float g_em) {
+    if (GM == 0.0f) return 0.0f;
+    return g_em * Q * Jz * sim->G_eff / (2.0f * GM);
 }
 
 /* Coulomb phi^{bg}(x) = +k_e Q / sqrt(r^2 + eps^2) on the CORNER sublattice. */
@@ -419,12 +459,15 @@ void gr_sim_set_background_point_charge(gr_sim_t* sim,
  * NULL array as zero; the analytic evaluators use the stored zero param). */
 void gr_sim_set_background_body(gr_sim_t* sim,
                                 float x0, float y0,
-                                float GM, float Q, float Jz, float epsilon) {
+                                float GM, float Q, float Jz,
+                                float g_em, float epsilon) {
     if (!sim) return;
     gr_sim_clear_background(sim);
-    if (GM != 0.0f) fill_bg_grav_scalar(sim, x0, y0, GM, epsilon);
-    if (Jz != 0.0f) fill_bg_gravomag_dipole(sim, x0, y0, Jz, epsilon);
-    if (Q  != 0.0f) fill_bg_coulomb(sim, x0, y0, Q, epsilon);
+    const float mu_z = compact_body_mu_z(sim, GM, Q, Jz, g_em);
+    if (GM   != 0.0f) fill_bg_grav_scalar(sim, x0, y0, GM, epsilon);
+    if (Jz   != 0.0f) fill_bg_gravomag_dipole(sim, x0, y0, Jz, epsilon);
+    if (Q    != 0.0f) fill_bg_coulomb(sim, x0, y0, Q, epsilon);
+    if (mu_z != 0.0f) fill_bg_magnetic_dipole(sim, x0, y0, mu_z, epsilon);
 
     sim->bg_kind   = GR_BG_KIND_COMPACT_BODY;
     sim->bg_x0     = x0;
@@ -433,6 +476,7 @@ void gr_sim_set_background_body(gr_sim_t* sim,
     sim->bg_eps    = epsilon;
     sim->bg_Jz     = Jz;
     sim->bg_charge = Q;
+    sim->bg_g_em   = g_em;
     sim->bg_B0     = 0.0f;
     sim->bg_B0_em  = 0.0f;
     sim->bg_Ex_em  = 0.0f;
@@ -594,6 +638,20 @@ int gr_bg_eval_A_em(const struct gr_sim* sim, float x, float y,
         *Ay_out = sim->bg_B0_em * dxi + 0.5f * sim->bg_B_prime_em * dxi * dxi;
         return 1;
     }
+    case GR_BG_KIND_COMPACT_BODY: {
+        /* Magnetic dipole of the spinning charge: A_em = (k_e mu_z/c^2)(z x r)
+         * / s^{3/2}, mirroring A_g (mu_z=0 => zero). */
+        const float mu_z = compact_body_mu_z(sim, sim->bg_GM, sim->bg_charge,
+                                             sim->bg_Jz, sim->bg_g_em);
+        const float dxi = x - sim->bg_x0;
+        const float dyi = y - sim->bg_y0;
+        const float s2  = dxi * dxi + dyi * dyi + sim->bg_eps * sim->bg_eps;
+        const float inv_s3 = 1.0f / (s2 * sqrtf(s2));
+        const float coeff  = sim->k_e * mu_z / (sim->c_eff * sim->c_eff);
+        *Ax_out = -coeff * dyi * inv_s3;
+        *Ay_out =  coeff * dxi * inv_s3;
+        return 1;
+    }
     default:
         *Ax_out = 0.0f;
         *Ay_out = 0.0f;
@@ -619,6 +677,20 @@ int gr_bg_eval_B_em(const struct gr_sim* sim, float x, float y,
         /* B_z = B0 + B' (x - x0). */
         (void) y;
         *Bz_out = sim->bg_B0_em + sim->bg_B_prime_em * (x - sim->bg_x0);
+        return 1;
+    }
+    case GR_BG_KIND_COMPACT_BODY: {
+        /* Curl of the magnetic dipole, same form as B_g (mu_z=0 => zero). */
+        const float mu_z = compact_body_mu_z(sim, sim->bg_GM, sim->bg_charge,
+                                             sim->bg_Jz, sim->bg_g_em);
+        const float dxi = x - sim->bg_x0;
+        const float dyi = y - sim->bg_y0;
+        const float r2  = dxi * dxi + dyi * dyi;
+        const float eps2 = sim->bg_eps * sim->bg_eps;
+        const float s2  = r2 + eps2;
+        const float inv_s52 = 1.0f / (s2 * s2 * sqrtf(s2));
+        const float coeff  = sim->k_e * mu_z / (sim->c_eff * sim->c_eff);
+        *Bz_out = coeff * (2.0f * eps2 - r2) * inv_s52;
         return 1;
     }
     default:

@@ -269,6 +269,11 @@ struct gr_sim {
     float        bg_Ey_em;
     /* Reserved slot for the charged variants (Stage 11+). */
     float        bg_charge;
+    /* Gyromagnetic ratio of a spinning charged COMPACT_BODY: the EM magnetic
+     * moment is mu_z = bg_g_em * (Q/2M) * Jz = bg_g_em*bg_charge*bg_Jz*G_eff/
+     * (2*bg_GM), so the body sources an EM magnetic dipole A_em.  Default 2
+     * (Kerr-Newman g=2 -> mu = Q J / M).  Zero -> no EM magnetic field. */
+    float        bg_g_em;
 
     /* Shapiro delay (Stage 31+): when nonzero, the EM-field leapfrog uses a
      * per-cell wave speed c_local^2(x) = c^2 * (1 + 2 Phi_g(x)/c^2)^2 on the

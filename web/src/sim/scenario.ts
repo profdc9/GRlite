@@ -86,6 +86,10 @@ export interface BackgroundSpec {
     GM: number;   // gravitational mass  -> Phi_g
     Q: number;    // electric charge     -> phi_em (Coulomb)
     Jz: number;   // angular momentum    -> A_g (frame dragging)
+    /* Gyromagnetic ratio of the spinning charge -> EM magnetic dipole A_em
+     * from moment mu = gFactor*(Q/2M)*Jz.  Default 2 (Kerr-Newman); 0 = no
+     * EM magnetic field.  Needs GM != 0 (moment undefined for a massless body). */
+    gFactor: number;
     /* Legacy discriminator from the pre-unification schema; ignored on load
      * (the body is whatever GM/Q/Jz say).  Kept optional for old scenes/URLs. */
     type?: string;
@@ -226,6 +230,7 @@ export function validate(obj: unknown): Scenario {
             GM: b.GM ?? 0,
             Q: (b as Partial<BackgroundSpec>).Q ?? 0,
             Jz: (b as Partial<BackgroundSpec>).Jz ?? 0,
+            gFactor: (b as Partial<BackgroundSpec>).gFactor ?? 2,
         })),
         particles: o.particles ?? [],
         view: { ...base.view, ...(o.view ?? {}) },

@@ -50,7 +50,7 @@ function setBackgroundPresent(sc: Scenario, present: boolean): void {
     if (sc.background[0]) return;
     sc.background = [{
         x: sc.grid.W * 0.5, y: sc.grid.H * 0.5, epsilon: 8,
-        GM: 0.01, Q: 0, Jz: 0,
+        GM: 0.01, Q: 0, Jz: 0, gFactor: 2,
     }];
 }
 
@@ -122,6 +122,7 @@ export class Inspector {
             this.globalEl.appendChild(numRow('mass GM', bg.GM, 0.001, (v) => edit((sc) => { sc.background[0].GM = v; })));
             this.globalEl.appendChild(numRow('charge Q', bg.Q, 0.001, (v) => edit((sc) => { sc.background[0].Q = v; })));
             this.globalEl.appendChild(numRow('ang.mom. Jz', bg.Jz, 0.1, (v) => edit((sc) => { sc.background[0].Jz = v; })));
+            this.globalEl.appendChild(numRow('gyromag. g', bg.gFactor, 0.1, (v) => edit((sc) => { sc.background[0].gFactor = v; })));
             this.globalEl.appendChild(numRow('softening ε', bg.epsilon, 0.5, (v) => edit((sc) => { sc.background[0].epsilon = v; })));
             this.globalEl.appendChild(numRow('x', bg.x, 1, (v) => edit((sc) => { sc.background[0].x = v; })));
             this.globalEl.appendChild(numRow('y', bg.y, 1, (v) => edit((sc) => { sc.background[0].y = v; })));

@@ -52,7 +52,7 @@ export function applyScenario(world: World, scn: Scenario): void {
     /* Unified compact body (M, Q, Jz) -- superposes grav + Coulomb + frame
      * dragging in one background.  The classic metrics are special cases. */
     for (const bg of scn.background) {
-        c.setBackgroundBody(s, bg.x, bg.y, bg.GM ?? 0, bg.Q ?? 0, bg.Jz ?? 0, bg.epsilon);
+        c.setBackgroundBody(s, bg.x, bg.y, bg.GM ?? 0, bg.Q ?? 0, bg.Jz ?? 0, bg.gFactor ?? 2, bg.epsilon);
     }
 
     scn.particles.forEach((p, i) => {

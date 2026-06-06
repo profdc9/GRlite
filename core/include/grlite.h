@@ -875,18 +875,27 @@ void gr_sim_set_background_point_charge(gr_sim_t* sim,
  *   mass GM         -> Phi_g^bg  (gravitoelectric / Newtonian well)
  *   angular mom. Jz -> A_g^bg    (gravitomagnetic dipole / frame dragging)
  *   charge Q        -> phi^bg    (Coulomb)
+ *   Q + Jz + g_em   -> A_em^bg   (EM magnetic dipole of the spinning charge)
  *
  * In this LINEARIZED GEM+EM simulator the potentials superpose, so this is
  * exactly the sum of set_background_point_mass + the spinning A_g + the
- * point-charge phi (no clearing between them).  It is the weak-field analog
- * of Kerr-Newman: (GM,0,0)=Schwarzschild, (GM,Q,0)=Reissner-Nordstrom,
- * (GM,0,Jz)=Kerr, (GM,Q,Jz)=Kerr-Newman.  NOT the exact metric: no horizon /
- * ergosphere / strong-field nonlinearity.  The magnetic dipole of a spinning
- * charge is intentionally NOT included.  Works in both bg modes (analytic
- * evaluators recognize GR_BG_KIND_COMPACT_BODY). */
+ * point-charge phi + the magnetic dipole (no clearing between them).  It is
+ * the weak-field analog of Kerr-Newman: (GM,0,0)=Schwarzschild,
+ * (GM,Q,0)=Reissner-Nordstrom, (GM,0,Jz)=Kerr, (GM,Q,Jz)=Kerr-Newman.  NOT
+ * the exact metric: no horizon / ergosphere / strong-field nonlinearity.
+ *
+ * The EM magnetic dipole comes from the magnetic moment
+ *   mu_z = g_em * (Q / 2M) * Jz   (standard gyromagnetic relation;
+ *        = g_em * Q * Jz * G_eff / (2 * GM)  since the param GM = G_eff*M),
+ * with A_em = (k_e mu_z / c^2) (z_hat x r)/s^{3/2}, mirroring A_g.  g_em is the
+ * gyromagnetic ratio: 2 reproduces Kerr-Newman (mu = Q J / M); 0 disables the
+ * EM magnetic field.  Requires GM != 0 (moment undefined for a massless body).
+ *
+ * Works in both bg modes (analytic evaluators recognize GR_BG_KIND_COMPACT_BODY). */
 void gr_sim_set_background_body(gr_sim_t* sim,
                                 float x0, float y0,
-                                float GM, float Q, float Jz, float epsilon);
+                                float GM, float Q, float Jz,
+                                float g_em, float epsilon);
 
 /* ----------------------------------------------------------------------------
  * Background evaluation mode
