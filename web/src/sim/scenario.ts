@@ -14,8 +14,10 @@ export type ForceInterpName = 'legacy' | 'lewis-birdsall';
 export type OuterBCName = 'dirichlet' | 'neumann';
 export type InitMethod = 'lw-settled' | 'lw' | 'none';
 export type BgModeName = 'sampled' | 'analytic';
-/* Which part of a field the visualizations (colormap + vector overlay) show. */
-export type FieldSourceName = 'perturbation' | 'background' | 'sum' | 'none';
+/* Which part of a field the visualizations (colormap + vector overlay) show.
+ * (Turning the colormap OFF entirely is the 'none' entry of FIELD_VIEWS, not a
+ * source -- the source picks WHICH data to draw when something is drawn.) */
+export type FieldSourceName = 'perturbation' | 'background' | 'sum';
 
 export interface GridSpec {
     W: number; H: number; dx: number; cEff: number; cfl: number;
@@ -72,8 +74,16 @@ export interface GlobalSpec {
 }
 
 export interface BackgroundSpec {
-    type: 'point-mass' | 'spinning-mass';
-    x: number; y: number; GM: number; epsilon: number; Jz?: number;
+    type: 'point-mass' | 'spinning-mass' | 'point-charge';
+    x: number; y: number; epsilon: number;
+    /* Gravitational mass (point-mass / spinning-mass). */
+    GM: number;
+    /* Angular momentum (spinning-mass) -> gravitomagnetic A_g. */
+    Jz?: number;
+    /* Electric charge (point-charge) -> Coulomb phi^bg.  Note the C setters
+     * are mutually exclusive (each clears any prior background), so one
+     * background body is gravitational OR electric, not both. */
+    Q?: number;
 }
 
 export interface ParticleSpec {

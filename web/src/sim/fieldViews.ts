@@ -20,7 +20,7 @@ import {
     GR_FIELD_PHI_EM, GR_FIELD_A_X, GR_FIELD_A_Y,
 } from './config';
 
-type ViewMode = 'scalar' | 'curl' | 'gradmag';
+type ViewMode = 'scalar' | 'curl' | 'gradmag' | 'none';
 
 export interface FieldView {
     label: string;
@@ -37,7 +37,13 @@ export const FIELD_VIEWS: FieldView[] = [
     { label: 'A_g,y  (grav vector pot.)', mode: 'scalar', a: GR_FIELD_A_GY },
     { label: 'φ_em  (electric potential)', mode: 'scalar', a: GR_FIELD_PHI_EM },
     { label: 'B_z  (magnetic, curl A)', mode: 'curl', a: GR_FIELD_A_X, b: GR_FIELD_A_Y },
+    { label: '— none (black) —', mode: 'none', a: -1 },
 ];
+
+/* Whether the selected view draws a colormap at all ('none' => black). */
+export function colormapEnabled(viewIndex: number): boolean {
+    return (FIELD_VIEWS[viewIndex] ?? FIELD_VIEWS[0]).mode !== 'none';
+}
 
 /* 2D vector fields drawable as an arrow overlay.  'components' takes (a,b)
  * directly as (Vx,Vy); 'gradient' forms V = -∇(a) from a scalar.  Index 0 is
@@ -107,6 +113,7 @@ export function computeView(world: World, viewIndex: number,
                            source: FieldSourceName = 'perturbation'): Float32Array {
     const view = FIELD_VIEWS[viewIndex] ?? FIELD_VIEWS[0];
     const W = world.W, H = world.H;
+    if (view.mode === 'none') return zeros(W * H);
     if (view.mode === 'scalar') return sourced(world, view.a, source, 0);
 
     const dst = out(W * H);

@@ -52,6 +52,8 @@ export function applyScenario(world: World, scn: Scenario): void {
     for (const bg of scn.background) {
         if (bg.type === 'spinning-mass') {
             c.setBackgroundSpinningPointMass(s, bg.x, bg.y, bg.GM, bg.epsilon, bg.Jz ?? 0);
+        } else if (bg.type === 'point-charge') {
+            c.setBackgroundPointCharge(s, bg.x, bg.y, bg.Q ?? 0, bg.epsilon);
         } else {
             c.setBackgroundPointMass(s, bg.x, bg.y, bg.GM, bg.epsilon);
         }

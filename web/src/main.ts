@@ -11,7 +11,7 @@ import { wireControls } from './ui/controls';
 import { Inspector } from './ui/inspector';
 import { FieldPass } from './render/fieldPass';
 import { Overlay2D, createTrails, type Trails } from './render/overlay2d';
-import { computeView, computeVectorField } from './sim/fieldViews';
+import { computeView, computeVectorField, colormapEnabled } from './sim/fieldViews';
 import { fullReport, stabilityProbe } from './dev/diagnostics';
 import { STEPS_PER_FRAME } from './sim/config';
 import { applyScenario } from './sim/build';
@@ -206,7 +206,7 @@ async function main(): Promise<void> {
         gl!.viewport(0, 0, canvas.width, canvas.height);
         gl!.clearColor(0, 0, 0, 1);
         gl!.clear(gl!.COLOR_BUFFER_BIT);
-        if (state.viewSource !== 'none') {
+        if (colormapEnabled(state.viewField)) {
             if (recompute) cmCache = computeView(world, state.viewField, state.viewSource);
             fieldPass.render(cmCache!);
         } else {
@@ -214,7 +214,7 @@ async function main(): Promise<void> {
         }
 
         if (recompute) {
-            vecCache = (state.vectorField > 0 && state.viewSource !== 'none')
+            vecCache = state.vectorField > 0
                 ? computeVectorField(world, state.vectorField, state.viewSource)
                 : null;
         }
