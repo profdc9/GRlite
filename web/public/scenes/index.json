@@ -5,6 +5,7 @@
     { "file": "pic_constant_v", "label": "constant velocity (boosted field)" },
     { "file": "pic_binary_em", "label": "charged binary (EM)" },
     { "file": "pic_three_body", "label": "three-body (equilateral)" },
-    { "file": "pic_gyroscope", "label": "frame-dragging gyroscopes" }
+    { "file": "pic_gyroscope", "label": "frame-dragging gyroscopes" },
+    { "file": "pic_coulomb_bg", "label": "charge in Coulomb background" }
   ]
 }

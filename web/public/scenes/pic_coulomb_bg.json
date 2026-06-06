@@ -1,0 +1,42 @@
+{
+  "program": "grlite",
+  "format": "grlite-scenario",
+  "version": 1,
+  "name": "test charge in Coulomb background",
+  "grid": { "W": 256, "H": 256, "dx": 1.0, "cEff": 1.0, "cfl": 0.7071067811865476 },
+  "global": {
+    "gEff": 1.0,
+    "kE": 1.0,
+    "shape": "bump",
+    "kernelRadius": 8,
+    "forceInterp": "lewis-birdsall",
+    "absorber": { "outerBC": "dirichlet", "frictionFloor": 0.0, "frictionWall": 0.02, "frictionDepth": 32, "zeroMeanScalar": false },
+    "init": { "method": "none", "settleSteps": 0 },
+    "switches": {
+      "gravitomagneticForce": false,
+      "gravitomagneticInductive": false,
+      "emLorentz": true,
+      "emInductive": false,
+      "emElectrostatic": true,
+      "emMagnetic": false,
+      "emStressEnergy": false,
+      "emShapiro": false,
+      "fieldEvolution": false,
+      "particleSourceDeposition": false,
+      "esirkepov": false,
+      "periodicBC": false
+    },
+    "rhoSmooth": 0,
+    "jSmooth": 0,
+    "bgMode": "analytic",
+    "selfFieldDefault": false,
+    "noRadiation": false
+  },
+  "background": [
+    { "type": "point-charge", "x": 127.5, "y": 127.5, "Q": 1.0, "epsilon": 4.0, "GM": 0.0 }
+  ],
+  "particles": [
+    { "x": 157.5, "y": 127.5, "vx": 0.0, "vy": 0.1802, "mass": 0.01, "charge": -0.01 }
+  ],
+  "view": { "field": 5, "showTrails": true, "showVelocity": true, "source": "background", "vectorField": 4, "vectorSpacing": 12 }
+}
