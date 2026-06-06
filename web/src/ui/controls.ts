@@ -19,6 +19,8 @@ export interface Controls {
     setStatus: (text: string) => void;
     setTrails: (on: boolean) => void;
     setField: (index: number) => void;
+    setScenarios: (items: { value: string; label: string }[], selected?: string) => void;
+    setScenario: (value: string) => void;
 }
 
 export function wireControls(h: ControlHandlers): Controls {
@@ -57,5 +59,15 @@ export function wireControls(h: ControlHandlers): Controls {
         setStatus: (text) => { statusEl.textContent = text; },
         setTrails: (on) => { trailsBtn.textContent = `trails: ${on ? 'on' : 'off'}`; },
         setField: (index) => { fieldSel.value = String(index); },
+        setScenarios: (items, selected) => {
+            scenarioSel.innerHTML = '';
+            for (const it of items) {
+                const o = document.createElement('option');
+                o.value = it.value; o.textContent = it.label;
+                scenarioSel.appendChild(o);
+            }
+            if (selected !== undefined) scenarioSel.value = selected;
+        },
+        setScenario: (value) => { scenarioSel.value = value; },
     };
 }

@@ -1,0 +1,6 @@
+{
+  "scenes": [
+    { "file": "pic_binary", "label": "binary orbit (two-body)" },
+    { "file": "pic_static", "label": "single stationary mass" }
+  ]
+}

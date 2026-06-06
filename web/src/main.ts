@@ -73,6 +73,7 @@ async function main(): Promise<void> {
             const res = await fetch(`/scenes/${name}.json`, { cache: 'no-cache' });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             loadScenario(validate(await res.json()));
+            controls.setScenario(name);
         } catch (e) {
             const msg = `failed to load /scenes/${name}.json: ${(e as Error).message}`;
             console.error(msg);
@@ -115,6 +116,21 @@ async function main(): Promise<void> {
         const py = (ev.clientY - r.top) * (overlayCanvas.height / r.height);
         state.selected = overlay.pick(px, py, world.particles());
     });
+
+    /* Populate the scenario dropdown from the library manifest (the JSON
+     * files define what's available; no hard-coded option list). */
+    {
+        let scenes: { value: string; label: string }[] = [];
+        try {
+            const res = await fetch('/scenes/index.json', { cache: 'no-cache' });
+            if (res.ok) {
+                const m = await res.json() as { scenes?: { file: string; label?: string }[] };
+                scenes = (m.scenes ?? []).map((s) => ({ value: s.file, label: s.label ?? s.file }));
+            }
+        } catch (e) { console.warn('scene manifest fetch failed:', (e as Error).message); }
+        if (scenes.length === 0) scenes = [{ value: DEFAULT_SCENARIO, label: DEFAULT_SCENARIO }];
+        controls.setScenarios(scenes, DEFAULT_SCENARIO);
+    }
 
     /* Initial scenario: URL hash if present, else the default library file. */
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
