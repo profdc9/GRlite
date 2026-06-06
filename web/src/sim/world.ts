@@ -136,4 +136,27 @@ export class World {
         for (let i = 0; i < n; i++) out.push(this.particle(i));
         return out;
     }
+
+    /* Live-edit a particle by writing the WASM heap view directly.  The
+     * gr_particle_t fields are plain floats, so this needs no C export; the
+     * pusher picks up the new values on the next step.  Caller is
+     * responsible for flagging the run as live-modified (not reproducible). */
+    setParticleFields(i: number, f: Partial<{
+        x: number; y: number; px: number; py: number;
+        mass: number; charge: number;
+        spin: number; phiSpin: number; gFactor: number;
+    }>): void {
+        const v = this.particleView(i);
+        if (f.x !== undefined) v[0] = f.x;
+        if (f.y !== undefined) v[1] = f.y;
+        if (f.px !== undefined) v[2] = f.px;
+        if (f.py !== undefined) v[3] = f.py;
+        if (f.mass !== undefined) v[4] = f.mass;
+        if (f.charge !== undefined) v[5] = f.charge;
+        if (this.stride >= 10) {
+            if (f.spin !== undefined) v[7] = f.spin;
+            if (f.phiSpin !== undefined) v[8] = f.phiSpin;
+            if (f.gFactor !== undefined) v[9] = f.gFactor;
+        }
+    }
 }

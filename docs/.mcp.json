@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "grlite-bridge": {
+      "command": "node",
+      "args": ["C:/Users/dmarks/Documents/cursor/GRlite/tools/grlite-bridge/server.mjs"]
+    }
+  }
+}

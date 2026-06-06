@@ -37,7 +37,10 @@ async function main(): Promise<void> {
     const core = await loadCore();
     const world = new World(core);
 
-    const gl = canvas.getContext('webgl2', { antialias: true, premultipliedAlpha: false });
+    /* preserveDrawingBuffer so the debug bridge's screenshot (canvas.toDataURL)
+     * captures the rendered frame rather than a cleared buffer. */
+    const gl = canvas.getContext('webgl2',
+        { antialias: true, premultipliedAlpha: false, preserveDrawingBuffer: true });
     if (!gl) throw new Error('WebGL2 not available');
     const fieldPass = new FieldPass(gl, world.W, world.H);
     const overlay = new OverlayPass(gl, world.W, world.H,
@@ -61,6 +64,19 @@ async function main(): Promise<void> {
     controls.setStatus(`building ${state.scenario}…`);
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
     rebuild(state.scenario);
+
+    /* Debug bridge (dev only): connect to the grlite-bridge MCP server so
+     * the agent can query/drive this exact running instance.  Dynamic import
+     * + DEV guard keeps it out of production bundles. */
+    if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
+        const { startBridge } = await import('./dev/bridge');
+        startBridge({
+            world, state, canvas,
+            setStatus: controls.setStatus,
+            setPaused: controls.setPaused,
+            rebuild,
+        });
+    }
 
     function frame(): void {
         if (!state.paused || state.singleStep) {
