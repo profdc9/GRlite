@@ -3,6 +3,7 @@
     { "file": "pic_binary", "label": "binary orbit (two-body)" },
     { "file": "pic_static", "label": "single stationary mass" },
     { "file": "pic_constant_v", "label": "constant velocity (boosted field)" },
-    { "file": "pic_binary_em", "label": "charged binary (EM)" }
+    { "file": "pic_binary_em", "label": "charged binary (EM)" },
+    { "file": "pic_three_body", "label": "three-body (equilateral)" }
   ]
 }

@@ -1,0 +1,41 @@
+{
+  "program": "grlite",
+  "format": "grlite-scenario",
+  "version": 1,
+  "name": "three-body (equilateral)",
+  "grid": { "W": 384, "H": 384, "dx": 1.0, "cEff": 1.0, "cfl": 0.7071067811865476 },
+  "global": {
+    "gEff": 1.0,
+    "kE": 1.0,
+    "shape": "bump",
+    "kernelRadius": 8,
+    "forceInterp": "lewis-birdsall",
+    "absorber": { "outerBC": "dirichlet", "frictionFloor": 0.0, "frictionWall": 0.02, "frictionDepth": 48, "zeroMeanScalar": false },
+    "init": { "method": "lw-settled", "settleSteps": 384 },
+    "switches": {
+      "gravitomagneticForce": true,
+      "gravitomagneticInductive": false,
+      "emLorentz": true,
+      "emInductive": true,
+      "emElectrostatic": true,
+      "emMagnetic": true,
+      "emStressEnergy": false,
+      "emShapiro": false,
+      "fieldEvolution": true,
+      "particleSourceDeposition": true,
+      "esirkepov": true,
+      "periodicBC": false
+    },
+    "rhoSmooth": 0,
+    "jSmooth": 0,
+    "selfFieldDefault": true,
+    "noRadiation": false
+  },
+  "background": [],
+  "particles": [
+    { "x": 191.5,   "y": 209.5, "vx": -0.143,  "vy": 0.0,      "mass": 0.01, "charge": 0.0 },
+    { "x": 175.912, "y": 182.5, "vx": 0.0715,  "vy": -0.123838, "mass": 0.01, "charge": 0.0 },
+    { "x": 207.088, "y": 182.5, "vx": 0.0715,  "vy": 0.123838,  "mass": 0.01, "charge": 0.0 }
+  ],
+  "view": { "field": 0, "showTrails": true, "showVelocity": true }
+}
