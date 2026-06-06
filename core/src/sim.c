@@ -601,44 +601,49 @@ void gr_sim_step(gr_sim_t* sim) {
          * are -1 (marginal) and -(1-beta)/(1+beta) (stable), so unlike
          * a post-step bleed on prev (which destabilizes the Nyquist
          * mode at CFL = 1/sqrt(2)), this form is stable for any beta. */
-        if (sim->friction_d) {
-            const float* beta = sim->friction_d;
-            const size_t ncells = (size_t) sim->width * (size_t) sim->height;
+        const size_t ncells_fr = (size_t) sim->width * (size_t) sim->height;
+        const float* beta = sim->friction_d;   /* may be NULL */
+
+        /* Friction on the collective's freshly-computed `next`, before rotate. */
+        if (beta) {
             for (int f = 0; f < GR_FIELD_COUNT; f++) {
                 float* prev = sim->fields[f].prev;
                 float* next = sim->fields[f].next;
-                for (size_t k = 0; k < ncells; k++) {
+                for (size_t k = 0; k < ncells_fr; k++)
                     next[k] = (next[k] + beta[k] * prev[k]) / (1.0f + beta[k]);
-                }
-            }
-            if (sim->self_field_sets) {
-                for (int pi = 0; pi < sim->n_particles; pi++) {
-                    gr_self_field_set_t* sf = sim->self_field_sets[pi];
-                    if (!sf) continue;
-                    for (int f = 0; f < GR_FIELD_COUNT; f++) {
-                        float* prev = sf->fields[f].prev;
-                        float* next = sf->fields[f].next;
-                        for (size_t k = 0; k < ncells; k++) {
-                            next[k] = (next[k] + beta[k] * prev[k]) / (1.0f + beta[k]);
-                        }
-                    }
-                }
             }
         }
 
-        /* Three-pointer rotation per field. */
+        /* Three-pointer rotation per field (collective). */
         for (int f = 0; f < GR_FIELD_COUNT; f++) {
             float* tmp           = sim->fields[f].prev;
             sim->fields[f].prev  = sim->fields[f].curr;
             sim->fields[f].curr  = sim->fields[f].next;
             sim->fields[f].next  = tmp;
         }
-        /* v39: step + rotate each per-particle self-field set. */
+
+        /* v39: step each per-particle self-field set, applying the SAME
+         * friction to its freshly-computed `next` before rotating.
+         *
+         * FIX: previously the self-set friction ran in the block above --
+         * before gr_field_leapfrog_step_self had computed `next` -- so it
+         * damped a stale buffer that step_self then overwrote.  The self
+         * sets therefore got NO friction while the collective did, so the
+         * two diverged and a lone particle kept a residual self-force.
+         * Applying friction here (post-step_self) keeps collective == self. */
         if (sim->self_field_sets) {
             for (int pi = 0; pi < sim->n_particles; pi++) {
                 gr_self_field_set_t* sf = sim->self_field_sets[pi];
                 if (!sf) continue;
                 gr_field_leapfrog_step_self(sim, sf);
+                if (beta) {
+                    for (int f = 0; f < GR_FIELD_COUNT; f++) {
+                        float* prev = sf->fields[f].prev;
+                        float* next = sf->fields[f].next;
+                        for (size_t k = 0; k < ncells_fr; k++)
+                            next[k] = (next[k] + beta[k] * prev[k]) / (1.0f + beta[k]);
+                    }
+                }
                 for (int f = 0; f < GR_FIELD_COUNT; f++) {
                     float* tmp          = sf->fields[f].prev;
                     sf->fields[f].prev  = sf->fields[f].curr;
@@ -875,6 +880,39 @@ void gr_sim_relax_phi_g_poisson(gr_sim_t* sim, int n_iters) {
  * Velocity is taken as v = p / (gamma m), matching the deposit code's
  * convention.  Particles with m == 0 contribute nothing to Phi_g/A_g;
  * particles with q == 0 contribute nothing to phi/A. */
+/* Apply the boundary taper (if any) and lock prev=curr=next on a set of
+ * potential fields.  Used for BOTH the collective sim->fields and each
+ * per-particle self-field set, so a single particle's self set carries the
+ * SAME L-W as its collective contribution -> exact self-force cancellation
+ * (the difference field collective-self starts at 0 and, being source-free,
+ * stays 0). */
+static void lw_taper_and_lock(gr_field_state_t* fields, int W, int H,
+                              int taper_inner, int taper_outer) {
+    const size_t ncells = (size_t) W * (size_t) H;
+    if (taper_inner > 0 && taper_inner > taper_outer) {
+        const float tw = (float)(taper_inner - taper_outer);
+        for (int j = 0; j < H; j++) {
+            int dy = j; if (H - 1 - j < dy) dy = H - 1 - j;
+            const int row = j * W;
+            for (int i = 0; i < W; i++) {
+                int dxi = i; if (W - 1 - i < dxi) dxi = W - 1 - i;
+                const int depth = (dxi < dy) ? dxi : dy;
+                if (depth >= taper_inner) continue;
+                float taper;
+                if (depth <= taper_outer) taper = 0.0f;
+                else { const float u = (float)(taper_inner - depth) / tw; taper = 1.0f - u * u; }
+                const int k = row + i;
+                for (int f = 0; f < GR_FIELD_COUNT; f++)
+                    if (fields[f].curr) fields[f].curr[k] *= taper;
+            }
+        }
+    }
+    for (int f = 0; f < GR_FIELD_COUNT; f++) {
+        if (fields[f].curr && fields[f].prev) memcpy(fields[f].prev, fields[f].curr, ncells * sizeof(float));
+        if (fields[f].curr && fields[f].next) memcpy(fields[f].next, fields[f].curr, ncells * sizeof(float));
+    }
+}
+
 void gr_sim_init_potentials_lienard_wiechert_with_taper(gr_sim_t* sim,
                                                          int taper_inner,
                                                          int taper_outer) {
@@ -926,6 +964,26 @@ void gr_sim_init_potentials_lienard_wiechert_with_taper(gr_sim_t* sim,
         const float kqA  = -sc_em   * inv_2pi * inv_c2 * p->charge;
         const int do_m = (p->mass   != 0.0f);
         const int do_q = (p->charge != 0.0f);
+
+        /* If this particle has a self-field set, seed it with this particle's
+         * OWN L-W contribution (zero it first, then accumulate just this
+         * particle below).  Makes collective == self for the lone particle. */
+        gr_self_field_set_t* self = (sim->self_field_sets) ? sim->self_field_sets[pi] : NULL;
+        float *sg = NULL, *sgx = NULL, *sgy = NULL, *se = NULL, *sx = NULL, *sy = NULL;
+        if (self) {
+            sg  = self->fields[GR_FIELD_PHI_GRAV].curr;
+            sgx = self->fields[GR_FIELD_A_GX].curr;
+            sgy = self->fields[GR_FIELD_A_GY].curr;
+            se  = self->fields[GR_FIELD_PHI_EM].curr;
+            sx  = self->fields[GR_FIELD_A_X].curr;
+            sy  = self->fields[GR_FIELD_A_Y].curr;
+            memset(sg,  0, ncells * sizeof(float));
+            memset(sgx, 0, ncells * sizeof(float));
+            memset(sgy, 0, ncells * sizeof(float));
+            memset(se,  0, ncells * sizeof(float));
+            memset(sx,  0, ncells * sizeof(float));
+            memset(sy,  0, ncells * sizeof(float));
+        }
 
         /* Per-particle boundary-mean subtraction.  The 2D log GROWS toward
          * the wall: ln|x-x_p| ~ ln(R_wall) >> the near-field structure, so
@@ -990,14 +1048,14 @@ void gr_sim_init_potentials_lienard_wiechert_with_taper(gr_sim_t* sim,
                 const float lr = logf(r) - bmean;   /* boundary-mean-subtracted */
                 const int k = row + i;
                 if (do_m) {
-                    phi_g[k] += kg  * lr;
-                    a_gx[k]  += kgA * vx * lr;
-                    a_gy[k]  += kgA * vy * lr;
+                    const float vg = kg * lr, vgx = kgA * vx * lr, vgy = kgA * vy * lr;
+                    phi_g[k] += vg;  a_gx[k] += vgx;  a_gy[k] += vgy;
+                    if (self) { sg[k] += vg;  sgx[k] += vgx;  sgy[k] += vgy; }
                 }
                 if (do_q) {
-                    phi_e[k] += kqe * lr;
-                    a_x[k]   += kqA * vx * lr;
-                    a_y[k]   += kqA * vy * lr;
+                    const float ve = kqe * lr, vax = kqA * vx * lr, vay = kqA * vy * lr;
+                    phi_e[k] += ve;  a_x[k] += vax;  a_y[k] += vay;
+                    if (self) { se[k] += ve;  sx[k] += vax;  sy[k] += vay; }
                 }
             }
         }
@@ -1023,44 +1081,15 @@ void gr_sim_init_potentials_lienard_wiechert_with_taper(gr_sim_t* sim,
      * zero field between the taper and the absorber -- useful as a
      * diagnostic for whether the boundary handling is responsible for
      * residual oscillation. */
-    if (taper_inner > 0 && taper_inner > taper_outer) {
-        const float taper_width = (float)(taper_inner - taper_outer);
-        for (int j = 0; j < H; j++) {
-            int dy = j;
-            if (H - 1 - j < dy) dy = H - 1 - j;
-            const int row = j * W;
-            for (int i = 0; i < W; i++) {
-                int dxi = i;
-                if (W - 1 - i < dxi) dxi = W - 1 - i;
-                const int depth = (dxi < dy) ? dxi : dy;
-                if (depth >= taper_inner) continue;
-                float taper;
-                if (depth <= taper_outer) {
-                    taper = 0.0f;
-                } else {
-                    const float u = (float)(taper_inner - depth) / taper_width;
-                    taper = 1.0f - u * u;
-                }
-                const int k = row + i;
-                phi_g[k] *= taper;
-                a_gx[k]  *= taper;
-                a_gy[k]  *= taper;
-                phi_e[k] *= taper;
-                a_x[k]   *= taper;
-                a_y[k]   *= taper;
-            }
+    /* Taper (if any) + lock prev=curr=next, for the collective field AND
+     * every per-particle self-field set, so collective and self carry the
+     * identical L-W and the self-force cancels exactly. */
+    lw_taper_and_lock(sim->fields, W, H, taper_inner, taper_outer);
+    if (sim->self_field_sets) {
+        for (int pi = 0; pi < sim->n_particles; pi++) {
+            gr_self_field_set_t* self = sim->self_field_sets[pi];
+            if (self) lw_taper_and_lock(self->fields, W, H, taper_inner, taper_outer);
         }
-    }
-
-    /* Lock as static: zero the wave-equation time derivative on every
-     * potential.  prev = curr means no implicit d/dt; next = curr keeps
-     * the next-buffer consistent with the rotation that gr_sim_step
-     * applies after each leapfrog. */
-    for (int f = 0; f < 6; f++) {
-        if (sim->fields[f].curr && sim->fields[f].prev)
-            memcpy(sim->fields[f].prev, sim->fields[f].curr, ncells * sizeof(float));
-        if (sim->fields[f].curr && sim->fields[f].next)
-            memcpy(sim->fields[f].next, sim->fields[f].curr, ncells * sizeof(float));
     }
 }
 
