@@ -65,6 +65,11 @@
 \newcommand{\dd}{\mathrm{d}}
 \newcommand{\half}{\tfrac{1}{2}}
 
+% Numbered algorithm steps (mirrors gr_sandbox_v38.tex).
+\newlist{algsteps}{enumerate}{1}
+\setlist[algsteps]{label=\textbf{Step \arabic*.}, leftmargin=*,
+                   labelwidth=5em, itemsep=6pt}
+
 %--------------------------------------------------------------------
 \begin{document}
 %--------------------------------------------------------------------
@@ -105,6 +110,25 @@ the interactive web demo against the v40/v41 simulator core:
 The discrete stability analysis of the centered-implicit friction
 form (which the post-step ``bleed'' form is \emph{not}) is included
 because the result is non-trivial and easy to get wrong.
+\end{shaded}
+
+\begin{shaded}
+\textbf{Revision 2 (2026-06-05).}  Corrections from running the demo
+end-to-end, marked inline as ``Revision 2'' boxes and collected in
+\S\ref{sec:status}:
+\begin{enumerate}[leftmargin=*,nosep]
+  \item Field init uses a per-particle \emph{boundary-mean subtraction}
+    (a gauge shift) plus a \emph{frozen-friction settle}, not the
+    multiplicative taper of the first draft (which distorts gradients).
+  \item The friction absorber uses a \emph{zero interior floor}
+    (wall-ramp only) for dynamics: a nonzero floor damps the
+    time-varying orbital near-field of moving sources and causes a
+    numerical inspiral.
+  \item The pic\_binary COM drift was a \emph{TSC deposition} artifact,
+    fixed by the \emph{BUMP $R=8$} kernel -- not, as first conjectured,
+    the init transient.  The near-circular orbit also needs the
+    discrete-force velocity calibration $v_\text{factor}\approx 1.05$.
+\end{enumerate}
 \end{shaded}
 
 \tableofcontents
@@ -214,26 +238,60 @@ nearby cells.  The clipped value is not the discrete 5-point Poisson
 solution -- see \S\ref{sec:lw_discrete} -- but the residual mismatch is
 handled by the friction absorber introduced below.
 
-\subsubsection*{Boundary taper}
+\subsubsection*{Boundary-mean subtraction (supersedes the taper)}
 
-If the outer wall enforces zero-Dirichlet (the v38 convention, kept
-here for reasons discussed in \S\ref{sec:dc_mode}), the L-W field at
-the wall is nonzero and inconsistent with the BC.  Multiply the L-W
-field through the absorbing zone by a smooth taper that brings it to
-zero at the wall:
+\begin{shaded}
+\textbf{Revision 2 (2026-06-05).}  An earlier draft of this addendum
+multiplied the L-W field by a smooth taper $T(d)$ to bring it to zero
+through the absorbing zone.  That taper is \emph{not} gauge-clean --
+multiplying the field distorts its gradient (hence the force) inside
+the ring -- and it is no longer used.  It is replaced by the
+boundary-mean subtraction below.
+\end{shaded}
+
+Under zero-Dirichlet the bare L-W field is large and \emph{positive} at
+the wall: the 2D log \emph{grows} outward, so $\Phi(\text{wall}) \sim
+-(s_c/2\pi)\,m\,\ln R_\text{wall}$, which for the binary exceeds the
+near-field well depth by a factor $\sim 7$--$15$.  Forcing that to zero
+is the dominant startup transient.
+
+The fix is a pure \emph{gauge} shift: for each particle $i$, subtract
+the mean of $\ln r$ over the boundary ring from that particle's
+contribution before accumulating it,
 \begin{equation}
-  \Phi(\vv{x}) \;\leftarrow\; T(d(\vv{x}))\,\Phi(\vv{x}),
-  \qquad
-  T(d) \;=\;
-  \begin{cases}
-    1 & d \ge N_\text{damp} \\
-    1 - u^2,\; u = (N_\text{damp} - d)/N_\text{damp} & 0 < d < N_\text{damp} \\
-    0 & d \le 0
-  \end{cases}
+  \ln|\vv{x}-\vv{x}_i| \;\longrightarrow\;
+  \ln|\vv{x}-\vv{x}_i| \;-\; \big\langle \ln|\vv{x}_b - \vv{x}_i|\big\rangle_{b\,\in\,\partial\Omega},
 \end{equation}
-where $d(\vv{x})$ is the cell-count distance from the nearest wall.
-This matches the polynomial $m=2$ damping profile of \S 9.6.  Under
-Neumann BC the taper must be \emph{omitted}; see \S\ref{sec:dc_mode}.
+applied uniformly to all six fields (the scalar shift maps to $\Ag,
+\vv{A}$ through the same $\vv{v}/c^2$ factor).  Because it is a constant
+per particle, it changes no gradient and hence no force anywhere.  The
+summed field then has zero mean on the boundary ring -- consistent with
+the Dirichlet fixed point -- removing $\sim 93\%$ of the boundary
+mismatch (the residual is the $\sim 7\%$ spatial variation of $\ln r$
+around the ring, $\ln\sqrt2 / \ln R_\text{wall}$, which a constant
+cannot remove).  Under Neumann BC the subtraction is harmless but
+unnecessary.
+
+\subsubsection*{Frozen-particle friction settle}
+
+The boundary-mean L-W is a close \emph{initial guess} but still differs
+from the discrete fixed point by the near-source discrete-vs-continuum
+mismatch (\S\ref{sec:lw_discrete}, $\sim 4\%$ peak).  Relax it to the
+fixed point by iterating the field with the particles \emph{frozen} and
+the friction absorber on (\texttt{gr\_sim\_init\_potentials\_settled}):
+positions and velocities are pinned, so the sources are constant and
+the wave equation -- now genuinely dissipative thanks to the friction
+of \S\ref{sec:friction} -- converges to the static solution.  This is
+the v38 \S 15.9 convergence iteration, which \emph{only works now} that
+friction damps the lowest mode (\S\ref{sec:friction}); the close L-W
+guess makes it converge in a few hundred steps.
+
+Measured (256$\times$256 \texttt{pic\_binary}): the symmetric binary's
+quarter-orbit total-momentum impulse falls from $2.3\times10^{-3}$ of
+$m v_\text{orb}$ with no settle to $\sim 3\times10^{-5}$ (round-off)
+with $\gtrsim 100$ settle steps.  Wall-ramp-only friction (no interior
+floor) settles equally well, so the settle does \emph{not} require an
+interior friction floor -- see the caution in \S\ref{sec:friction}.
 
 \subsubsection*{Leapfrog initialization at $t=0$}
 
@@ -325,7 +383,14 @@ spatial profile of $\gamma$.  In particular: a uniform friction floor
 $\gamma_0$ everywhere in the box damps all modes -- including the
 lowest standing mode, which has nonzero $\partial_t \Phi$ even though
 its spatial amplitude at the wall is small -- without shifting the
-equilibrium.
+\emph{static} equilibrium.
+
+\emph{Caveat (Revision 2):} ``damps all modes with nonzero
+$\partial_t\Phi$'' includes the legitimate, time-varying near-field of
+\emph{moving} sources.  A uniform interior floor therefore bleeds real
+orbital energy (numerical inspiral), so for dynamics the floor is set
+to zero and the absorber is wall-ramp-only; see \S\ref{sec:friction}
+``Per-cell profile''.
 
 \subsection{Mode-by-mode decay rate}
 
@@ -445,9 +510,8 @@ compatibility for tests that do not use the friction array.
 \subsection{Per-cell profile}
 
 The implementation stores $\beta_k = \gamma_k\,\dd t$ as a single
-floating-point array \texttt{friction\_d[k]}.  A practical profile is
-a small uniform floor plus a polynomial ramp to a larger value at
-the wall:
+floating-point array \texttt{friction\_d[k]}.  The profile is a
+polynomial ramp from an interior floor to a larger wall value:
 \begin{equation}
   \beta_k \;=\;
   \begin{cases}
@@ -455,18 +519,34 @@ the wall:
     \beta_\text{floor} + (\beta_\text{wall} - \beta_\text{floor})\,u^2,\; u = (N_\text{damp} - d_k)/N_\text{damp} & 0 \le d_k < N_\text{damp}
   \end{cases}
 \end{equation}
-with $d_k$ the cell-count distance from the nearest wall.  Sensible
-values for the web demo on a $384 \times 384$ grid with absorber
-depth $N_\text{damp} = 48$:
+with $d_k$ the cell-count distance from the nearest wall.
+
+\begin{shaded}
+\textbf{Revision 2 (2026-06-05): use $\beta_\text{floor} = 0$ (wall-ramp
+only) for dynamics.}  A nonzero interior floor was first chosen to damp
+the lowest standing mode everywhere.  But friction damps \emph{every}
+mode with nonzero $\partial_t\Phi$ -- including the legitimate,
+time-varying orbital near-field of moving sources.  A floor of $10^{-3}$
+bleeds the binary's orbital energy: a measurable numerical
+\emph{inspiral} ($\sim 13\%$ orbit shrink over 4 orbits in
+\texttt{pic\_binary}).  The interior floor is moreover unnecessary: with
+the boundary-mean L-W initial guess, the frozen-particle settle reaches
+the fixed point using the \emph{wall ramp alone} (the near-source
+residual radiates to the wall), and during dynamics there is no startup
+transient to trap.  The recommended values for the web demo
+($384\times384$, $N_\text{damp}=48$) are therefore
 \begin{equation}
-  \beta_\text{floor} \;=\; 10^{-3},
-  \qquad
-  \beta_\text{wall}  \;=\; 2 \times 10^{-2}.
+  \beta_\text{floor} \;=\; 0, \qquad \beta_\text{wall} \;=\; 2\times10^{-2}.
 \end{equation}
-Mode lifetimes: lowest standing mode $\sim 1000$ steps; modes
-localized within the ring $\sim 50$ steps.  At
-CFL $= 1/\sqrt{2}$ this is well inside the stability region for both
-the bulk and the wall.
+A small floor ($\sim 10^{-4}$) is acceptable if a particular scenario
+excites a persistent interior mode, at the cost of a correspondingly
+small inspiral; the default is $0$.
+\end{shaded}
+
+The wall ramp gives radiative wave packets several e-folds of
+attenuation across the ring; modes localized near the boundary decay in
+$\sim 50$ steps.  At CFL $= 1/\sqrt{2}$ this is well inside the
+stability region (\S\ref{sec:friction}, any $\beta \ge 0$).
 
 %--------------------------------------------------------------------
 \section{The DC mode under each boundary condition}
@@ -539,28 +619,32 @@ concerns.
 
 \begin{algsteps}
   \item Place all particles at their scenario IC positions and momenta.
-  \item Evaluate Eqs.~(\ref{eq:phig_lw})-(\ref{eq:A_lw}) at every grid
-    cell for every particle.  Clip $r$ at $\half\dd x$ to avoid the
-    log singularity at the source.
-  \item If the outer BC is Dirichlet, multiply through by the
-    polynomial-$m=2$ taper that brings the field smoothly to zero at
-    the wall over the depth of the absorbing zone.  If Neumann, do
-    not taper -- the discontinuity would launch an inward wave on
-    step 1.
+  \item For each particle, evaluate Eqs.~(\ref{eq:phig_lw})-(\ref{eq:A_lw})
+    at every grid cell, \emph{subtracting that particle's boundary-ring
+    mean of $\ln r$} from its contribution (gauge shift; all six fields).
+    Clip $r$ at $\half\dd x$ at the source.  This leaves the summed field
+    $\approx 0$ on the boundary ring, consistent with Dirichlet.  (No
+    multiplicative taper -- it distorts gradients.)
   \item Copy the resulting curr buffer into prev and next so the
     encoded time derivative is identically zero.
-  \item Begin the wave-equation evolution.  No half-step momentum
-    back-extrapolation is needed because the field is already at the
-    static fixed point.
+  \item Settle to the discrete fixed point: freeze the particles and
+    iterate the field $\sim\!\max(W,H)$ steps with the friction absorber
+    on (wall ramp suffices).  This sheds the near-source
+    discrete-vs-continuum residual; the momentum impulse on release
+    falls to round-off.  Reset \texttt{step\_count} to 0.
+  \item Release the particles and begin dynamics.  No half-step momentum
+    back-extrapolation is needed -- the field is already static.
 \end{algsteps}
 
 \subsection*{Replacement for v38 \S 9.6 (absorbing boundary layer)}
 
 \begin{algsteps}
   \item Allocate \texttt{friction\_d[k]} of size $W \times H$.
-  \item Populate with a tapered profile: $\beta_\text{floor}$ in the
-    interior, smoothly increasing to $\beta_\text{wall}$ over the
-    last $N_\text{damp}$ cells from each wall.
+  \item Populate with a \emph{wall-ramp-only} profile: $\beta_\text{floor}
+    = 0$ in the interior, rising as $\beta_\text{wall}\,u^2$ over the last
+    $N_\text{damp}$ cells from each wall.  Do \emph{not} use a nonzero
+    interior floor for dynamics -- it bleeds the orbital near-field energy
+    of moving sources (numerical inspiral).
   \item In \texttt{gr\_sim\_step}, after the standard leapfrog
     computes \texttt{next} for every field but \emph{before} the
     three-pointer rotation, apply the per-cell correction
@@ -575,36 +659,57 @@ concerns.
 
 %--------------------------------------------------------------------
 \section{Status \& open items}
+\label{sec:status}
 %--------------------------------------------------------------------
 
-\paragraph{What works.}  The friction absorber + Dirichlet + L-W
-initialization combination reaches a stable post-transient
-configuration on both pic\_static (single mass) and pic\_binary (two
-orbiting masses):
+\paragraph{What works (Revision 2, 2026-06-05).}  The combination
+\emph{boundary-mean L-W + frozen-friction settle + Dirichlet +
+wall-only friction + BUMP $R=8$ deposition + $v_\text{factor}=1.05$}
+gives a stable, near-circular, non-inspiraling, COM-pinned binary:
 \begin{itemize}[leftmargin=*,nosep]
-  \item Initial Dirichlet-induced inward wave from the L-W taper at
-    the wall damps within a few hundred steps.
-  \item No lowest-mode trap; no inversion oscillation.
-  \item The bound binary keeps orbiting after the transient.
-  \item Discrete-Dirichlet-Poisson static is reached and held.
+  \item No lowest-mode trap, no inversion oscillation, no startup
+    transient (boundary-mean + settle).
+  \item Center of mass pinned: $\max|\vv{p}_0+\vv{p}_1| \sim 4\times
+    10^{-4}\,m v_\text{orb}$ over many orbits.
+  \item Separation breathing $\sim 2\%$, secular growth $\approx 1.0$
+    (no numerical inspiral), stable through $\sim 8$ orbits.
+  \item Discrete static is reached and held.
 \end{itemize}
 
-\paragraph{Open follow-ups.}  Tracked separately:
+\paragraph{Resolved since Revision 1.}
 \begin{itemize}[leftmargin=*,nosep]
-  \item \emph{COM drift on pic\_binary.}  After the boundary transient
-    damps, the two-body center of mass moves at small constant
-    velocity.  Suspected cause: the transient imparts a momentum
-    impulse to the pair that is not exactly equal and opposite due
-    to sub-cell grid alignment of the particles.  Fix is to make the
-    L-W IC consistent with the discrete Dirichlet equilibrium so no
-    transient is launched, either via TSC-convolved L-W or via a few
-    SOR sweeps applied to the L-W as a smoother.
+  \item \emph{COM drift on pic\_binary} -- the first draft attributed
+    this to the L-W startup transient.  Measurement (pre-settling the
+    field to its exact fixed point did \emph{not} reduce it) showed the
+    dominant cause was instead the \textbf{TSC deposition kernel}.
+    \textbf{BUMP $R=8$} pins the COM ($\sim 3700\times$ smaller drift
+    than TSC).  Self-field subtraction is \emph{not} needed for this.
+  \item \emph{Orbit breathing} -- two compounding causes, both fixed:
+    (a) the interior friction floor was bleeding orbital energy (now
+    wall-ramp-only friction, \S\ref{sec:friction}); (b) a genuine
+    discrete-vs-continuum velocity calibration -- the discrete force
+    during motion is $\sim 8\%$ stronger than the continuum
+    $\sqrt{G_\text{eff} m}$, so the matched circular speed is
+    $v_\text{factor} \approx 1.05$.  Note the \emph{rest}-measured force
+    ratio (1.20) overshoots; the moving optimum must be found by
+    minimizing breathing, because the velocity-dependent
+    (gravitomagnetic / inductive) forces reduce the effective inward
+    force during motion.
+\end{itemize}
+
+\paragraph{Open follow-ups.}
+\begin{itemize}[leftmargin=*,nosep]
   \item \emph{Continuum-discrete Poisson residual.}  See
-    \S\ref{sec:lw_discrete}.  Currently dissipated by friction; could
-    be eliminated by TSC-convolved L-W.
+    \S\ref{sec:lw_discrete}.  Currently shed by the frozen-friction
+    settle; could be eliminated at $t=0$ by a TSC-convolved L-W.
+  \item \emph{Slow eccentricity creep} of the calibrated binary
+    (breathing rises from $\sim 2\%$ at 4--8 orbits to $\sim 5\%$ by
+    12).  Minor; likely accumulated discrete-force anisotropy.
   \item \emph{Neumann + zero-mean momentum bleed.}  See
-    \S\ref{sec:dc_mode}, item 1.  Currently worked around by using
-    Dirichlet.
+    \S\ref{sec:dc_mode}, item 1.  Worked around by using Dirichlet.
+  \item \emph{$v_\text{factor}=1.05$ is empirical} and specific to the
+    mass / radius / kernel / grid; a general scenario would need to
+    re-calibrate.
 \end{itemize}
 
 \end{document}
