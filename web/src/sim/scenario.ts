@@ -65,6 +65,12 @@ export interface ParticleSpec {
     x: number; y: number; vx: number; vy: number;
     mass: number; charge: number;
     spin?: number; gFactor?: number;
+    /* v39 per-particle self-field subtraction: the particle gets its own
+     * field set and feels only the OTHER particles' fields (bit-exact
+     * self-force cancellation at eps=0).  Removes PIC self-heating at the
+     * cost of ~one extra field solve per opted-in particle per step. */
+    selfField?: boolean;
+    selfFieldEps?: [number, number];
 }
 
 export interface ViewSpec { field: number; showTrails: boolean; showVelocity: boolean; }

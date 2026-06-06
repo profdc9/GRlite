@@ -31,7 +31,7 @@
   },
   "background": [],
   "particles": [
-    { "x": 110.0, "y": 191.5, "vx": 0.12, "vy": 0.0, "mass": 0.01, "charge": 0.0 }
+    { "x": 110.0, "y": 191.5, "vx": 0.12, "vy": 0.0, "mass": 0.01, "charge": 0.0, "selfField": true }
   ],
   "view": { "field": 0, "showTrails": true, "showVelocity": true }
 }

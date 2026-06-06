@@ -56,6 +56,10 @@ export function applyScenario(world: World, scn: Scenario): void {
     scn.particles.forEach((p, i) => {
         c.addParticle(s, p.x, p.y, p.mass, p.charge, p.vx, p.vy);
         if (p.spin) c.setParticleSpin(s, i, p.spin, p.gFactor ?? 2.0);
+        if (p.selfField) {
+            c.particleEnableSelfField(s, i);
+            if (p.selfFieldEps) c.particleSetSelfFieldEpsilon(s, i, p.selfFieldEps[0], p.selfFieldEps[1]);
+        }
     });
 
     /* Absorber (v42): Dirichlet/Neumann + derivative friction, multiplicative

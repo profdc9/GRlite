@@ -31,8 +31,8 @@
   },
   "background": [],
   "particles": [
-    { "x": 176.5, "y": 191.5, "vx": 0.0, "vy": 0.155, "mass": 0.01, "charge": 0.01 },
-    { "x": 206.5, "y": 191.5, "vx": 0.0, "vy": -0.155, "mass": 0.01, "charge": -0.01 }
+    { "x": 176.5, "y": 191.5, "vx": 0.0, "vy": 0.155, "mass": 0.01, "charge": 0.01, "selfField": true },
+    { "x": 206.5, "y": 191.5, "vx": 0.0, "vy": -0.155, "mass": 0.01, "charge": -0.01, "selfField": true }
   ],
   "view": { "field": 5, "showTrails": true, "showVelocity": true }
 }
