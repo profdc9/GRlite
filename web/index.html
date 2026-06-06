@@ -3,48 +3,80 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>GRlite — binary orbit</title>
+    <title>GRlite — sandbox</title>
     <style>
       :root { color-scheme: dark; }
       body { margin: 0; background: #0c0c0e; color: #ddd;
              font: 14px system-ui, sans-serif; }
-      header { padding: 10px 16px; background: #15151a;
-               border-bottom: 1px solid #222; }
+      header { padding: 10px 16px; background: #15151a; border-bottom: 1px solid #222; }
       header h1 { margin: 0; font-size: 15px; font-weight: 500; color: #eee; }
       header .sub { font-size: 12px; color: #888; margin-top: 2px; }
-      main { display: flex; flex-direction: column; align-items: center;
-             padding: 24px; gap: 12px; }
-      canvas { background: #000; image-rendering: auto;
-               border: 1px solid #2a2a2a; box-shadow: 0 0 12px rgba(0,0,0,0.6); }
+      main { display: flex; align-items: flex-start; padding: 18px; gap: 18px; }
+      .left { display: flex; flex-direction: column; gap: 10px; }
+      /* Canvas stack: WebGL field under a transparent Canvas2D overlay. */
+      .stack { position: relative; width: 640px; height: 640px; }
+      .stack canvas { position: absolute; left: 0; top: 0; width: 640px; height: 640px;
+                      border: 1px solid #2a2a2a; }
+      #view { background: #000; box-shadow: 0 0 12px rgba(0,0,0,0.6); }
+      #overlay { background: transparent; cursor: crosshair; }
       #status { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-                font-size: 12px; color: #999; }
-      .controls { display: flex; gap: 8px; }
-      button { background: #1f1f25; color: #ddd; border: 1px solid #3a3a45;
-               padding: 5px 14px; font-size: 12px; cursor: pointer;
-               border-radius: 3px; }
+                font-size: 12px; color: #999; max-width: 640px; }
+      .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+      label { color: #aaa; font-size: 12px; }
+      button, select { background: #1f1f25; color: #ddd; border: 1px solid #3a3a45;
+               padding: 5px 12px; font-size: 12px; cursor: pointer; border-radius: 3px; }
       button:hover { background: #2a2a32; }
       button:active { background: #303040; }
+      /* Inspector */
+      .panel { width: 320px; background: #131318; border: 1px solid #24242c;
+               border-radius: 5px; padding: 12px 14px; }
+      .panel h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600;
+                  color: #9ab; text-transform: uppercase; letter-spacing: 0.05em; }
+      .panel + .panel { margin-top: 12px; }
+      .kv { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+            font-size: 12px; line-height: 1.5; color: #ccd; white-space: pre-wrap; }
+      .hint { color: #777; font-size: 11px; margin-top: 6px; }
+      .badge { display: inline-block; padding: 1px 6px; border-radius: 3px;
+               font-size: 10px; background: #3a2a10; color: #e0a040; }
     </style>
   </head>
   <body>
     <header>
-      <h1>GRlite — pic_binary (two-body via FDTD gravity)</h1>
-      <div class="sub">v40+v41 simulator core; background colormap = Φ<sub>g</sub>; white dots = particles.</div>
+      <h1>GRlite — 2D linearized GR + EM sandbox</h1>
+      <div class="sub">field colormap (selectable) · particle trails &amp; velocity · click a particle to inspect</div>
     </header>
     <main>
-      <canvas id="view" width="640" height="640"></canvas>
-      <div class="controls">
-        <label for="scenario" style="margin-right:6px;color:#aaa">scenario</label>
-        <select id="scenario">
-          <option value="pic_binary">pic_binary (two-body orbit)</option>
-          <option value="pic_static">pic_static (single stationary mass)</option>
-        </select>
-        <button id="reset">reset</button>
-        <button id="pause">pause</button>
-        <button id="stepFrame">step 1</button>
-        <button id="probe" title="run 4000-step frozen-particle stability probe">probe</button>
+      <div class="left">
+        <div class="stack">
+          <canvas id="view" width="640" height="640"></canvas>
+          <canvas id="overlay" width="640" height="640"></canvas>
+        </div>
+        <div class="controls">
+          <label for="scenario">scenario</label>
+          <select id="scenario">
+            <option value="pic_binary">pic_binary (two-body orbit)</option>
+            <option value="pic_static">pic_static (single stationary mass)</option>
+          </select>
+          <label for="field">field</label>
+          <select id="field"></select>
+          <button id="reset">reset</button>
+          <button id="pause">resume</button>
+          <button id="stepFrame">step 1</button>
+          <button id="trails" title="toggle particle trails">trails: on</button>
+          <button id="probe" title="frozen-particle stability probe">probe</button>
+        </div>
+        <div id="status">initializing&hellip;</div>
       </div>
-      <div id="status">initializing&hellip;</div>
+      <div class="right">
+        <div class="panel">
+          <h2>Global</h2>
+          <div id="globalInfo" class="kv">—</div>
+        </div>
+        <div class="panel">
+          <h2>Particle</h2>
+          <div id="particleInfo" class="kv">click a particle to select</div>
+        </div>
+      </div>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

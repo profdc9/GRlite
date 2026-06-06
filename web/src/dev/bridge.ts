@@ -17,10 +17,23 @@ import {
 export interface BridgeContext {
     world: World;
     state: AppState;
-    canvas: HTMLCanvasElement;
+    canvas: HTMLCanvasElement;          // WebGL field canvas
+    overlayCanvas?: HTMLCanvasElement;  // Canvas2D overlay (trails/arrows)
     setStatus: (s: string) => void;
     setPaused: (p: boolean) => void;
     rebuild: (scenario: string) => void;
+}
+
+/* Composite the WebGL field canvas and the Canvas2D overlay into one PNG. */
+function compositeScreenshot(ctx: BridgeContext): string {
+    const base = ctx.canvas;
+    const tmp = document.createElement('canvas');
+    tmp.width = base.width; tmp.height = base.height;
+    const c = tmp.getContext('2d');
+    if (!c) return base.toDataURL('image/png');
+    c.drawImage(base, 0, 0);
+    if (ctx.overlayCanvas) c.drawImage(ctx.overlayCanvas, 0, 0, tmp.width, tmp.height);
+    return tmp.toDataURL('image/png');
 }
 
 type Handler = (p: any) => unknown;
@@ -68,7 +81,7 @@ function buildHandlers(ctx: BridgeContext): Record<string, Handler> {
             if (live) state.liveModified = true;
             return `global updated${live ? ' (run is now live-modified)' : ''}`;
         },
-        screenshot: () => ctx.canvas.toDataURL('image/png'),
+        screenshot: () => compositeScreenshot(ctx),
     };
 }
 

@@ -1,20 +1,23 @@
 /* GRlite web frontend — entry point.
  *
- * Thin wiring: load the WASM core, build a World, set up the two render
- * passes, wire the controls, and run the frame loop.  All substance lives
- * in the modules (wasm/, sim/, render/, dev/, ui/). */
+ * Thin wiring: load the WASM core, build a World, set up the field pass +
+ * Canvas2D overlay + inspector, wire the controls, run the frame loop.
+ * Substance lives in the modules (wasm/, sim/, render/, dev/, ui/). */
 
 import { loadCore } from './wasm/binding';
 import { World } from './sim/world';
 import { createState } from './state';
 import { wireControls } from './ui/controls';
+import { Inspector } from './ui/inspector';
 import { FieldPass } from './render/fieldPass';
-import { OverlayPass } from './render/overlayPass';
+import { Overlay2D, createTrails } from './render/overlay2d';
+import { computeView } from './sim/fieldViews';
 import { fullReport, stabilityProbe } from './dev/diagnostics';
 import { STEPS_PER_FRAME } from './sim/config';
 
 async function main(): Promise<void> {
     const canvas = document.getElementById('view') as HTMLCanvasElement;
+    const overlayCanvas = document.getElementById('overlay') as HTMLCanvasElement;
     const scenarioSel = document.getElementById('scenario') as HTMLSelectElement;
 
     const state = createState(scenarioSel?.value || 'pic_binary');
@@ -22,8 +25,10 @@ async function main(): Promise<void> {
     const controls = wireControls({
         onTogglePause: () => { state.paused = !state.paused; controls.setPaused(state.paused); },
         onStep: () => { state.singleStep = true; },
-        onReset: () => { rebuild(state.scenario); },
+        onReset: () => rebuild(state.scenario),
         onScenarioChange: (name) => { state.scenario = name; rebuild(name); },
+        onFieldChange: (i) => { state.viewField = i; },
+        onToggleTrails: () => { state.showTrails = !state.showTrails; controls.setTrails(state.showTrails); },
         onProbe: () => {
             controls.setStatus('running stability probe…');
             requestAnimationFrame(() => {
@@ -32,22 +37,28 @@ async function main(): Promise<void> {
             });
         },
     });
+    controls.setTrails(state.showTrails);
+    controls.setField(state.viewField);
 
     controls.setStatus('loading WASM…');
     const core = await loadCore();
     const world = new World(core);
 
-    /* preserveDrawingBuffer so the debug bridge's screenshot (canvas.toDataURL)
-     * captures the rendered frame rather than a cleared buffer. */
     const gl = canvas.getContext('webgl2',
         { antialias: true, premultipliedAlpha: false, preserveDrawingBuffer: true });
     if (!gl) throw new Error('WebGL2 not available');
     const fieldPass = new FieldPass(gl, world.W, world.H);
-    const overlay = new OverlayPass(gl, world.W, world.H,
-        Math.min(canvas.width, canvas.height) * 0.018);
+    const overlay = new Overlay2D(overlayCanvas, world.W, world.H);
+    const inspector = new Inspector();
+    const trails = createTrails();
 
-    const PARTICLE_MAX = 256;
-    const xyBuf = new Float32Array(PARTICLE_MAX * 2);
+    /* Click to select the nearest particle. */
+    overlayCanvas.addEventListener('click', (ev) => {
+        const r = overlayCanvas.getBoundingClientRect();
+        const px = (ev.clientX - r.left) * (overlayCanvas.width / r.width);
+        const py = (ev.clientY - r.top) * (overlayCanvas.height / r.height);
+        state.selected = overlay.pick(px, py, world.particles());
+    });
 
     function rebuild(name: string): void {
         controls.setStatus(`building ${name}…`);
@@ -55,23 +66,22 @@ async function main(): Promise<void> {
         if (rc !== 0) { controls.setStatus(`failed to build ${name} (rc=${rc})`); return; }
         state.paused = true;
         state.liveModified = false;
+        state.selected = -1;
+        trails.reset(world.particleCount());
         controls.setPaused(true);
         console.log(`[${name}] built\n` + fullReport(world));
         controls.setStatus(`paused on ${name} (press resume)`);
     }
 
-    /* Initial build. */
     controls.setStatus(`building ${state.scenario}…`);
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
     rebuild(state.scenario);
 
-    /* Debug bridge (dev only): connect to the grlite-bridge MCP server so
-     * the agent can query/drive this exact running instance.  Dynamic import
-     * + DEV guard keeps it out of production bundles. */
+    /* Debug bridge (dev only). */
     if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
         const { startBridge } = await import('./dev/bridge');
         startBridge({
-            world, state, canvas,
+            world, state, canvas, overlayCanvas,
             setStatus: controls.setStatus,
             setPaused: controls.setPaused,
             rebuild,
@@ -79,28 +89,29 @@ async function main(): Promise<void> {
     }
 
     function frame(): void {
-        if (!state.paused || state.singleStep) {
+        const advanced = !state.paused || state.singleStep;
+        if (advanced) {
             world.step(state.singleStep ? 1 : STEPS_PER_FRAME);
             state.singleStep = false;
         }
 
-        const data = world.fieldView(state.viewField);
+        /* Field pass (selected view, derived on CPU where needed). */
+        const data = computeView(world, state.viewField);
         gl!.viewport(0, 0, canvas.width, canvas.height);
         gl!.clearColor(0, 0, 0, 1);
         gl!.clear(gl!.COLOR_BUFFER_BIT);
         fieldPass.render(data);
 
-        const n = Math.min(world.particleCount(), PARTICLE_MAX);
-        for (let i = 0; i < n; i++) {
-            const v = world.particleView(i);
-            xyBuf[2 * i] = v[0];
-            xyBuf[2 * i + 1] = v[1];
-        }
-        overlay.render(xyBuf, n);
+        /* Overlay pass (Canvas2D). */
+        const parts = world.particles();
+        if (advanced && state.showTrails) trails.push(parts);
+        overlay.render(parts, trails,
+            { showTrails: state.showTrails, showVelocity: state.showVelocity, selected: state.selected });
 
+        inspector.update(world, state);
         controls.setStatus(
             `${state.scenario}  step ${world.stepCount().toString().padStart(6)}  ` +
-            `t=${world.time().toFixed(2)}  parts=${n}  ` +
+            `t=${world.time().toFixed(2)}  parts=${parts.length}  ` +
             `${state.liveModified ? '[LIVE-MODIFIED] ' : ''}${state.paused ? '[PAUSED]' : ''}`);
         requestAnimationFrame(frame);
     }

@@ -1,17 +1,22 @@
-/* Wires the toolbar buttons + scenario selector to callbacks.  Pure DOM,
- * no framework.  The richer inspectors land in Phase 3. */
+/* Toolbar + selector wiring.  Pure DOM, no framework. */
+
+import { FIELD_VIEWS } from '../sim/fieldViews';
 
 export interface ControlHandlers {
     onTogglePause: () => void;
     onStep: () => void;
     onReset: () => void;
     onScenarioChange: (name: string) => void;
+    onFieldChange: (index: number) => void;
+    onToggleTrails: () => void;
     onProbe?: () => void;
 }
 
 export interface Controls {
     setPaused: (paused: boolean) => void;
     setStatus: (text: string) => void;
+    setTrails: (on: boolean) => void;
+    setField: (index: number) => void;
 }
 
 export function wireControls(h: ControlHandlers): Controls {
@@ -20,16 +25,31 @@ export function wireControls(h: ControlHandlers): Controls {
     const pauseBtn = document.getElementById('pause') as HTMLButtonElement;
     const stepBtn = document.getElementById('stepFrame') as HTMLButtonElement;
     const scenarioSel = document.getElementById('scenario') as HTMLSelectElement;
+    const fieldSel = document.getElementById('field') as HTMLSelectElement;
+    const trailsBtn = document.getElementById('trails') as HTMLButtonElement;
     const probeBtn = document.getElementById('probe') as HTMLButtonElement | null;
+
+    /* Populate field selector from FIELD_VIEWS. */
+    fieldSel.innerHTML = '';
+    FIELD_VIEWS.forEach((v, i) => {
+        const opt = document.createElement('option');
+        opt.value = String(i);
+        opt.textContent = v.label;
+        fieldSel.appendChild(opt);
+    });
 
     pauseBtn.addEventListener('click', h.onTogglePause);
     stepBtn.addEventListener('click', h.onStep);
     resetBtn.addEventListener('click', h.onReset);
     scenarioSel.addEventListener('change', () => h.onScenarioChange(scenarioSel.value));
+    fieldSel.addEventListener('change', () => h.onFieldChange(parseInt(fieldSel.value, 10)));
+    trailsBtn.addEventListener('click', h.onToggleTrails);
     if (probeBtn && h.onProbe) probeBtn.addEventListener('click', h.onProbe);
 
     return {
-        setPaused: (paused: boolean) => { pauseBtn.textContent = paused ? 'resume' : 'pause'; },
-        setStatus: (text: string) => { statusEl.textContent = text; },
+        setPaused: (paused) => { pauseBtn.textContent = paused ? 'resume' : 'pause'; },
+        setStatus: (text) => { statusEl.textContent = text; },
+        setTrails: (on) => { trailsBtn.textContent = `trails: ${on ? 'on' : 'off'}`; },
+        setField: (index) => { fieldSel.value = String(index); },
     };
 }
