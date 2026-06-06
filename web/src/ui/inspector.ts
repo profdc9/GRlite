@@ -16,6 +16,9 @@ export interface InspectorHandlers {
     getState: () => AppState;
     getWorld: () => World;
     onEdit: (mutate: (s: Scenario) => void) => void;
+    /* Visualization-only edit: mutate the scenario WITHOUT rebuilding the sim
+     * (so the run keeps going) -- used for per-particle ticks/clock + tick Δ. */
+    onViewEdit: (mutate: (s: Scenario) => void) => void;
 }
 
 function numRow(label: string, value: number, step: number,
@@ -90,6 +93,7 @@ export class Inspector {
     renderEditors(): void {
         const s = this.h.getScenario();
         const edit = this.h.onEdit;
+        const viewEdit = this.h.onViewEdit;
 
         /* ---- Global ---- */
         this.globalEl.innerHTML = '';
@@ -128,6 +132,11 @@ export class Inspector {
             this.globalEl.appendChild(numRow('y', bg.y, 1, (v) => edit((sc) => { sc.background[0].y = v; })));
         }
 
+        /* ---- Visualization (view-only; no rebuild) ---- */
+        this.globalEl.appendChild(header('visualization'));
+        this.globalEl.appendChild(numRow('tick Δ (0=auto)', s.view.tickInterval, 0.5,
+            (v) => viewEdit((sc) => { sc.view.tickInterval = Math.max(0, v); })));
+
         const gl = document.createElement('div'); gl.className = 'live'; gl.textContent = '—';
         this.globalEl.appendChild(gl); this.globalLive = gl;
 
@@ -148,6 +157,15 @@ export class Inspector {
         mk('y', 'y', 1);
         mk('vx', 'vx', 0.01);
         mk('vy', 'vy', 0.01);
+
+        /* Visualization (view-only): trajectory ticks + proper-time clock. */
+        this.particleEl.appendChild(header('time visualization'));
+        this.particleEl.appendChild(selRow('ticks', s.particles[sel].ticks ?? 'none',
+            ['none', 'coordinate', 'proper', 'both'],
+            (v) => viewEdit((sc) => { sc.particles[sel].ticks = v as Scenario['particles'][number]['ticks']; })));
+        this.particleEl.appendChild(checkRow('clock', !!s.particles[sel].clock,
+            (v) => viewEdit((sc) => { sc.particles[sel].clock = v; })));
+
         const pl = document.createElement('div'); pl.className = 'live'; pl.textContent = '—';
         this.particleEl.appendChild(pl); this.particleLive = pl;
     }

@@ -1226,6 +1226,7 @@ void gr_sim_step_n(gr_sim_t* sim, int n) {
 
 int   gr_sim_step_count(const gr_sim_t* sim) { return sim ? sim->step_count : 0; }
 float gr_sim_time(const gr_sim_t* sim)       { return sim ? sim->dt * (float) sim->step_count : 0.0f; }
+void  gr_sim_reset_time(gr_sim_t* sim)       { if (sim) sim->step_count = 0; }
 float gr_sim_dt(const gr_sim_t* sim)         { return sim ? sim->dt : 0.0f; }
 float gr_sim_dx(const gr_sim_t* sim)         { return sim ? sim->dx : 0.0f; }
 int   gr_sim_width(const gr_sim_t* sim)      { return sim ? sim->width : 0; }

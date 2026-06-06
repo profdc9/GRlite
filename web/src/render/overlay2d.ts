@@ -5,14 +5,24 @@
 
 import type { Particle } from '../sim/world';
 import type { VectorData } from '../sim/fieldViews';
+import type { TickMode } from '../sim/scenario';
 
 const VEL_PX_PER_C = 420;   // arrow pixels at |v| = c
 const TRAIL_MAX = 600;       // points kept per particle
+const TRAIL_STRIDE = 4;      // [x, y, t, tau] per trail point
+const CLOCK_PERIOD = 120.0;  // time units per full hand revolution (gentle sweep)
+
+/* Per-particle visualization flags passed to render (parallel to particles). */
+export interface ParticleDisplay {
+    ticks: TickMode;
+    clock: boolean;
+    rate: number;   // instantaneous dτ/dt (for the clock readout)
+}
 
 export interface Trails {
-    /* trails[i] is a flat ring of [x0,y0,x1,y1,...] for particle i. */
+    /* trails[i] is a flat ring of [x0,y0,t0,tau0, x1,y1,t1,tau1, ...]. */
     pts: number[][];
-    push(particles: Particle[]): void;
+    push(particles: Particle[], t: number): void;
     reset(n: number): void;
 }
 
@@ -20,16 +30,25 @@ export function createTrails(): Trails {
     const t: Trails = {
         pts: [],
         reset(n: number) { t.pts = Array.from({ length: n }, () => []); },
-        push(particles: Particle[]) {
+        push(particles: Particle[], time: number) {
             if (t.pts.length !== particles.length) t.reset(particles.length);
             for (let i = 0; i < particles.length; i++) {
                 const arr = t.pts[i];
-                arr.push(particles[i].x, particles[i].y);
-                if (arr.length > TRAIL_MAX * 2) arr.splice(0, arr.length - TRAIL_MAX * 2);
+                arr.push(particles[i].x, particles[i].y, time, particles[i].properTime);
+                const cap = TRAIL_MAX * TRAIL_STRIDE;
+                if (arr.length > cap) arr.splice(0, arr.length - cap);
             }
         },
     };
     return t;
+}
+
+/* "Nice" number (1, 2, 5 × 10^k) at or below x -- for auto tick spacing. */
+function niceInterval(x: number): number {
+    if (!(x > 0)) return 1;
+    const p = Math.pow(10, Math.floor(Math.log10(x)));
+    const f = x / p;
+    return (f >= 5 ? 5 : f >= 2 ? 2 : 1) * p;
 }
 
 export class Overlay2D {
@@ -64,8 +83,10 @@ export class Overlay2D {
 
     render(particles: Particle[], trails: Trails | null,
            opts: { showTrails: boolean; showVelocity: boolean; selected: number;
-                   vectors?: { data: VectorData; spacing: number } | null }): void {
+                   vectors?: { data: VectorData; spacing: number } | null;
+                   display?: ParticleDisplay[]; tickInterval?: number; time?: number }): void {
         const ctx = this.ctx;
+        const S = TRAIL_STRIDE;
         ctx.clearRect(0, 0, this.cw, this.ch);
 
         /* Vector-field arrows (under the trails/particles). */
@@ -76,21 +97,31 @@ export class Overlay2D {
             ctx.lineWidth = 1.5;
             for (let i = 0; i < trails.pts.length; i++) {
                 const a = trails.pts[i];
-                const segs = a.length / 2;
+                const segs = a.length / S;
                 if (segs < 2) continue;
                 for (let k = 1; k < segs; k++) {
                     const alpha = k / segs;
                     ctx.strokeStyle = `rgba(120,180,255,${(0.05 + 0.5 * alpha).toFixed(3)})`;
                     ctx.beginPath();
-                    ctx.moveTo(this.sx(a[2 * (k - 1)]), this.sy(a[2 * (k - 1) + 1]));
-                    ctx.lineTo(this.sx(a[2 * k]), this.sy(a[2 * k + 1]));
+                    ctx.moveTo(this.sx(a[S * (k - 1)]), this.sy(a[S * (k - 1) + 1]));
+                    ctx.lineTo(this.sx(a[S * k]), this.sy(a[S * k + 1]));
                     ctx.stroke();
                 }
             }
         }
 
+        /* Coordinate/proper-time ticks along each selected trail. */
+        if (trails && opts.display) {
+            for (let i = 0; i < trails.pts.length; i++) {
+                const d = opts.display[i];
+                if (!d || d.ticks === 'none') continue;
+                this.drawTrackTicks(trails.pts[i], d.ticks, opts.tickInterval ?? 0);
+            }
+        }
+
         for (const p of particles) {
             const x = this.sx(p.x), y = this.sy(p.y);
+            const disp = opts.display?.[p.index];
 
             /* Velocity arrow (v = p / (gamma m), c=1). */
             if (opts.showVelocity && p.mass > 0) {
@@ -136,6 +167,108 @@ export class Overlay2D {
             }
             ctx.fillStyle = '#888'; ctx.font = '10px ui-monospace, monospace';
             ctx.fillText(`p${p.index}`, x + 9, y - 9);
+
+            /* Proper-time clock: coordinate-time hand (gray) vs proper-time
+             * hand (cyan); the angular lag between them IS the accumulated time
+             * dilation t-τ.  Digital readout shows τ, t-τ, and dτ/dt. */
+            if (disp?.clock) this.drawClock(x + 26, y - 26, opts.time ?? p.properTime, p.properTime, disp.rate);
+        }
+    }
+
+    /* Place tick markers along a trail at equal coordinate-time (circles) and/or
+     * proper-time (triangles) intervals.  Ticks sit at absolute multiples of Δ
+     * so they stay pinned to the trajectory as the trail scrolls.  When Δ<=0,
+     * Δ is auto-chosen from the trail's coordinate-time span (~12 ticks). */
+    private drawTrackTicks(a: number[], mode: TickMode, interval: number): void {
+        const S = TRAIL_STRIDE;
+        const n = a.length / S;
+        if (n < 2) return;
+        let dv = interval;
+        if (!(dv > 0)) {
+            const span = a[(n - 1) * S + 2] - a[2];   // coordinate-time span
+            dv = niceInterval(span / 12);
+        }
+        if (!(dv > 0)) return;
+        if (mode === 'coordinate' || mode === 'both') this.ticksFor(a, 2, dv, false);
+        if (mode === 'proper' || mode === 'both') this.ticksFor(a, 3, dv, true);
+    }
+
+    /* Walk trail segments emitting a marker wherever the value at stride-offset
+     * `off` (2=t, 3=τ) crosses an integer multiple of dv. */
+    private ticksFor(a: number[], off: number, dv: number, triangle: boolean): void {
+        const ctx = this.ctx;
+        const S = TRAIL_STRIDE;
+        const n = a.length / S;
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = '#15151a';                       // dark outline for contrast
+        ctx.fillStyle = triangle ? '#ff5db1' : '#ffd24a';  // τ = magenta, t = amber
+        let m = Math.floor(a[off] / dv) + 1;
+        for (let k = 1; k < n; k++) {
+            const v0 = a[(k - 1) * S + off], v1 = a[k * S + off];
+            const dvSeg = v1 - v0;
+            while (m * dv <= v1) {
+                const target = m * dv;
+                if (target >= v0) {
+                    const f = dvSeg !== 0 ? (target - v0) / dvSeg : 0;
+                    const sxv = a[(k - 1) * S] + f * (a[k * S] - a[(k - 1) * S]);
+                    const syv = a[(k - 1) * S + 1] + f * (a[k * S + 1] - a[(k - 1) * S + 1]);
+                    const px = this.sx(sxv), py = this.sy(syv);
+                    ctx.beginPath();
+                    if (triangle) {
+                        ctx.moveTo(px, py - 4);
+                        ctx.lineTo(px - 3.5, py + 3);
+                        ctx.lineTo(px + 3.5, py + 3);
+                        ctx.closePath();
+                    } else {
+                        ctx.arc(px, py, 3, 0, Math.PI * 2);
+                    }
+                    ctx.fill(); ctx.stroke();
+                }
+                m++;
+            }
+        }
+    }
+
+    /* A small two-hand clock: gray hand = coordinate time t, cyan hand = proper
+     * time τ.  Both sweep with period CLOCK_PERIOD; the angular gap between them
+     * grows as the accumulated dilation t-τ.  Digital readout: τ, Δ=t-τ, dτ/dt. */
+    private drawClock(cx: number, cy: number, t: number, tau: number, rate: number): void {
+        const ctx = this.ctx;
+        const r = 13;
+        const face = (ang: number, len: number, color: string, w: number) => {
+            ctx.strokeStyle = color; ctx.lineWidth = w;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(cx + len * Math.sin(ang), cy - len * Math.cos(ang));
+            ctx.stroke();
+        };
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(10,12,16,0.85)'; ctx.fill();
+        ctx.strokeStyle = '#556'; ctx.lineWidth = 1.5; ctx.stroke();
+        /* Lag wedge: the sector swept between the proper-time and coordinate-time
+         * hands.  Its opening angle is the accumulated dilation t-τ -- a direct,
+         * at-a-glance "how far has this clock fallen behind" gauge. */
+        const angT = (2 * Math.PI * t) / CLOCK_PERIOD;
+        const angTau = (2 * Math.PI * tau) / CLOCK_PERIOD;
+        if (angT - angTau > 1e-3) {
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.arc(cx, cy, r - 3, angTau - Math.PI / 2, angT - Math.PI / 2);
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(255,93,177,0.22)'; ctx.fill();
+        }
+        face(angT, r - 3, '#aab', 1.5);      // coordinate
+        face(angTau, r - 5, '#66ffcc', 2);   // proper
+        ctx.fillStyle = '#66ffcc';
+        ctx.beginPath(); ctx.arc(cx, cy, 1.6, 0, Math.PI * 2); ctx.fill();
+        ctx.font = '9px ui-monospace, monospace'; ctx.textAlign = 'left';
+        ctx.fillStyle = '#9ab';
+        ctx.fillText(`τ${tau.toFixed(1)}`, cx + r + 3, cy - 2);
+        ctx.fillStyle = '#c98';
+        ctx.fillText(`Δ${(t - tau).toFixed(1)}`, cx + r + 3, cy + 8);
+        if (Number.isFinite(rate)) {
+            ctx.fillStyle = '#789';
+            ctx.fillText(`${rate.toFixed(3)}`, cx + r + 3, cy + 18);
         }
     }
 

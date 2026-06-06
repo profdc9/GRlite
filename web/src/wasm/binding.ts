@@ -62,6 +62,7 @@ export interface GRliteCore {
     clearBackground: (sim: number) => void;
     stepCount: (sim: number) => number;
     simTime: (sim: number) => number;
+    resetTime: (sim: number) => void;
     simDt: (sim: number) => number;
     particleCount: (sim: number) => number;
     getParticle: (sim: number, idx: number) => number;
@@ -158,6 +159,7 @@ function bindCore(M: GRliteModule): GRliteCore {
         clearBackground: vfn('gr_sim_clear_background', ['number']),
         stepCount: num('gr_sim_step_count', ['number']),
         simTime: num('gr_sim_time', ['number']),
+        resetTime: vfn('gr_sim_reset_time', ['number']),
         simDt: num('gr_sim_dt', ['number']),
         particleCount: num('gr_sim_particle_count', ['number']),
         getParticle: num('gr_sim_get_particle', ['number','number']),

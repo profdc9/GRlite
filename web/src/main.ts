@@ -89,6 +89,15 @@ async function main(): Promise<void> {
         loadScenario(prev);
     }
 
+    /* View-only edit: mutate the canonical scenario but DON'T rebuild the sim,
+     * so per-particle ticks/clock and tick Δ can be toggled mid-run.  The hash
+     * is updated so the visualization choice is still shareable. */
+    function applyViewEdit(mutate: (s: Scenario) => void): void {
+        mutate(current);
+        writeToHash(current);
+        inspector.renderEditors();
+    }
+
     /* Load a scenario by name from the JSON library (public/scenes/<name>.json).
      * The JSON files are the single source of truth -- there is no in-code copy. */
     async function buildByName(name: string): Promise<void> {
@@ -140,6 +149,7 @@ async function main(): Promise<void> {
         getState: () => state,
         getWorld: () => world,
         onEdit: applyEdit,
+        onViewEdit: applyViewEdit,
     });
 
     /* Click to select the nearest particle. */
@@ -192,6 +202,12 @@ async function main(): Promise<void> {
     let vecCache: ReturnType<typeof computeVectorField> = null;
     let viewKey = '';
 
+    /* Proper-time clock: instantaneous dτ/dt per particle, finite-differenced
+     * from the previous advanced frame (engine-integrated τ vs coordinate t). */
+    let clockPrevT = -1;
+    let clockPrevTau: number[] = [];
+    let clockRate: number[] = [];
+
     function frame(): void {
         const advanced = !state.paused || state.singleStep;
         if (advanced) {
@@ -221,10 +237,37 @@ async function main(): Promise<void> {
         const vec = vecCache;
 
         const parts = world.particles();
-        if (advanced && state.showTrails) trails.push(parts);
+        const tNow = world.time();
+        /* Always record the track (cheap) so ticks/clock work even when the
+         * trail LINE is hidden; the line draw itself is gated by showTrails. */
+        if (advanced) trails.push(parts, tNow);
+
+        /* Update dτ/dt estimates (only on a forward advance). */
+        if (advanced) {
+            const dT = tNow - clockPrevT;
+            for (let i = 0; i < parts.length; i++) {
+                const prev = clockPrevTau[i];
+                if (clockPrevT >= 0 && dT > 1e-9 && prev !== undefined) {
+                    clockRate[i] = (parts[i].properTime - prev) / dT;
+                } else if (clockRate[i] === undefined) {
+                    clockRate[i] = 1;
+                }
+                clockPrevTau[i] = parts[i].properTime;
+            }
+            clockPrevT = tNow;
+        }
+
+        /* Per-particle visualization flags (ticks / clock) from the scenario. */
+        const display = parts.map((p) => ({
+            ticks: current.particles[p.index]?.ticks ?? 'none',
+            clock: current.particles[p.index]?.clock ?? false,
+            rate: clockRate[p.index] ?? 1,
+        }));
+
         overlay.render(parts, trails,
             { showTrails: state.showTrails, showVelocity: state.showVelocity, selected: state.selected,
-              vectors: vec ? { data: vec, spacing: state.vectorSpacing } : null });
+              vectors: vec ? { data: vec, spacing: state.vectorSpacing } : null,
+              display, tickInterval: current.view.tickInterval, time: tNow });
 
         inspector.updateLive();
         controls.setStatus(

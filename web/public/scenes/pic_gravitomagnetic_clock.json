@@ -1,0 +1,43 @@
+{
+  "program": "grlite",
+  "format": "grlite-scenario",
+  "version": 1,
+  "name": "gravitomagnetic clock effect (prograde vs retrograde)",
+  "grid": { "W": 128, "H": 128, "dx": 1.0, "cEff": 1.0, "cfl": 0.7071067811865476 },
+  "global": {
+    "gEff": 1.0,
+    "kE": 1.0,
+    "shape": "bump",
+    "kernelRadius": 8,
+    "forceInterp": "lewis-birdsall",
+    "absorber": { "outerBC": "dirichlet", "frictionFloor": 0.0, "frictionWall": 0.02, "frictionDepth": 24, "zeroMeanScalar": false },
+    "init": { "method": "none", "settleSteps": 0 },
+    "switches": {
+      "gravitomagneticForce": false,
+      "gravitomagneticInductive": false,
+      "emLorentz": false,
+      "emInductive": false,
+      "emElectrostatic": false,
+      "emMagnetic": false,
+      "emStressEnergy": false,
+      "emShapiro": false,
+      "fieldEvolution": false,
+      "particleSourceDeposition": false,
+      "esirkepov": false,
+      "periodicBC": false
+    },
+    "rhoSmooth": 0,
+    "jSmooth": 0,
+    "bgMode": "analytic",
+    "selfFieldDefault": false,
+    "noRadiation": false
+  },
+  "background": [
+    { "x": 63.5, "y": 63.5, "GM": 0.25, "Q": 0.0, "Jz": 15.0, "gFactor": 2.0, "epsilon": 2.0 }
+  ],
+  "particles": [
+    { "x": 88.5, "y": 63.5, "vx": 0.0, "vy": 0.09952, "mass": 0.001, "charge": 0.0, "ticks": "both", "clock": true },
+    { "x": 88.5, "y": 63.5, "vx": 0.0, "vy": -0.09952, "mass": 0.001, "charge": 0.0, "ticks": "both", "clock": true }
+  ],
+  "view": { "field": 1, "showTrails": true, "showVelocity": true, "source": "background", "vectorField": 1, "vectorSpacing": 8, "tickInterval": 100 }
+}

@@ -18,6 +18,11 @@ export type BgModeName = 'sampled' | 'analytic';
  * (Turning the colormap OFF entirely is the 'none' entry of FIELD_VIEWS, not a
  * source -- the source picks WHICH data to draw when something is drawn.) */
 export type FieldSourceName = 'perturbation' | 'background' | 'sum';
+/* Per-particle trajectory tick markers (§17 Trajectory tracks): circles at
+ * equal coordinate-time intervals, triangles at equal proper-time intervals.
+ * Showing both makes relativistic time dilation visible as the proper-time
+ * ticks spreading out along the track relative to the coordinate-time ones. */
+export type TickMode = 'none' | 'coordinate' | 'proper' | 'both';
 
 export interface GridSpec {
     W: number; H: number; dx: number; cEff: number; cfl: number;
@@ -114,6 +119,11 @@ export interface ParticleSpec {
      * cost of ~one extra field solve per opted-in particle per step. */
     selfField?: boolean;
     selfFieldEps?: [number, number];
+    /* Visualization-only (no physics effect): which trajectory ticks to draw
+     * for this particle, and whether to show its proper-time clock.  Edited
+     * live (no rebuild) but persisted in the scenario so links reproduce them. */
+    ticks?: TickMode;
+    clock?: boolean;
 }
 
 export interface ViewSpec {
@@ -124,6 +134,10 @@ export interface ViewSpec {
      * spacing in cells between arrows (smaller = denser). */
     vectorField: number;
     vectorSpacing: number;
+    /* Trajectory-tick spacing Δ (same value for coordinate- and proper-time
+     * ticks, so their differing spacing along the track reveals time dilation).
+     * 0 = auto (pick a "nice" Δ giving ~12 ticks across the current trail). */
+    tickInterval: number;
 }
 
 export interface Scenario {
@@ -190,7 +204,8 @@ export function emptyScenario(name = 'untitled'): Scenario {
         background: [],
         particles: [],
         view: { field: 0, showTrails: true, showVelocity: true,
-                source: 'perturbation', vectorField: 0, vectorSpacing: 24 },
+                source: 'perturbation', vectorField: 0, vectorSpacing: 24,
+                tickInterval: 0 },
     };
 }
 

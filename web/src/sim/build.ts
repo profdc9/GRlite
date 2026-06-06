@@ -79,5 +79,11 @@ export function applyScenario(world: World, scn: Scenario): void {
     else if (g.init.method === 'lw') c.initPotentialsLW(s);
     /* 'none' -> leave fields zero. */
 
+    /* Every (re)build starts a fresh run at t=0.  initPotentialsSettled already
+     * zeroes step_count, but 'none'/'lw' inits do not -- without this the sim
+     * clock keeps climbing across resets while per-particle proper_time restarts
+     * at 0, desyncing the proper-/coordinate-time track ticks. */
+    c.resetTime(s);
+
     world.refreshStride();
 }

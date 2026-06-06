@@ -159,6 +159,12 @@ void gr_sim_step_n(gr_sim_t* sim, int n);
 
 int   gr_sim_step_count(const gr_sim_t* sim);
 float gr_sim_time(const gr_sim_t* sim);  /* simulation time = step_count * dt */
+/* Reset the coordinate-time counter (step_count -> 0) so a rebuilt scenario
+ * begins at t=0.  Used by the JS build path for init methods that don't run
+ * gr_sim_init_potentials_settled (which already zeroes step_count); without it,
+ * t keeps climbing across resets while per-particle proper_time restarts at 0,
+ * desynchronizing the proper-time / coordinate-time track ticks. */
+void  gr_sim_reset_time(gr_sim_t* sim);
 float gr_sim_dt(const gr_sim_t* sim);
 float gr_sim_dx(const gr_sim_t* sim);
 int   gr_sim_width(const gr_sim_t* sim);
