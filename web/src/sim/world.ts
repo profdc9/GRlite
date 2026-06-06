@@ -96,6 +96,9 @@ export class World {
     }
 
     /* ---- particles ---- */
+    /* Re-probe the particle struct stride after a fresh build. */
+    refreshStride(): void { this.detectStride(); }
+
     private detectStride(): void {
         if (this.core.particleCount(this.sim) >= 2) {
             const p0 = this.core.getParticle(this.sim, 0);

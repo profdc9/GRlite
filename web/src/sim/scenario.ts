@@ -1,0 +1,190 @@
+/* GRlite scenario JSON schema — the source of truth for a web simulation.
+ *
+ * A scenario fully and reproducibly determines a run: grid, all global
+ * physics/absorber/init config + switches, background, and particles.  The
+ * sim is built from this via the WASM API (sim/build.ts); the C scenarios
+ * remain only for native tests. */
+
+export const SCENARIO_PROGRAM = 'grlite';
+export const SCENARIO_FORMAT = 'grlite-scenario';
+export const SCENARIO_VERSION = 1;
+
+export type ShapeName = 'cic' | 'tsc' | 'bump';
+export type ForceInterpName = 'legacy' | 'lewis-birdsall';
+export type OuterBCName = 'dirichlet' | 'neumann';
+export type InitMethod = 'lw-settled' | 'lw' | 'none';
+
+export interface GridSpec {
+    W: number; H: number; dx: number; cEff: number; cfl: number;
+}
+
+export interface Switches {
+    gravitomagneticForce: boolean;
+    gravitomagneticInductive: boolean;
+    emLorentz: boolean;
+    emInductive: boolean;
+    emElectrostatic: boolean;
+    emMagnetic: boolean;
+    emStressEnergy: boolean;
+    emShapiro: boolean;
+    fieldEvolution: boolean;
+    particleSourceDeposition: boolean;
+    esirkepov: boolean;
+    periodicBC: boolean;
+}
+
+export interface AbsorberSpec {
+    outerBC: OuterBCName;
+    frictionFloor: number;
+    frictionWall: number;
+    frictionDepth: number;
+    zeroMeanScalar: boolean;
+}
+
+export interface InitSpec { method: InitMethod; settleSteps: number; }
+
+export interface GlobalSpec {
+    gEff: number;
+    kE: number;
+    shape: ShapeName;
+    kernelRadius: number;
+    forceInterp: ForceInterpName;
+    absorber: AbsorberSpec;
+    init: InitSpec;
+    switches: Switches;
+    rhoSmooth: number;
+    jSmooth: number;
+}
+
+export interface BackgroundSpec {
+    type: 'point-mass' | 'spinning-mass';
+    x: number; y: number; GM: number; epsilon: number; Jz?: number;
+}
+
+export interface ParticleSpec {
+    x: number; y: number; vx: number; vy: number;
+    mass: number; charge: number;
+    spin?: number; gFactor?: number;
+}
+
+export interface ViewSpec { field: number; showTrails: boolean; showVelocity: boolean; }
+
+export interface Scenario {
+    program: typeof SCENARIO_PROGRAM;
+    format: typeof SCENARIO_FORMAT;
+    version: number;
+    name: string;
+    grid: GridSpec;
+    global: GlobalSpec;
+    background: BackgroundSpec[];
+    particles: ParticleSpec[];
+    view: ViewSpec;
+}
+
+/* ---- defaults ---- */
+
+export function defaultSwitches(): Switches {
+    return {
+        gravitomagneticForce: true,
+        gravitomagneticInductive: false,
+        emLorentz: true,
+        emInductive: true,
+        emElectrostatic: true,
+        emMagnetic: true,
+        emStressEnergy: false,
+        emShapiro: false,
+        fieldEvolution: true,
+        particleSourceDeposition: true,
+        esirkepov: true,
+        periodicBC: false,
+    };
+}
+
+/* v42 production absorber/deposition defaults (see web/README + addendum). */
+export function defaultGlobal(): GlobalSpec {
+    return {
+        gEff: 1.0,
+        kE: 1.0,
+        shape: 'bump',
+        kernelRadius: 8,
+        forceInterp: 'lewis-birdsall',
+        absorber: { outerBC: 'dirichlet', frictionFloor: 0.0, frictionWall: 0.02,
+                    frictionDepth: 48, zeroMeanScalar: false },
+        init: { method: 'lw-settled', settleSteps: 384 },
+        switches: defaultSwitches(),
+        rhoSmooth: 0,
+        jSmooth: 0,
+    };
+}
+
+export function defaultGrid(): GridSpec {
+    return { W: 384, H: 384, dx: 1.0, cEff: 1.0, cfl: 1.0 / Math.sqrt(2) };
+}
+
+export function emptyScenario(name = 'untitled'): Scenario {
+    return {
+        program: SCENARIO_PROGRAM, format: SCENARIO_FORMAT, version: SCENARIO_VERSION,
+        name,
+        grid: defaultGrid(),
+        global: defaultGlobal(),
+        background: [],
+        particles: [],
+        view: { field: 0, showTrails: true, showVelocity: true },
+    };
+}
+
+/* ---- built-in scenarios (JSON counterparts of the C scenarios) ---- */
+
+export function builtinBinary(): Scenario {
+    const s = emptyScenario('binary orbit');
+    s.global.switches.gravitomagneticInductive = true;   // pic_binary turns this on
+    const cx = (384 - 1) * 0.5, cy = (384 - 1) * 0.5;
+    const m = 0.01, r = 15.0;
+    const v = 1.05 * Math.sqrt(s.global.gEff * m);        // BUMP-R8 calibrated
+    s.particles = [
+        { x: cx - r, y: cy, vx: 0, vy: +v, mass: m, charge: 0 },
+        { x: cx + r, y: cy, vx: 0, vy: -v, mass: m, charge: 0 },
+    ];
+    return s;
+}
+
+export function builtinStatic(): Scenario {
+    const s = emptyScenario('single stationary mass');
+    const cx = (384 - 1) * 0.5, cy = (384 - 1) * 0.5;
+    s.particles = [{ x: cx, y: cy, vx: 0, vy: 0, mass: 0.01, charge: 0 }];
+    return s;
+}
+
+/* Keyed by the scenario-selector value. */
+export const BUILTINS: { [k: string]: () => Scenario } = {
+    pic_binary: builtinBinary,
+    pic_static: builtinStatic,
+};
+
+/* ---- validation / migration ---- */
+
+export function validate(obj: unknown): Scenario {
+    const o = obj as Partial<Scenario>;
+    if (!o || o.program !== SCENARIO_PROGRAM || o.format !== SCENARIO_FORMAT) {
+        throw new Error('not a grlite scenario');
+    }
+    if (typeof o.version !== 'number' || o.version > SCENARIO_VERSION) {
+        throw new Error(`unsupported scenario version ${o.version}`);
+    }
+    /* Fill any missing sections with defaults (forward-compatible load). */
+    const base = emptyScenario(o.name ?? 'loaded');
+    return {
+        ...base,
+        ...o,
+        grid: { ...base.grid, ...(o.grid ?? {}) },
+        global: {
+            ...base.global, ...(o.global ?? {}),
+            absorber: { ...base.global.absorber, ...(o.global?.absorber ?? {}) },
+            init: { ...base.global.init, ...(o.global?.init ?? {}) },
+            switches: { ...base.global.switches, ...(o.global?.switches ?? {}) },
+        },
+        background: o.background ?? [],
+        particles: o.particles ?? [],
+        view: { ...base.view, ...(o.view ?? {}) },
+    } as Scenario;
+}

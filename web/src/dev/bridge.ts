@@ -15,13 +15,14 @@ import {
 } from './diagnostics';
 
 export interface BridgeContext {
-    world: World;
+    getWorld: () => World;              // getter: the World may be recreated on grid change
     state: AppState;
     canvas: HTMLCanvasElement;          // WebGL field canvas
     overlayCanvas?: HTMLCanvasElement;  // Canvas2D overlay (trails/arrows)
     setStatus: (s: string) => void;
     setPaused: (p: boolean) => void;
-    rebuild: (scenario: string) => void;
+    reset: () => void;                  // rebuild the current scenario
+    buildByName: (name: string) => void | Promise<void>;
 }
 
 /* Composite the WebGL field canvas and the Canvas2D overlay into one PNG. */
@@ -36,46 +37,47 @@ function compositeScreenshot(ctx: BridgeContext): string {
     return tmp.toDataURL('image/png');
 }
 
-type Handler = (p: any) => unknown;
+type Handler = (p: any) => unknown | Promise<unknown>;
 
 function buildHandlers(ctx: BridgeContext): Record<string, Handler> {
-    const { world, state } = ctx;
+    const { state } = ctx;
+    const w = () => ctx.getWorld();
     return {
         status: () => ({
             connected: true,
             scenario: state.scenario,
-            step: world.stepCount(),
-            time: world.time(),
+            step: w().stepCount(),
+            time: w().time(),
             paused: state.paused,
             liveModified: state.liveModified,
-            particleCount: world.particleCount(),
-            grid: `${world.W}x${world.H}`,
+            particleCount: w().particleCount(),
+            grid: `${w().W}x${w().H}`,
         }),
-        report: () => fullReport(world),
-        particles: () => particleReport(world),
-        conservation: () => conservationReport(world),
-        field_stats: (p) => fieldStats(world, p?.field ?? 0),
+        report: () => fullReport(w()),
+        particles: () => particleReport(w()),
+        conservation: () => conservationReport(w()),
+        field_stats: (p) => fieldStats(w(), p?.field ?? 0),
         field_profile: (p) =>
-            fieldProfile(world, p?.field ?? 0, p?.axis ?? 'row', p?.at ?? (world.H >> 1), p?.stride ?? 16),
-        step: (p) => { world.step(Math.max(1, p?.n ?? 1)); return `step=${world.stepCount()} t=${world.time().toFixed(3)}`; },
+            fieldProfile(w(), p?.field ?? 0, p?.axis ?? 'row', p?.at ?? (w().H >> 1), p?.stride ?? 16),
+        step: (p) => { w().step(Math.max(1, p?.n ?? 1)); return `step=${w().stepCount()} t=${w().time().toFixed(3)}`; },
         play: () => { state.paused = false; ctx.setPaused(false); return 'playing'; },
         pause: () => { state.paused = true; ctx.setPaused(true); return 'paused'; },
-        reset: () => { ctx.rebuild(state.scenario); return `rebuilt ${state.scenario}`; },
-        build: (p) => {
+        reset: () => { ctx.reset(); return `rebuilt ${state.scenario}`; },
+        build: async (p) => {
             if (!p?.scenario) throw new Error('build requires { scenario }');
-            state.scenario = p.scenario; ctx.rebuild(p.scenario);
+            await ctx.buildByName(p.scenario);
             return `built ${p.scenario}`;
         },
         set_particle: (p) => {
             if (p?.index == null) throw new Error('set_particle requires { index }');
-            world.setParticleFields(p.index, p);
+            w().setParticleFields(p.index, p);
             state.liveModified = true;
             return `particle ${p.index} updated (run is now live-modified)`;
         },
         set_global: (p) => {
             let live = false;
-            if (p?.gEff !== undefined) { world.setGEff(p.gEff); live = true; }
-            if (p?.kE !== undefined) { world.setKE(p.kE); live = true; }
+            if (p?.gEff !== undefined) { w().setGEff(p.gEff); live = true; }
+            if (p?.kE !== undefined) { w().setKE(p.kE); live = true; }
             if (p?.viewField !== undefined) state.viewField = p.viewField;
             if (p?.paused !== undefined) { state.paused = !!p.paused; ctx.setPaused(state.paused); }
             if (live) state.liveModified = true;
@@ -102,12 +104,10 @@ export function startBridge(ctx: BridgeContext, url = 'ws://127.0.0.1:8787'): vo
             try { req = JSON.parse(ev.data as string); } catch { return; }
             const h = handlers[req.method];
             if (!h) { ws.send(JSON.stringify({ id: req.id, ok: false, error: `unknown method "${req.method}"` })); return; }
-            try {
-                const result = h(req.params ?? {});
-                ws.send(JSON.stringify({ id: req.id, ok: true, result }));
-            } catch (e) {
-                ws.send(JSON.stringify({ id: req.id, ok: false, error: (e as Error).message }));
-            }
+            /* Supports both sync and async handlers. */
+            Promise.resolve().then(() => h(req.params ?? {}))
+                .then((result) => ws.send(JSON.stringify({ id: req.id, ok: true, result })))
+                .catch((e) => ws.send(JSON.stringify({ id: req.id, ok: false, error: (e as Error).message })));
         };
     };
     connect();

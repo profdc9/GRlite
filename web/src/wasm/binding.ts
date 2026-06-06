@@ -30,6 +30,24 @@ export interface GRliteCore {
     setOuterBcNeumann: (sim: number, neumann: number) => void;
     setVolumeFrictionTaper: (sim: number, uniform: number, taperMax: number, taperDepth: number) => void;
     setZeroMeanScalarPotentials: (sim: number, enabled: number) => void;
+    /* Physics switches (Phase 2: JSON-controllable). */
+    setGravitomagneticForce: (sim: number, e: number) => void;
+    setGravitomagneticInductive: (sim: number, e: number) => void;
+    setEmLorentz: (sim: number, e: number) => void;
+    setEmInductive: (sim: number, e: number) => void;
+    setEmElectrostatic: (sim: number, e: number) => void;
+    setEmMagnetic: (sim: number, e: number) => void;
+    setEmStressEnergy: (sim: number, e: number) => void;
+    setEmShapiro: (sim: number, e: number) => void;
+    setFieldEvolution: (sim: number, e: number) => void;
+    setParticleSourceDeposition: (sim: number, e: number) => void;
+    setEsirkepov: (sim: number, e: number) => void;
+    setRhoSmoothPasses: (sim: number, n: number) => void;
+    setJSmoothPasses: (sim: number, n: number) => void;
+    setPeriodicBC: (sim: number, e: number) => void;
+    setParticleSpin: (sim: number, idx: number, spin: number, g: number) => void;
+    setBackgroundPointMass: (sim: number, x: number, y: number, GM: number, eps: number) => void;
+    setBackgroundSpinningPointMass: (sim: number, x: number, y: number, GM: number, eps: number, Jz: number) => void;
     setGEff: (sim: number, gEff: number) => void;
     setKE: (sim: number, kE: number) => void;
     addParticle: (sim: number, x: number, y: number, mass: number, charge: number, vx: number, vy: number) => number;
@@ -101,6 +119,23 @@ function bindCore(M: GRliteModule): GRliteCore {
         setOuterBcNeumann: vfn('gr_sim_set_outer_bc_neumann', ['number','number']),
         setVolumeFrictionTaper: vfn('gr_sim_set_volume_friction_taper', ['number','number','number','number']),
         setZeroMeanScalarPotentials: vfn('gr_sim_set_zero_mean_scalar_potentials', ['number','number']),
+        setGravitomagneticForce: vfn('gr_sim_set_gravitomagnetic_force_enabled', ['number','number']),
+        setGravitomagneticInductive: vfn('gr_sim_set_gravitomagnetic_inductive_enabled', ['number','number']),
+        setEmLorentz: vfn('gr_sim_set_em_lorentz_force_enabled', ['number','number']),
+        setEmInductive: vfn('gr_sim_set_em_inductive_enabled', ['number','number']),
+        setEmElectrostatic: vfn('gr_sim_set_em_electrostatic_enabled', ['number','number']),
+        setEmMagnetic: vfn('gr_sim_set_em_magnetic_enabled', ['number','number']),
+        setEmStressEnergy: vfn('gr_sim_set_em_stress_energy_enabled', ['number','number']),
+        setEmShapiro: vfn('gr_sim_set_em_shapiro_enabled', ['number','number']),
+        setFieldEvolution: vfn('gr_sim_set_field_evolution', ['number','number']),
+        setParticleSourceDeposition: vfn('gr_sim_set_particle_source_deposition', ['number','number']),
+        setEsirkepov: vfn('gr_sim_set_esirkepov_enabled', ['number','number']),
+        setRhoSmoothPasses: vfn('gr_sim_set_rho_smooth_passes', ['number','number']),
+        setJSmoothPasses: vfn('gr_sim_set_j_smooth_passes', ['number','number']),
+        setPeriodicBC: vfn('gr_sim_set_periodic_bc', ['number','number']),
+        setParticleSpin: vfn('gr_sim_set_particle_spin', ['number','number','number','number']),
+        setBackgroundPointMass: vfn('gr_sim_set_background_point_mass', ['number','number','number','number','number']),
+        setBackgroundSpinningPointMass: vfn('gr_sim_set_background_spinning_point_mass', ['number','number','number','number','number','number']),
         setGEff: vfn('gr_sim_set_G_eff', ['number','number']),
         setKE: vfn('gr_sim_set_k_e', ['number','number']),
         addParticle: M.cwrap('gr_sim_add_particle', 'number',

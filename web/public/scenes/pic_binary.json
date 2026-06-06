@@ -1,0 +1,38 @@
+{
+  "program": "grlite",
+  "format": "grlite-scenario",
+  "version": 1,
+  "name": "binary orbit",
+  "grid": { "W": 384, "H": 384, "dx": 1.0, "cEff": 1.0, "cfl": 0.7071067811865476 },
+  "global": {
+    "gEff": 1.0,
+    "kE": 1.0,
+    "shape": "bump",
+    "kernelRadius": 8,
+    "forceInterp": "lewis-birdsall",
+    "absorber": { "outerBC": "dirichlet", "frictionFloor": 0.0, "frictionWall": 0.02, "frictionDepth": 48, "zeroMeanScalar": false },
+    "init": { "method": "lw-settled", "settleSteps": 384 },
+    "switches": {
+      "gravitomagneticForce": true,
+      "gravitomagneticInductive": true,
+      "emLorentz": true,
+      "emInductive": true,
+      "emElectrostatic": true,
+      "emMagnetic": true,
+      "emStressEnergy": false,
+      "emShapiro": false,
+      "fieldEvolution": true,
+      "particleSourceDeposition": true,
+      "esirkepov": true,
+      "periodicBC": false
+    },
+    "rhoSmooth": 0,
+    "jSmooth": 0
+  },
+  "background": [],
+  "particles": [
+    { "x": 176.5, "y": 191.5, "vx": 0.0, "vy": 0.105, "mass": 0.01, "charge": 0.0 },
+    { "x": 206.5, "y": 191.5, "vx": 0.0, "vy": -0.105, "mass": 0.01, "charge": 0.0 }
+  ],
+  "view": { "field": 0, "showTrails": true, "showVelocity": true }
+}
