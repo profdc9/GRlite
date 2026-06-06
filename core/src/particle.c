@@ -1085,19 +1085,18 @@ void gr_particle_push_all(struct gr_sim* sim) {
         float G_dAx, G_dAy;
         dt_A_g_at_total(sim, p->x, p->y, &G_dAx, &G_dAy);
 
-        float Fx, Fy;
-        grav_force_at(sim, p->mass, vx_pre, vy_pre, phi, grad_x, grad_y, Bg_z, G_dAx, G_dAy, &Fx, &Fy);
+        /* Force is tracked as separate gravitational (GEM) and EM-Lorentz
+         * components (Fg, Fe) so the per-particle breakdown can be exported for
+         * the force-arrow overlay; the dynamics only see their sum. */
+        float Fg_x, Fg_y;
+        grav_force_at(sim, p->mass, vx_pre, vy_pre, phi, grad_x, grad_y, Bg_z, G_dAx, G_dAy, &Fg_x, &Fg_y);
         /* Additive EM Lorentz contribution: -q grad phi - q d_t A + q v x B
          * (Stages 23/24/25; full static-and-dynamic EM Lorentz force). */
-        {
-            float Fx_em, Fy_em;
-            em_force_at(p->charge, vx_pre, vy_pre,
-                        E_phi_grad_x, E_phi_grad_y,
-                        E_dAx, E_dAy,
-                        B_em_z, &Fx_em, &Fy_em);
-            Fx += Fx_em;
-            Fy += Fy_em;
-        }
+        float Fe_x = 0.0f, Fe_y = 0.0f;
+        em_force_at(p->charge, vx_pre, vy_pre,
+                    E_phi_grad_x, E_phi_grad_y,
+                    E_dAx, E_dAy,
+                    B_em_z, &Fe_x, &Fe_y);
         /* v40 spin-gradient force (Stern-Gerlach-like).
          * F_spin = s * grad B_g,z + mu * grad B_z,
          * where mu = (g q / 2m) * spin.  Computed BEFORE the corrector
@@ -1116,8 +1115,8 @@ void gr_particle_push_all(struct gr_sim* sim) {
             Fx_spin = p->spin * dBg_dx + mu_em * dBe_dx;
             Fy_spin = p->spin * dBg_dy + mu_em * dBe_dy;
         }
-        Fx += Fx_spin;
-        Fy += Fy_spin;
+        float Fx = Fg_x + Fe_x + Fx_spin;
+        float Fy = Fg_y + Fe_y + Fy_spin;
 
         /* Corrector iteration for velocity-dependent terms (Tier-2 scalar
          * coupling + Tier-1 gravitomagnetic v x B_g + EM v x B_em):
@@ -1137,17 +1136,15 @@ void gr_particle_push_all(struct gr_sim* sim) {
             const float vy_post = py_pred / (gamma_pred * p->mass);
             const float vx_mid = 0.5f * (vx_pre + vx_post);
             const float vy_mid = 0.5f * (vy_pre + vy_post);
-            grav_force_at(sim, p->mass, vx_mid, vy_mid, phi, grad_x, grad_y, Bg_z, G_dAx, G_dAy, &Fx, &Fy);
-            float Fx_em, Fy_em;
+            grav_force_at(sim, p->mass, vx_mid, vy_mid, phi, grad_x, grad_y, Bg_z, G_dAx, G_dAy, &Fg_x, &Fg_y);
             em_force_at(p->charge, vx_mid, vy_mid,
                         E_phi_grad_x, E_phi_grad_y,
                         E_dAx, E_dAy,
-                        B_em_z, &Fx_em, &Fy_em);
-            Fx += Fx_em;
-            Fy += Fy_em;
-            /* Re-fold spin-gradient force back in (corrector overwrote it). */
-            Fx += Fx_spin;
-            Fy += Fy_spin;
+                        B_em_z, &Fe_x, &Fe_y);
+            /* Re-form the total from the corrected grav/em plus the (v-indep.)
+             * spin-gradient force. */
+            Fx = Fg_x + Fe_x + Fx_spin;
+            Fy = Fg_y + Fe_y + Fy_spin;
         }
 
         /* v39: per-particle self-field subtraction.  Re-gather the force
@@ -1218,6 +1215,13 @@ void gr_particle_push_all(struct gr_sim* sim) {
             Fx -= (1.0f + eps_x) * Fx_self;
             Fy -= (1.0f + eps_y) * Fy_self;
         }
+
+        /* Stash the per-particle force breakdown for the visualization overlay
+         * (diagnostic only -- not used by the integrator). */
+        p->fgrav_x = Fg_x;   p->fgrav_y = Fg_y;
+        p->fem_x   = Fe_x;   p->fem_y   = Fe_y;
+        p->fspin_x = Fx_spin; p->fspin_y = Fy_spin;
+        p->ftot_x  = Fx;     p->ftot_y  = Fy;
 
         p->px += Fx * dt;
         p->py += Fy * dt;
@@ -1367,6 +1371,10 @@ int gr_sim_add_particle(gr_sim_t* sim, float x, float y,
     sim->particles[idx].spin        = 0.0f;
     sim->particles[idx].phi_spin    = 0.0f;
     sim->particles[idx].g_factor    = 2.0f;
+    sim->particles[idx].fgrav_x = 0.0f; sim->particles[idx].fgrav_y = 0.0f;
+    sim->particles[idx].fem_x   = 0.0f; sim->particles[idx].fem_y   = 0.0f;
+    sim->particles[idx].fspin_x = 0.0f; sim->particles[idx].fspin_y = 0.0f;
+    sim->particles[idx].ftot_x  = 0.0f; sim->particles[idx].ftot_y  = 0.0f;
     return idx;
 }
 

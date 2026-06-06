@@ -10,17 +10,20 @@
 
 import type { World } from '../sim/world';
 import type { AppState } from '../state';
+import type { Scenario } from '../sim/scenario';
 import {
     fullReport, particleReport, conservationReport, fieldStats, fieldProfile,
 } from './diagnostics';
 
 export interface BridgeContext {
     getWorld: () => World;              // getter: the World may be recreated on grid change
+    getScenario: () => Scenario;       // canonical scenario (name + view live here)
     state: AppState;
     canvas: HTMLCanvasElement;          // WebGL field canvas
     overlayCanvas?: HTMLCanvasElement;  // Canvas2D overlay (trails/arrows)
     setStatus: (s: string) => void;
     setPaused: (p: boolean) => void;
+    setViewField: (i: number) => void; // set the colormap field (updates UI too)
     reset: () => void;                  // rebuild the current scenario
     buildByName: (name: string) => void | Promise<void>;
 }
@@ -45,7 +48,7 @@ function buildHandlers(ctx: BridgeContext): Record<string, Handler> {
     return {
         status: () => ({
             connected: true,
-            scenario: state.scenario,
+            scenario: ctx.getScenario().name,
             step: w().stepCount(),
             time: w().time(),
             paused: state.paused,
@@ -62,7 +65,7 @@ function buildHandlers(ctx: BridgeContext): Record<string, Handler> {
         step: (p) => { w().step(Math.max(1, p?.n ?? 1)); return `step=${w().stepCount()} t=${w().time().toFixed(3)}`; },
         play: () => { state.paused = false; ctx.setPaused(false); return 'playing'; },
         pause: () => { state.paused = true; ctx.setPaused(true); return 'paused'; },
-        reset: () => { ctx.reset(); return `rebuilt ${state.scenario}`; },
+        reset: () => { ctx.reset(); return `rebuilt ${ctx.getScenario().name}`; },
         build: async (p) => {
             if (!p?.scenario) throw new Error('build requires { scenario }');
             await ctx.buildByName(p.scenario);
@@ -78,7 +81,7 @@ function buildHandlers(ctx: BridgeContext): Record<string, Handler> {
             let live = false;
             if (p?.gEff !== undefined) { w().setGEff(p.gEff); live = true; }
             if (p?.kE !== undefined) { w().setKE(p.kE); live = true; }
-            if (p?.viewField !== undefined) state.viewField = p.viewField;
+            if (p?.viewField !== undefined) ctx.setViewField(p.viewField);
             if (p?.paused !== undefined) { state.paused = !!p.paused; ctx.setPaused(state.paused); }
             if (live) state.liveModified = true;
             return `global updated${live ? ' (run is now live-modified)' : ''}`;

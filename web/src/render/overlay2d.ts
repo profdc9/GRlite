@@ -5,12 +5,19 @@
 
 import type { Particle } from '../sim/world';
 import type { VectorData } from '../sim/fieldViews';
-import type { TickMode } from '../sim/scenario';
+import type { TickMode, ForceArrows } from '../sim/scenario';
 
 const VEL_PX_PER_C = 420;   // arrow pixels at |v| = c
 const TRAIL_MAX = 600;       // points kept per particle
 const TRAIL_STRIDE = 4;      // [x, y, t, tau] per trail point
 const CLOCK_PERIOD = 120.0;  // time units per full hand revolution (gentle sweep)
+const FORCE_REF_PX = 70;     // px length of the strongest displayed force arrow
+
+/* Force-component arrow colors (§17): grav orange, EM blue, spin green,
+ * total white. */
+const FORCE_COLORS = {
+    grav: '#ff9030', em: '#4aa3ff', spin: '#46d66a', total: '#f0f0f0',
+} as const;
 
 /* Per-particle visualization flags passed to render (parallel to particles). */
 export interface ParticleDisplay {
@@ -84,7 +91,8 @@ export class Overlay2D {
     render(particles: Particle[], trails: Trails | null,
            opts: { showTrails: boolean; showVelocity: boolean; selected: number;
                    vectors?: { data: VectorData; spacing: number } | null;
-                   display?: ParticleDisplay[]; tickInterval?: number; time?: number }): void {
+                   display?: ParticleDisplay[]; tickInterval?: number; time?: number;
+                   forces?: ForceArrows }): void {
         const ctx = this.ctx;
         const S = TRAIL_STRIDE;
         ctx.clearRect(0, 0, this.cw, this.ch);
@@ -133,7 +141,9 @@ export class Overlay2D {
                 /* vy is +up in sim, -down in canvas */
                 const ey = y - vy * VEL_PX_PER_C;
                 const speed = Math.hypot(vx, vy);
-                ctx.strokeStyle = speed > 0.5 ? '#ff6060' : '#60a0ff';
+                /* Violet, distinct from the force-arrow palette; brighter when
+                 * relativistic (|v| > 0.5 c). */
+                ctx.strokeStyle = speed > 0.5 ? '#e0b0ff' : '#9b6cff';
                 ctx.lineWidth = 2;
                 ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(ex, ey); ctx.stroke();
                 this.arrowHead(ex, ey, Math.atan2(ey - y, ex - x), ctx.strokeStyle);
@@ -172,6 +182,43 @@ export class Overlay2D {
              * hand (cyan); the angular lag between them IS the accumulated time
              * dilation t-τ.  Digital readout shows τ, t-τ, and dτ/dt. */
             if (disp?.clock) this.drawClock(x + 26, y - 26, opts.time ?? p.properTime, p.properTime, disp.rate);
+        }
+
+        /* Force-component arrows on top of the markers. */
+        if (opts.forces) this.drawForces(particles, opts.forces);
+    }
+
+    /* Per-particle force arrows (§17): gravitational / EM / spin-gradient /
+     * total.  All enabled components across all particles share one auto-scale
+     * so their lengths are directly comparable; the strongest spans FORCE_REF_PX.
+     * Components stack from the same origin (the particle center). */
+    private drawForces(particles: Particle[], f: ForceArrows): void {
+        const ctx = this.ctx;
+        const comps: { on: boolean; gx: (p: Particle) => number; gy: (p: Particle) => number; c: string }[] = [
+            { on: f.grav,  gx: (p) => p.fgravX, gy: (p) => p.fgravY, c: FORCE_COLORS.grav },
+            { on: f.em,    gx: (p) => p.femX,   gy: (p) => p.femY,   c: FORCE_COLORS.em },
+            { on: f.spin,  gx: (p) => p.fspinX, gy: (p) => p.fspinY, c: FORCE_COLORS.spin },
+            { on: f.total, gx: (p) => p.ftotX,  gy: (p) => p.ftotY,  c: FORCE_COLORS.total },
+        ];
+        let max = 0;
+        for (const p of particles)
+            for (const cm of comps)
+                if (cm.on) max = Math.max(max, Math.hypot(cm.gx(p), cm.gy(p)));
+        if (max <= 0) return;
+        const scale = FORCE_REF_PX / max;
+
+        ctx.lineWidth = 2;
+        for (const p of particles) {
+            const x = this.sx(p.x), y = this.sy(p.y);
+            for (const cm of comps) {
+                if (!cm.on) continue;
+                const fx = cm.gx(p), fy = cm.gy(p);
+                if (fx === 0 && fy === 0) continue;
+                const ex = x + fx * scale, ey = y - fy * scale;   // sim y is +up
+                ctx.strokeStyle = cm.c;
+                ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(ex, ey); ctx.stroke();
+                this.arrowHead(ex, ey, Math.atan2(ey - y, ex - x), cm.c, 7);
+            }
         }
     }
 

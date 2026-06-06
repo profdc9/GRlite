@@ -108,7 +108,10 @@ export class Inspector {
 
         /* Perturbation fields: one toggle for evolve + deposit.  Off => the
          * particles' own fields are neither sourced nor evolved, so a body
-         * responds to ONLY the background (set one below). */
+         * responds to ONLY the background (set one below).  Field initialization
+         * follows automatically: applyScenario settles the field whenever
+         * perturbation is active (see sim/build.ts), so this stays a dumb
+         * switch and can't desync from the init method. */
         const pert = s.global.switches.fieldEvolution && s.global.switches.particleSourceDeposition;
         this.globalEl.appendChild(checkRow('perturbation', pert, (v) => edit((sc) => {
             sc.global.switches.fieldEvolution = v;
@@ -136,6 +139,16 @@ export class Inspector {
         this.globalEl.appendChild(header('visualization'));
         this.globalEl.appendChild(numRow('tick Δ (0=auto)', s.view.tickInterval, 0.5,
             (v) => viewEdit((sc) => { sc.view.tickInterval = Math.max(0, v); })));
+
+        /* Per-particle force arrows (drawn on every particle). */
+        const fa = s.view.forceArrows;
+        const faRow = (label: string, key: keyof typeof fa) =>
+            this.globalEl.appendChild(checkRow(label, fa[key],
+                (v) => viewEdit((sc) => { sc.view.forceArrows[key] = v; })));
+        faRow('force: grav', 'grav');
+        faRow('force: EM', 'em');
+        faRow('force: spin', 'spin');
+        faRow('force: total', 'total');
 
         const gl = document.createElement('div'); gl.className = 'live'; gl.textContent = '—';
         this.globalEl.appendChild(gl); this.globalLive = gl;

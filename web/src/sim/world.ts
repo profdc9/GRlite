@@ -7,10 +7,8 @@
 
 import type { GRliteCore } from '../wasm/binding';
 import {
-    GRID_W, GRID_H, DX, C_EFF, CFL, N_DAMPING, N_SETTLE,
-    GR_SHAPE_BUMP, GR_FORCE_INTERP_LB, KERNEL_RADIUS_CELLS,
-    FRICTION_FLOOR, FRICTION_WALL, GR_FIELD_PHI_GRAV,
-    PARTICLE_STRIDE_F32_OLD, PARTICLE_STRIDE_F32_NEW, SCENARIOS,
+    GRID_W, GRID_H, DX, C_EFF, CFL, GR_FIELD_PHI_GRAV,
+    PARTICLE_STRIDE_F32_OLD, PARTICLE_STRIDE_F32_NEW,
 } from './config';
 
 export interface Particle {
@@ -20,6 +18,11 @@ export interface Particle {
     mass: number; charge: number;
     properTime: number;
     spin: number; phiSpin: number; gFactor: number;
+    /* v43 last-step force breakdown (0 if the WASM predates the wider stride). */
+    fgravX: number; fgravY: number;
+    femX: number; femY: number;
+    fspinX: number; fspinY: number;
+    ftotX: number; ftotY: number;
 }
 
 export class World {
@@ -46,48 +49,11 @@ export class World {
     time(): number { return this.core.simTime(this.sim); }
     dt(): number { return this.core.simDt(this.sim); }
 
-    /* ---- absorber / deposition config (v42 production defaults) ---- */
-    applyAbsorberDefaults(): void {
-        const c = this.core, s = this.sim;
-        c.setOuterBcNeumann(s, 0);          // Dirichlet (pins DC mode)
-        c.setDamping(s, 0);                  // disable legacy multiplicative ring
-        c.setVolumeFrictionTaper(s, FRICTION_FLOOR, FRICTION_WALL, N_DAMPING);
-        c.setZeroMeanScalarPotentials(s, 0);
-        c.setShapeFunction(s, GR_SHAPE_BUMP);
-        c.setKernelRadius(s, KERNEL_RADIUS_CELLS);
-        c.setForceInterp(s, GR_FORCE_INTERP_LB);
-    }
-
     setParticlesFrozen(frozen: boolean): void {
         this.core.setParticlesFrozen(this.sim, frozen ? 1 : 0);
     }
     setGEff(g: number): void { this.core.setGEff(this.sim, g); }
     setKE(k: number): void { this.core.setKE(this.sim, k); }
-
-    /* ---- scenario loading (Phase 1: still via C scenarios) ---- */
-    loadScenario(name: string): number {
-        const spec = SCENARIOS[name];
-        if (!spec) { console.error(`unknown scenario: ${name}`); return -1; }
-        const M = this.core.M;
-        const arr = new Float32Array(spec.params);
-        const ptr = M._malloc(arr.byteLength);
-        M.HEAPF32.set(arr, ptr >> 2);
-        const rc = this.core.loadScenario(this.sim, spec.name, ptr, arr.length);
-        M._free(ptr);
-        if (rc === 0) this.detectStride();
-        return rc;
-    }
-
-    /* Full (re)build of a scenario: load + production config + settle init.
-     * After this the field is at the discrete fixed point and the particles
-     * are ready to release. */
-    buildScenario(name: string): number {
-        const rc = this.loadScenario(name);
-        if (rc !== 0) return rc;
-        this.applyAbsorberDefaults();
-        this.core.initPotentialsSettled(this.sim, N_SETTLE);
-        return 0;
-    }
 
     /* ---- field access ---- */
     fieldView(which = GR_FIELD_PHI_GRAV): Float32Array {
@@ -131,6 +97,7 @@ export class World {
 
     particle(i: number): Particle {
         const v = this.particleView(i);
+        const hasF = this.stride >= 18;
         return {
             index: i,
             x: v[0], y: v[1], px: v[2], py: v[3],
@@ -138,6 +105,10 @@ export class World {
             spin: this.stride >= 10 ? v[7] : 0,
             phiSpin: this.stride >= 10 ? v[8] : 0,
             gFactor: this.stride >= 10 ? v[9] : 2,
+            fgravX: hasF ? v[10] : 0, fgravY: hasF ? v[11] : 0,
+            femX: hasF ? v[12] : 0, femY: hasF ? v[13] : 0,
+            fspinX: hasF ? v[14] : 0, fspinY: hasF ? v[15] : 0,
+            ftotX: hasF ? v[16] : 0, ftotY: hasF ? v[17] : 0,
         };
     }
 

@@ -24,7 +24,7 @@ async function main(): Promise<void> {
     const canvas = document.getElementById('view') as HTMLCanvasElement;
     const overlayCanvas = document.getElementById('overlay') as HTMLCanvasElement;
 
-    const state = createState('pic_binary');
+    const state = createState();
 
     const gl = canvas.getContext('webgl2',
         { antialias: true, premultipliedAlpha: false, preserveDrawingBuffer: true });
@@ -45,28 +45,28 @@ async function main(): Promise<void> {
         trails = createTrails();
     }
 
+    /* Push the canonical view settings (current.view) into the toolbar widgets.
+     * current.view is the single source of truth; this just reflects it in the UI. */
+    function syncViewControls(): void {
+        controls.setField(current.view.field);
+        controls.setSource(current.view.source);
+        controls.setVectors(current.view.vectorField);
+        controls.setVectorSpacing(current.view.vectorSpacing);
+        controls.setTrails(current.view.showTrails);
+        controls.setVelocity(current.view.showVelocity);
+    }
+
     function loadScenario(scn: Scenario): void {
         controls.setStatus(`building ${scn.name}…`);
         if (!world || world.W !== scn.grid.W || world.H !== scn.grid.H) setupGrid(scn.grid);
         applyScenario(world, scn);
         current = scn;
-        state.scenario = scn.name;
-        state.viewField = scn.view.field;
-        state.viewSource = scn.view.source;
-        state.vectorField = scn.view.vectorField;
-        state.vectorSpacing = scn.view.vectorSpacing;
-        state.showTrails = scn.view.showTrails;
-        state.showVelocity = scn.view.showVelocity;
         state.paused = true;
         state.liveModified = false;
         state.selected = -1;
         trails.reset(world.particleCount());
         controls.setPaused(true);
-        controls.setField(state.viewField);
-        controls.setSource(state.viewSource);
-        controls.setVectors(state.vectorField);
-        controls.setVectorSpacing(state.vectorSpacing);
-        controls.setTrails(state.showTrails);
+        syncViewControls();
         controls.setRadiation(scn.global.noRadiation);
         inspector.renderEditors();
         writeToHash(scn);
@@ -118,11 +118,12 @@ async function main(): Promise<void> {
         onStep: () => { state.singleStep = true; },
         onReset: () => loadScenario(current),
         onScenarioChange: (name) => { void buildByName(name); },
-        onFieldChange: (i) => { state.viewField = i; current.view.field = i; },
-        onSourceChange: (sourceName) => { state.viewSource = sourceName; current.view.source = sourceName; },
-        onVectorsChange: (i) => { state.vectorField = i; current.view.vectorField = i; },
-        onVectorSpacingChange: (n) => { state.vectorSpacing = n; current.view.vectorSpacing = n; },
-        onToggleTrails: () => { state.showTrails = !state.showTrails; controls.setTrails(state.showTrails); },
+        onFieldChange: (i) => { current.view.field = i; },
+        onSourceChange: (sourceName) => { current.view.source = sourceName; },
+        onVectorsChange: (i) => { current.view.vectorField = i; },
+        onVectorSpacingChange: (n) => { current.view.vectorSpacing = n; },
+        onToggleTrails: () => { current.view.showTrails = !current.view.showTrails; controls.setTrails(current.view.showTrails); },
+        onToggleVelocity: () => { current.view.showVelocity = !current.view.showVelocity; controls.setVelocity(current.view.showVelocity); },
         onUndo: () => undo(),
         onToggleRadiation: () => applyEdit((sc) => { sc.global.noRadiation = !sc.global.noRadiation; }),
         onCopyLink: () => {
@@ -139,7 +140,7 @@ async function main(): Promise<void> {
             });
         },
     });
-    controls.setTrails(state.showTrails);
+    syncViewControls();
 
     controls.setStatus('loading WASM…');
     core = await loadCore();
@@ -187,9 +188,11 @@ async function main(): Promise<void> {
         const { startBridge } = await import('./dev/bridge');
         startBridge({
             getWorld: () => world,
+            getScenario: () => current,
             state, canvas, overlayCanvas,
             setStatus: controls.setStatus,
             setPaused: controls.setPaused,
+            setViewField: (i) => { current.view.field = i; controls.setField(i); },
             reset: () => loadScenario(current),
             buildByName,
         });
@@ -215,23 +218,24 @@ async function main(): Promise<void> {
             state.singleStep = false;
         }
 
-        const key = `${state.viewField}|${state.viewSource}|${state.vectorField}`;
+        const view = current.view;
+        const key = `${view.field}|${view.source}|${view.vectorField}`;
         const recompute = advanced || key !== viewKey || cmCache === null;
         viewKey = key;
 
         gl!.viewport(0, 0, canvas.width, canvas.height);
         gl!.clearColor(0, 0, 0, 1);
         gl!.clear(gl!.COLOR_BUFFER_BIT);
-        if (colormapEnabled(state.viewField)) {
-            if (recompute) cmCache = computeView(world, state.viewField, state.viewSource);
+        if (colormapEnabled(view.field)) {
+            if (recompute) cmCache = computeView(world, view.field, view.source);
             fieldPass.render(cmCache!);
         } else {
             cmCache = null;
         }
 
         if (recompute) {
-            vecCache = state.vectorField > 0
-                ? computeVectorField(world, state.vectorField, state.viewSource)
+            vecCache = view.vectorField > 0
+                ? computeVectorField(world, view.vectorField, view.source)
                 : null;
         }
         const vec = vecCache;
@@ -265,13 +269,14 @@ async function main(): Promise<void> {
         }));
 
         overlay.render(parts, trails,
-            { showTrails: state.showTrails, showVelocity: state.showVelocity, selected: state.selected,
-              vectors: vec ? { data: vec, spacing: state.vectorSpacing } : null,
-              display, tickInterval: current.view.tickInterval, time: tNow });
+            { showTrails: view.showTrails, showVelocity: view.showVelocity, selected: state.selected,
+              vectors: vec ? { data: vec, spacing: view.vectorSpacing } : null,
+              display, tickInterval: view.tickInterval, time: tNow,
+              forces: view.forceArrows });
 
         inspector.updateLive();
         controls.setStatus(
-            `${state.scenario}  step ${world.stepCount().toString().padStart(6)}  ` +
+            `${current.name}  step ${world.stepCount().toString().padStart(6)}  ` +
             `t=${world.time().toFixed(2)}  parts=${parts.length}  ` +
             `${state.liveModified ? '[LIVE-MODIFIED] ' : ''}${state.paused ? '[PAUSED]' : ''}`);
         requestAnimationFrame(frame);

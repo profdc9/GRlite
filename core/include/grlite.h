@@ -290,6 +290,21 @@ typedef struct {
     float spin;
     float phi_spin;
     float g_factor;
+    /* v43 -- last-step force components (diagnostic / visualization only; these
+     * are written each push and never fed back into the dynamics).  The
+     * components are the COLLECTIVE (pre-self-subtraction) contributions, so
+     * (fgrav + fem + fspin) == ftot exactly when per-particle self-field
+     * subtraction is off (the usual case).  With self-field subtraction on,
+     * ftot is the exact force applied to the particle and the components are
+     * the collective gathers (their sum exceeds ftot by the removed self-force).
+     *   fgrav = gravitational / GEM force (incl. v x B_g and relativistic terms)
+     *   fem   = EM Lorentz force  q(E + v x B)
+     *   fspin = spin-gradient (Stern-Gerlach) force  s grad B_g,z + mu grad B_z
+     *   ftot  = total force actually applied to the particle this step */
+    float fgrav_x, fgrav_y;
+    float fem_x,   fem_y;
+    float fspin_x, fspin_y;
+    float ftot_x,  ftot_y;
 } gr_particle_t;
 
 /* Force tier — selects which terms enter the gravitational force.

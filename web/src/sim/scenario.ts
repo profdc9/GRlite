@@ -138,6 +138,17 @@ export interface ViewSpec {
      * ticks, so their differing spacing along the track reveals time dilation).
      * 0 = auto (pick a "nice" Δ giving ~12 ticks across the current trail). */
     tickInterval: number;
+    /* Per-particle force-arrow overlay (§17): which force components to draw on
+     * every particle.  Arrow lengths share one auto-scale so magnitudes are
+     * comparable across components and particles. */
+    forceArrows: ForceArrows;
+}
+
+export interface ForceArrows {
+    grav: boolean;   // gravitational / GEM force (orange)
+    em: boolean;     // EM Lorentz force (blue)
+    spin: boolean;   // spin-gradient force (green)
+    total: boolean;  // total applied force (white)
 }
 
 export interface Scenario {
@@ -205,7 +216,8 @@ export function emptyScenario(name = 'untitled'): Scenario {
         particles: [],
         view: { field: 0, showTrails: true, showVelocity: true,
                 source: 'perturbation', vectorField: 0, vectorSpacing: 24,
-                tickInterval: 0 },
+                tickInterval: 0,
+                forceArrows: { grav: false, em: false, spin: false, total: false } },
     };
 }
 

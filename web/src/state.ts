@@ -1,23 +1,12 @@
-/* Central app state.  The render loop reads it; UI and (later) the debug
- * bridge mutate it.  Kept deliberately small and plain. */
-
-import { GR_FIELD_PHI_GRAV } from './sim/config';
-import type { FieldSourceName } from './sim/scenario';
+/* Central app state: ONLY genuine runtime/UI state that is not part of the
+ * scenario.  All view settings (field/source/vectors/trails/velocity) and the
+ * scenario name live on the canonical Scenario (current.view / current.name) --
+ * that is their single source of truth; mirroring them here caused drift.  The
+ * render loop reads view settings from `current`; UI + bridge mutate `current`. */
 
 export interface AppState {
-    scenario: string;
     paused: boolean;
     singleStep: boolean;
-    /* Which field VIEW (index into FIELD_VIEWS) the FieldPass displays. */
-    viewField: number;
-    /* Which part of the field the visualizations read. */
-    viewSource: FieldSourceName;
-    /* Vector-arrow overlay: index into VECTOR_FIELDS (0 = off) + grid spacing. */
-    vectorField: number;
-    vectorSpacing: number;
-    /* Overlay toggles. */
-    showTrails: boolean;
-    showVelocity: boolean;
     /* Set when a live edit has diverged the running sim from the canonical
      * scenario -- run is no longer reproducible until reset. */
     liveModified: boolean;
@@ -25,17 +14,10 @@ export interface AppState {
     selected: number;
 }
 
-export function createState(scenario: string): AppState {
+export function createState(): AppState {
     return {
-        scenario,
         paused: true,
         singleStep: false,
-        viewField: GR_FIELD_PHI_GRAV,
-        viewSource: 'perturbation',
-        vectorField: 0,
-        vectorSpacing: 24,
-        showTrails: true,
-        showVelocity: true,
         liveModified: false,
         selected: -1,
     };

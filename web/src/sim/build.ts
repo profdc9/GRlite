@@ -74,10 +74,21 @@ export function applyScenario(world: World, scn: Scenario): void {
     c.setVolumeFrictionTaper(s, ab.frictionFloor, ab.frictionWall, ab.frictionDepth);
     c.setZeroMeanScalarPotentials(s, b(ab.zeroMeanScalar));
 
-    /* Field initialization. */
-    if (g.init.method === 'lw-settled') c.initPotentialsSettled(s, g.init.settleSteps);
-    else if (g.init.method === 'lw') c.initPotentialsLW(s);
-    /* 'none' -> leave fields zero. */
+    /* Field initialization -- derived from the physics config so it can't
+     * desync from the switches (this is the single place both scenario load
+     * and the reset button initialize through).  When perturbation is active
+     * (deposit + evolve) the field MUST start at its settled fixed point, else
+     * the run begins from zero with an unphysical transient -- so an explicit
+     * 'lw-settled', OR any active-perturbation run, settles the field.  'lw'
+     * is the unrelaxed direct sum; 'none' with perturbation off leaves zero. */
+    const pertActive = sw.fieldEvolution && sw.particleSourceDeposition;
+    const settleSteps = g.init.settleSteps > 0 ? g.init.settleSteps : Math.max(scn.grid.W, scn.grid.H);
+    if (g.init.method === 'lw-settled' || (g.init.method === 'none' && pertActive)) {
+        c.initPotentialsSettled(s, settleSteps);
+    } else if (g.init.method === 'lw') {
+        c.initPotentialsLW(s);
+    }
+    /* else: 'none' + perturbation off -> leave fields zero. */
 
     /* Every (re)build starts a fresh run at t=0.  initPotentialsSettled already
      * zeroes step_count, but 'none'/'lw' inits do not -- without this the sim

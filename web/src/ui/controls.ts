@@ -13,6 +13,7 @@ export interface ControlHandlers {
     onVectorsChange: (index: number) => void;
     onVectorSpacingChange: (cells: number) => void;
     onToggleTrails: () => void;
+    onToggleVelocity: () => void;
     onUndo: () => void;
     onToggleRadiation: () => void;
     onCopyLink?: () => void;
@@ -24,6 +25,7 @@ export interface Controls {
     setPaused: (paused: boolean) => void;
     setStatus: (text: string) => void;
     setTrails: (on: boolean) => void;
+    setVelocity: (on: boolean) => void;
     setField: (index: number) => void;
     setSource: (source: FieldSourceName) => void;
     setVectors: (index: number) => void;
@@ -44,6 +46,7 @@ export function wireControls(h: ControlHandlers): Controls {
     const vectorsSel = document.getElementById('vectors') as HTMLSelectElement;
     const vecSpacingInp = document.getElementById('vecspacing') as HTMLInputElement;
     const trailsBtn = document.getElementById('trails') as HTMLButtonElement;
+    const velocityBtn = document.getElementById('velocity') as HTMLButtonElement;
     const probeBtn = document.getElementById('probe') as HTMLButtonElement | null;
 
     /* Populate field selector from FIELD_VIEWS. */
@@ -76,6 +79,7 @@ export function wireControls(h: ControlHandlers): Controls {
         if (Number.isFinite(n) && n >= 2) h.onVectorSpacingChange(n);
     });
     trailsBtn.addEventListener('click', h.onToggleTrails);
+    velocityBtn.addEventListener('click', h.onToggleVelocity);
     const undoBtn = document.getElementById('undo') as HTMLButtonElement;
     const radBtn = document.getElementById('radiation') as HTMLButtonElement;
     undoBtn.addEventListener('click', h.onUndo);
@@ -97,6 +101,7 @@ export function wireControls(h: ControlHandlers): Controls {
         setPaused: (paused) => { pauseBtn.textContent = paused ? 'resume' : 'pause'; },
         setStatus: (text) => { statusEl.textContent = text; },
         setTrails: (on) => { trailsBtn.textContent = `trails: ${on ? 'on' : 'off'}`; },
+        setVelocity: (on) => { velocityBtn.textContent = `velocity: ${on ? 'on' : 'off'}`; },
         setField: (index) => { fieldSel.value = String(index); },
         setSource: (source) => { sourceSel.value = source; },
         setVectors: (index) => { vectorsSel.value = String(index); },

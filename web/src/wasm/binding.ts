@@ -18,7 +18,6 @@ export interface GRliteCore {
     stepN: (sim: number, n: number) => void;
     fieldPtr: (sim: number, which: number) => number;
     backgroundPtr: (sim: number, which: number) => number;
-    loadScenario: (sim: number, name: string, paramsPtr: number, n: number) => number;
     setDamping: (sim: number, nDamping: number) => void;
     setParticlesFrozen: (sim: number, frozen: number) => void;
     relaxPhiGPoisson: (sim: number, nIters: number) => void;
@@ -112,9 +111,6 @@ function bindCore(M: GRliteModule): GRliteCore {
         stepN: vfn('gr_sim_step_n', ['number','number']),
         fieldPtr: num('gr_sim_field_ptr', ['number','number']),
         backgroundPtr: num('gr_sim_background_ptr', ['number','number']),
-        loadScenario: M.cwrap('gr_sim_load_scenario', 'number',
-            ['number','string','number','number']) as unknown as
-            (sim: number, name: string, p: number, n: number) => number,
         setDamping: vfn('gr_sim_set_damping', ['number','number']),
         setParticlesFrozen: vfn('gr_sim_set_particles_frozen', ['number','number']),
         relaxPhiGPoisson: vfn('gr_sim_relax_phi_g_poisson', ['number','number']),
@@ -163,13 +159,13 @@ function bindCore(M: GRliteModule): GRliteCore {
         simDt: num('gr_sim_dt', ['number']),
         particleCount: num('gr_sim_particle_count', ['number']),
         getParticle: num('gr_sim_get_particle', ['number','number']),
-        particleStrideF32: 10,
+        particleStrideF32: 18,
     };
 
     /* Fail loudly if a load-bearing symbol is missing -- otherwise cwrap
      * returns a silent no-op that surfaces as a confusing error later. */
     const required: (keyof GRliteCore)[] = [
-        'create','step','stepN','fieldPtr','loadScenario','initPotentialsSettled',
+        'create','step','stepN','fieldPtr','initPotentialsSettled',
         'setShapeFunction','setKernelRadius','setVolumeFrictionTaper',
         'setOuterBcNeumann','setParticlesFrozen','addParticle','getParticle',
     ];
