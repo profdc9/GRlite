@@ -61,9 +61,26 @@ async function main(): Promise<void> {
         controls.setPaused(true);
         controls.setField(state.viewField);
         controls.setTrails(state.showTrails);
+        controls.setRadiation(scn.global.noRadiation);
+        inspector.renderEditors();
         writeToHash(scn);
         console.log(`[${scn.name}] built\n` + fullReport(world));
         controls.setStatus(`paused on ${scn.name} (press resume)`);
+    }
+
+    /* Edit model: snapshot for undo, mutate the canonical scenario, rebuild
+     * from it (deterministic edit -> restart).  Undo pops + rebuilds. */
+    const undoStack: Scenario[] = [];
+    function applyEdit(mutate: (s: Scenario) => void): void {
+        undoStack.push(structuredClone(current));
+        if (undoStack.length > 50) undoStack.shift();
+        mutate(current);
+        loadScenario(current);
+    }
+    function undo(): void {
+        const prev = undoStack.pop();
+        if (!prev) { controls.setStatus('nothing to undo'); return; }
+        loadScenario(prev);
     }
 
     /* Load a scenario by name from the JSON library (public/scenes/<name>.json).
@@ -88,6 +105,8 @@ async function main(): Promise<void> {
         onScenarioChange: (name) => { void buildByName(name); },
         onFieldChange: (i) => { state.viewField = i; },
         onToggleTrails: () => { state.showTrails = !state.showTrails; controls.setTrails(state.showTrails); },
+        onUndo: () => undo(),
+        onToggleRadiation: () => applyEdit((sc) => { sc.global.noRadiation = !sc.global.noRadiation; }),
         onCopyLink: () => {
             writeToHash(current);
             void navigator.clipboard?.writeText(location.href);
@@ -107,7 +126,12 @@ async function main(): Promise<void> {
     controls.setStatus('loading WASM…');
     core = await loadCore();
 
-    const inspector = new Inspector();
+    const inspector = new Inspector({
+        getScenario: () => current,
+        getState: () => state,
+        getWorld: () => world,
+        onEdit: applyEdit,
+    });
 
     /* Click to select the nearest particle. */
     overlayCanvas.addEventListener('click', (ev) => {
@@ -115,6 +139,7 @@ async function main(): Promise<void> {
         const px = (ev.clientX - r.left) * (overlayCanvas.width / r.width);
         const py = (ev.clientY - r.top) * (overlayCanvas.height / r.height);
         state.selected = overlay.pick(px, py, world.particles());
+        inspector.renderEditors();
     });
 
     /* Populate the scenario dropdown from the library manifest (the JSON
@@ -169,7 +194,7 @@ async function main(): Promise<void> {
         overlay.render(parts, trails,
             { showTrails: state.showTrails, showVelocity: state.showVelocity, selected: state.selected });
 
-        inspector.update(world, state);
+        inspector.updateLive();
         controls.setStatus(
             `${state.scenario}  step ${world.stepCount().toString().padStart(6)}  ` +
             `t=${world.time().toFixed(2)}  parts=${parts.length}  ` +

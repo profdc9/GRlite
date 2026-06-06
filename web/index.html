@@ -35,6 +35,19 @@
       .panel + .panel { margin-top: 12px; }
       .kv { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
             font-size: 12px; line-height: 1.5; color: #ccd; white-space: pre-wrap; }
+      .right { width: 340px; }
+      .panel.hidden { display: none; }
+      .row { display: flex; align-items: center; gap: 8px; margin: 3px 0;
+             font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+      .row label { flex: 0 0 96px; color: #9ab; }
+      .row input[type=number] { width: 110px; background: #0e0e12; color: #ddd;
+             border: 1px solid #3a3a45; border-radius: 3px; padding: 2px 5px;
+             font-family: inherit; font-size: 12px; }
+      .row input[type=checkbox] { accent-color: #5a7; }
+      .row select { flex: 1; }
+      .live { margin-top: 8px; padding-top: 6px; border-top: 1px solid #24242c;
+              font-family: ui-monospace, Consolas, monospace; font-size: 11px;
+              color: #9a9; white-space: pre-wrap; }
       .hint { color: #777; font-size: 11px; margin-top: 6px; }
       .badge { display: inline-block; padding: 1px 6px; border-radius: 3px;
                font-size: 10px; background: #3a2a10; color: #e0a040; }
@@ -59,7 +72,11 @@
           <button id="reset">reset</button>
           <button id="pause">resume</button>
           <button id="stepFrame">step 1</button>
+          <button id="undo" title="undo last scenario edit">undo</button>
+          <button id="radiation" title="toggle radiation-reaction (inductive) terms">radiation: on</button>
           <button id="trails" title="toggle particle trails">trails: on</button>
+          <button id="toggleGlobal" title="show/hide the global inspector">⚙ global</button>
+          <button id="toggleParticle" title="show/hide the particle inspector">◉ particle</button>
           <button id="copylink" title="copy a shareable URL of the current scenario">copy link</button>
           <button id="savejson" title="download the current scenario as JSON">save .json</button>
           <button id="probe" title="frozen-particle stability probe">probe</button>
@@ -67,11 +84,11 @@
         <div id="status">initializing&hellip;</div>
       </div>
       <div class="right">
-        <div class="panel">
+        <div class="panel" id="panelGlobal">
           <h2>Global</h2>
           <div id="globalInfo" class="kv">—</div>
         </div>
-        <div class="panel">
+        <div class="panel" id="panelParticle">
           <h2>Particle</h2>
           <div id="particleInfo" class="kv">click a particle to select</div>
         </div>
