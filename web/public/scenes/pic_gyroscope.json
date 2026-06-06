@@ -43,5 +43,5 @@
     { "x": 95.5, "y": 63.5, "vx": 0.0, "vy": 0.0, "mass": 20.0, "charge": 0.0, "spin": 0.2, "gFactor": 2.0 },
     { "x": 63.5, "y": 71.5, "vx": 0.0, "vy": 0.0, "mass": 20.0, "charge": 0.0, "spin": 0.2, "gFactor": 2.0 }
   ],
-  "view": { "field": 0, "showTrails": false, "showVelocity": false }
+  "view": { "field": 1, "showTrails": false, "showVelocity": false, "source": "background", "vectorField": 1, "vectorSpacing": 8 }
 }

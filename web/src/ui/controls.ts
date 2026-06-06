@@ -1,6 +1,7 @@
 /* Toolbar + selector wiring.  Pure DOM, no framework. */
 
-import { FIELD_VIEWS } from '../sim/fieldViews';
+import { FIELD_VIEWS, VECTOR_FIELDS } from '../sim/fieldViews';
+import type { FieldSourceName } from '../sim/scenario';
 
 export interface ControlHandlers {
     onTogglePause: () => void;
@@ -8,6 +9,9 @@ export interface ControlHandlers {
     onReset: () => void;
     onScenarioChange: (name: string) => void;
     onFieldChange: (index: number) => void;
+    onSourceChange: (source: FieldSourceName) => void;
+    onVectorsChange: (index: number) => void;
+    onVectorSpacingChange: (cells: number) => void;
     onToggleTrails: () => void;
     onUndo: () => void;
     onToggleRadiation: () => void;
@@ -21,6 +25,9 @@ export interface Controls {
     setStatus: (text: string) => void;
     setTrails: (on: boolean) => void;
     setField: (index: number) => void;
+    setSource: (source: FieldSourceName) => void;
+    setVectors: (index: number) => void;
+    setVectorSpacing: (cells: number) => void;
     setScenarios: (items: { value: string; label: string }[], selected?: string) => void;
     setScenario: (value: string) => void;
     setRadiation: (on: boolean) => void;
@@ -33,6 +40,9 @@ export function wireControls(h: ControlHandlers): Controls {
     const stepBtn = document.getElementById('stepFrame') as HTMLButtonElement;
     const scenarioSel = document.getElementById('scenario') as HTMLSelectElement;
     const fieldSel = document.getElementById('field') as HTMLSelectElement;
+    const sourceSel = document.getElementById('source') as HTMLSelectElement;
+    const vectorsSel = document.getElementById('vectors') as HTMLSelectElement;
+    const vecSpacingInp = document.getElementById('vecspacing') as HTMLInputElement;
     const trailsBtn = document.getElementById('trails') as HTMLButtonElement;
     const probeBtn = document.getElementById('probe') as HTMLButtonElement | null;
 
@@ -45,11 +55,26 @@ export function wireControls(h: ControlHandlers): Controls {
         fieldSel.appendChild(opt);
     });
 
+    /* Populate vector-field selector from VECTOR_FIELDS (index 0 = none). */
+    vectorsSel.innerHTML = '';
+    VECTOR_FIELDS.forEach((v, i) => {
+        const opt = document.createElement('option');
+        opt.value = String(i);
+        opt.textContent = v.label;
+        vectorsSel.appendChild(opt);
+    });
+
     pauseBtn.addEventListener('click', h.onTogglePause);
     stepBtn.addEventListener('click', h.onStep);
     resetBtn.addEventListener('click', h.onReset);
     scenarioSel.addEventListener('change', () => h.onScenarioChange(scenarioSel.value));
     fieldSel.addEventListener('change', () => h.onFieldChange(parseInt(fieldSel.value, 10)));
+    sourceSel.addEventListener('change', () => h.onSourceChange(sourceSel.value as FieldSourceName));
+    vectorsSel.addEventListener('change', () => h.onVectorsChange(parseInt(vectorsSel.value, 10)));
+    vecSpacingInp.addEventListener('change', () => {
+        const n = parseInt(vecSpacingInp.value, 10);
+        if (Number.isFinite(n) && n >= 2) h.onVectorSpacingChange(n);
+    });
     trailsBtn.addEventListener('click', h.onToggleTrails);
     const undoBtn = document.getElementById('undo') as HTMLButtonElement;
     const radBtn = document.getElementById('radiation') as HTMLButtonElement;
@@ -73,6 +98,9 @@ export function wireControls(h: ControlHandlers): Controls {
         setStatus: (text) => { statusEl.textContent = text; },
         setTrails: (on) => { trailsBtn.textContent = `trails: ${on ? 'on' : 'off'}`; },
         setField: (index) => { fieldSel.value = String(index); },
+        setSource: (source) => { sourceSel.value = source; },
+        setVectors: (index) => { vectorsSel.value = String(index); },
+        setVectorSpacing: (cells) => { vecSpacingInp.value = String(cells); },
         setRadiation: (on) => { radBtn.textContent = `radiation: ${on ? 'on' : 'off'}`; },
         setScenarios: (items, selected) => {
             scenarioSel.innerHTML = '';

@@ -69,6 +69,19 @@
           <select id="scenario"><!-- populated from /scenes/index.json --></select>
           <label for="field">field</label>
           <select id="field"></select>
+          <label for="source">source</label>
+          <select id="source" title="which part of the field the visualizations show">
+            <option value="perturbation">perturbation</option>
+            <option value="background">background</option>
+            <option value="sum">sum</option>
+            <option value="none">none</option>
+          </select>
+          <label for="vectors">vectors</label>
+          <select id="vectors" title="overlay a grid of field-direction arrows"></select>
+          <label for="vecspacing">spacing</label>
+          <input id="vecspacing" type="number" min="6" max="64" step="2" value="24"
+                 title="arrow grid spacing in cells (smaller = denser)"
+                 style="width:54px" />
           <button id="reset">reset</button>
           <button id="pause">resume</button>
           <button id="stepFrame">step 1</button>

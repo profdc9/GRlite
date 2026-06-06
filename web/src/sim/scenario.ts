@@ -14,6 +14,8 @@ export type ForceInterpName = 'legacy' | 'lewis-birdsall';
 export type OuterBCName = 'dirichlet' | 'neumann';
 export type InitMethod = 'lw-settled' | 'lw' | 'none';
 export type BgModeName = 'sampled' | 'analytic';
+/* Which part of a field the visualizations (colormap + vector overlay) show. */
+export type FieldSourceName = 'perturbation' | 'background' | 'sum' | 'none';
 
 export interface GridSpec {
     W: number; H: number; dx: number; cEff: number; cfl: number;
@@ -86,7 +88,15 @@ export interface ParticleSpec {
     selfFieldEps?: [number, number];
 }
 
-export interface ViewSpec { field: number; showTrails: boolean; showVelocity: boolean; }
+export interface ViewSpec {
+    field: number; showTrails: boolean; showVelocity: boolean;
+    /* Field-visualization source (colormap + vector overlay). */
+    source: FieldSourceName;
+    /* Vector-arrow overlay: index into VECTOR_FIELDS (0 = off), and the grid
+     * spacing in cells between arrows (smaller = denser). */
+    vectorField: number;
+    vectorSpacing: number;
+}
 
 export interface Scenario {
     program: typeof SCENARIO_PROGRAM;
@@ -151,7 +161,8 @@ export function emptyScenario(name = 'untitled'): Scenario {
         global: defaultGlobal(),
         background: [],
         particles: [],
-        view: { field: 0, showTrails: true, showVelocity: true },
+        view: { field: 0, showTrails: true, showVelocity: true,
+                source: 'perturbation', vectorField: 0, vectorSpacing: 24 },
     };
 }
 

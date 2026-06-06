@@ -17,6 +17,7 @@ export interface GRliteCore {
     step: (sim: number) => void;
     stepN: (sim: number, n: number) => void;
     fieldPtr: (sim: number, which: number) => number;
+    backgroundPtr: (sim: number, which: number) => number;
     loadScenario: (sim: number, name: string, paramsPtr: number, n: number) => number;
     setDamping: (sim: number, nDamping: number) => void;
     setParticlesFrozen: (sim: number, frozen: number) => void;
@@ -107,6 +108,7 @@ function bindCore(M: GRliteModule): GRliteCore {
         step: vfn('gr_sim_step', ['number']),
         stepN: vfn('gr_sim_step_n', ['number','number']),
         fieldPtr: num('gr_sim_field_ptr', ['number','number']),
+        backgroundPtr: num('gr_sim_background_ptr', ['number','number']),
         loadScenario: M.cwrap('gr_sim_load_scenario', 'number',
             ['number','string','number','number']) as unknown as
             (sim: number, name: string, p: number, n: number) => number,

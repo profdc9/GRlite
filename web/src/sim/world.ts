@@ -95,6 +95,14 @@ export class World {
         return new Float32Array(this.core.M.HEAPF32.buffer, ptr, this.W * this.H);
     }
 
+    /* Background (analytic/sampled) grid for a field id, or null if no
+     * background of that kind has been installed (the C side returns NULL). */
+    backgroundView(which: number): Float32Array | null {
+        const ptr = this.core.backgroundPtr(this.sim, which);
+        if (!ptr) return null;
+        return new Float32Array(this.core.M.HEAPF32.buffer, ptr, this.W * this.H);
+    }
+
     /* ---- particles ---- */
     /* Re-probe the particle struct stride after a fresh build. */
     refreshStride(): void { this.detectStride(); }

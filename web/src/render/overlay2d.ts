@@ -4,6 +4,7 @@
  * so we flip y in the mapping. */
 
 import type { Particle } from '../sim/world';
+import type { VectorData } from '../sim/fieldViews';
 
 const VEL_PX_PER_C = 420;   // arrow pixels at |v| = c
 const TRAIL_MAX = 600;       // points kept per particle
@@ -62,9 +63,13 @@ export class Overlay2D {
     }
 
     render(particles: Particle[], trails: Trails | null,
-           opts: { showTrails: boolean; showVelocity: boolean; selected: number }): void {
+           opts: { showTrails: boolean; showVelocity: boolean; selected: number;
+                   vectors?: { data: VectorData; spacing: number } | null }): void {
         const ctx = this.ctx;
         ctx.clearRect(0, 0, this.cw, this.ch);
+
+        /* Vector-field arrows (under the trails/particles). */
+        if (opts.vectors) this.drawVectors(opts.vectors.data, opts.vectors.spacing);
 
         /* Trails: fade with age (oldest transparent). */
         if (opts.showTrails && trails) {
@@ -134,8 +139,53 @@ export class Overlay2D {
         }
     }
 
-    private arrowHead(x: number, y: number, ang: number, color: string): void {
-        const ctx = this.ctx, s = 6;
+    /* Quiver: arrows on a `spacing`-cell grid showing the local field
+     * direction + magnitude.  Lengths are normalized so the strongest sampled
+     * arrow spans ~0.9 of the cell gap; alpha fades with relative magnitude so
+     * weak regions recede.  Arrows are centered on their sample point. */
+    private drawVectors(v: VectorData, spacing: number): void {
+        const ctx = this.ctx;
+        const W = this.W, H = this.H;
+        const step = Math.max(2, Math.round(spacing));
+        const start = Math.floor(step / 2);
+
+        /* First pass: peak magnitude among the sampled points. */
+        let max = 0;
+        for (let j = start; j < H; j += step) {
+            for (let i = start; i < W; i += step) {
+                const k = j * W + i;
+                const m = Math.hypot(v.vx[k], v.vy[k]);
+                if (m > max) max = m;
+            }
+        }
+        if (max <= 0) return;
+
+        const spacingPx = step * (this.cw / W);
+        const scale = (spacingPx * 0.9) / max;   // px per field unit
+        const head = Math.min(5, spacingPx * 0.22);
+        ctx.lineWidth = 1.25;
+
+        for (let j = start; j < H; j += step) {
+            for (let i = start; i < W; i += step) {
+                const k = j * W + i;
+                const fx = v.vx[k], fy = v.vy[k];
+                const m = Math.hypot(fx, fy);
+                if (m <= 0) continue;
+                const px = this.sx(i + 0.5), py = this.sy(j + 0.5);
+                const dx = fx * scale, dy = -fy * scale;   // sim y is +up
+                const x0 = px - dx * 0.5, y0 = py - dy * 0.5;
+                const x1 = px + dx * 0.5, y1 = py + dy * 0.5;
+                const a = (0.2 + 0.7 * (m / max)).toFixed(3);
+                ctx.strokeStyle = `rgba(255,210,74,${a})`;
+                ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+                this.arrowHead(x1, y1, Math.atan2(y1 - y0, x1 - x0),
+                               `rgba(255,210,74,${a})`, head);
+            }
+        }
+    }
+
+    private arrowHead(x: number, y: number, ang: number, color: string, s = 6): void {
+        const ctx = this.ctx;
         ctx.fillStyle = color;
         ctx.beginPath();
         ctx.moveTo(x, y);

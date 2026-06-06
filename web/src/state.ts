@@ -2,6 +2,7 @@
  * bridge mutate it.  Kept deliberately small and plain. */
 
 import { GR_FIELD_PHI_GRAV } from './sim/config';
+import type { FieldSourceName } from './sim/scenario';
 
 export interface AppState {
     scenario: string;
@@ -9,6 +10,11 @@ export interface AppState {
     singleStep: boolean;
     /* Which field VIEW (index into FIELD_VIEWS) the FieldPass displays. */
     viewField: number;
+    /* Which part of the field the visualizations read. */
+    viewSource: FieldSourceName;
+    /* Vector-arrow overlay: index into VECTOR_FIELDS (0 = off) + grid spacing. */
+    vectorField: number;
+    vectorSpacing: number;
     /* Overlay toggles. */
     showTrails: boolean;
     showVelocity: boolean;
@@ -25,6 +31,9 @@ export function createState(scenario: string): AppState {
         paused: true,
         singleStep: false,
         viewField: GR_FIELD_PHI_GRAV,
+        viewSource: 'perturbation',
+        vectorField: 0,
+        vectorSpacing: 24,
         showTrails: true,
         showVelocity: true,
         liveModified: false,

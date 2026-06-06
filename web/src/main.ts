@@ -11,7 +11,7 @@ import { wireControls } from './ui/controls';
 import { Inspector } from './ui/inspector';
 import { FieldPass } from './render/fieldPass';
 import { Overlay2D, createTrails, type Trails } from './render/overlay2d';
-import { computeView } from './sim/fieldViews';
+import { computeView, computeVectorField } from './sim/fieldViews';
 import { fullReport, stabilityProbe } from './dev/diagnostics';
 import { STEPS_PER_FRAME } from './sim/config';
 import { applyScenario } from './sim/build';
@@ -52,6 +52,9 @@ async function main(): Promise<void> {
         current = scn;
         state.scenario = scn.name;
         state.viewField = scn.view.field;
+        state.viewSource = scn.view.source;
+        state.vectorField = scn.view.vectorField;
+        state.vectorSpacing = scn.view.vectorSpacing;
         state.showTrails = scn.view.showTrails;
         state.showVelocity = scn.view.showVelocity;
         state.paused = true;
@@ -60,6 +63,9 @@ async function main(): Promise<void> {
         trails.reset(world.particleCount());
         controls.setPaused(true);
         controls.setField(state.viewField);
+        controls.setSource(state.viewSource);
+        controls.setVectors(state.vectorField);
+        controls.setVectorSpacing(state.vectorSpacing);
         controls.setTrails(state.showTrails);
         controls.setRadiation(scn.global.noRadiation);
         inspector.renderEditors();
@@ -103,7 +109,10 @@ async function main(): Promise<void> {
         onStep: () => { state.singleStep = true; },
         onReset: () => loadScenario(current),
         onScenarioChange: (name) => { void buildByName(name); },
-        onFieldChange: (i) => { state.viewField = i; },
+        onFieldChange: (i) => { state.viewField = i; current.view.field = i; },
+        onSourceChange: (sourceName) => { state.viewSource = sourceName; current.view.source = sourceName; },
+        onVectorsChange: (i) => { state.vectorField = i; current.view.vectorField = i; },
+        onVectorSpacingChange: (n) => { state.vectorSpacing = n; current.view.vectorSpacing = n; },
         onToggleTrails: () => { state.showTrails = !state.showTrails; controls.setTrails(state.showTrails); },
         onUndo: () => undo(),
         onToggleRadiation: () => applyEdit((sc) => { sc.global.noRadiation = !sc.global.noRadiation; }),
@@ -183,16 +192,22 @@ async function main(): Promise<void> {
             state.singleStep = false;
         }
 
-        const data = computeView(world, state.viewField);
         gl!.viewport(0, 0, canvas.width, canvas.height);
         gl!.clearColor(0, 0, 0, 1);
         gl!.clear(gl!.COLOR_BUFFER_BIT);
-        fieldPass.render(data);
+        if (state.viewSource !== 'none') {
+            fieldPass.render(computeView(world, state.viewField, state.viewSource));
+        }
+
+        const vec = (state.vectorField > 0 && state.viewSource !== 'none')
+            ? computeVectorField(world, state.vectorField, state.viewSource)
+            : null;
 
         const parts = world.particles();
         if (advanced && state.showTrails) trails.push(parts);
         overlay.render(parts, trails,
-            { showTrails: state.showTrails, showVelocity: state.showVelocity, selected: state.selected });
+            { showTrails: state.showTrails, showVelocity: state.showVelocity, selected: state.selected,
+              vectors: vec ? { data: vec, spacing: state.vectorSpacing } : null });
 
         inspector.updateLive();
         controls.setStatus(
