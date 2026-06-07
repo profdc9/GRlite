@@ -293,9 +293,14 @@ async function main(): Promise<void> {
 
     /* Canvas interaction: click selects the nearest particle; once a particle is
      * selected you can drag it to reposition (grab the marker), or Shift-drag its
-     * velocity arrow tip to set its initial velocity.  Live feedback is written
-     * straight to the sim (setParticleFields); the drop bakes it into the
-     * scenario via applyEdit (deterministic restart, undoable, saved/shared). */
+     * velocity arrow tip to set its initial velocity.  Live feedback is always
+     * written straight to the sim (setParticleFields).  The drop's meaning
+     * depends on whether the sim has run yet:
+     *   - at the initial state (step 0): bake it into the scenario via applyEdit
+     *     -- a deterministic restart, undoable, saved/shared (you're editing the
+     *     scenario's initial conditions).
+     *   - after the sim has advanced: leave it as a live-only nudge to the
+     *     physics-engine state; a reset reverts to the scenario. */
     const GRAB_TOL = 16;                       // px radius to grab a handle
     let drag: { mode: 'pos' | 'vel'; index: number; moved: boolean } | null = null;
 
@@ -398,6 +403,10 @@ async function main(): Promise<void> {
         overlayCanvas.style.cursor = 'crosshair';
         if (overlayCanvas.hasPointerCapture(ev.pointerId)) overlayCanvas.releasePointerCapture(ev.pointerId);
         if (!moved) return;                       // a click on the handle: nothing to commit
+        /* After the sim has advanced this is a live-only nudge (liveModified is
+         * already set by applyDrag); a reset reverts it.  Only at the initial
+         * state does the drag edit the scenario's initial conditions. */
+        if (world.stepCount() > 0) return;
         /* Bake the live (dragged) value into the scenario; applyEdit rebuilds
          * deterministically and preserves the selection. */
         const p = world.particle(index);
