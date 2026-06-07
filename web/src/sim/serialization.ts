@@ -52,16 +52,18 @@ export function encodeToHash(scn: Scenario, file?: string | null): string {
     return file ? `${s}&f=${encodeURIComponent(file)}` : s;
 }
 
-/* Read the scenario (and its library file key, if any) from the current URL
- * hash, or null if absent/invalid. */
-export function readFromHash(hash = location.hash): { scenario: Scenario; file: string | null } | null {
+/* Decode the scenario JSON string (and library file key) from the URL hash, or
+ * null if absent / undecodable.  Validation is NOT done here -- the caller runs
+ * the decoded string through the same parseScenarioText pipeline as the paste
+ * modal, so both paths validate identically. */
+export function readFromHash(hash = location.hash): { json: string; file: string | null } | null {
     const m = /[#&]s=([^&]+)/.exec(hash);
     if (!m) return null;
     try {
-        const scenario = validate(JSON.parse(b64urlDecode(m[1])));
+        const json = b64urlDecode(m[1]);
         const fm = /[#&]f=([^&]+)/.exec(hash);
-        return { scenario, file: fm ? decodeURIComponent(fm[1]) : null };
-    } catch (e) { console.warn('bad scenario in URL hash:', (e as Error).message); return null; }
+        return { json, file: fm ? decodeURIComponent(fm[1]) : null };
+    } catch (e) { console.warn('bad URL hash encoding:', (e as Error).message); return null; }
 }
 
 /* Write the scenario into the URL hash without reloading or adding history. */

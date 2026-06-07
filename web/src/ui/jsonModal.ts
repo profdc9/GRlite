@@ -5,12 +5,15 @@
  * (syntax + format + value ranges via parseScenarioText) before it is applied;
  * problems are shown in the modal and the load is refused. */
 
-import { toJSON, parseScenarioText } from '../sim/serialization';
+import { toJSON } from '../sim/serialization';
 import type { Scenario } from '../sim/scenario';
 
 export interface JsonModalHandlers {
-    getScenario: () => Scenario;     // current scenario, to populate the textarea
-    onLoad: (scn: Scenario) => void; // apply a successfully-parsed scenario
+    getScenario: () => Scenario;          // current scenario, to populate the textarea
+    /* Validate + load a JSON string through the app's one load pipeline; returns
+     * [] on success or the list of problems to display.  (Same pipeline the URL
+     * hash and library scenes use.) */
+    onLoadText: (text: string) => string[];
 }
 
 export interface JsonModal { open: () => void; }
@@ -44,9 +47,8 @@ export function initJsonModal(h: JsonModalHandlers): JsonModal {
         fill(); setMsg('reverted to the current scenario', true);
     });
     document.getElementById('jsonLoad')!.addEventListener('click', () => {
-        const res = parseScenarioText(text.value);
-        if ('errors' in res) { setMsg(res.errors.join('\n')); return; }
-        h.onLoad(res.scenario);
+        const errs = h.onLoadText(text.value);
+        if (errs.length) { setMsg(errs.join('\n')); return; }
         setMsg('loaded', true);
         close();
     });

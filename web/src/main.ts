@@ -16,8 +16,8 @@ import { computeView, computeVectorField, colormapEnabled } from './sim/fieldVie
 import { fullReport, stabilityProbe } from './dev/diagnostics';
 import { STEPS_PER_FRAME } from './sim/config';
 import { applyScenario } from './sim/build';
-import { emptyScenario, validate, type Scenario } from './sim/scenario';
-import { readFromHash, writeToHash, downloadScenario } from './sim/serialization';
+import { emptyScenario, type Scenario } from './sim/scenario';
+import { readFromHash, writeToHash, downloadScenario, parseScenarioText } from './sim/serialization';
 
 const DEFAULT_SCENARIO = 'pic_binary';
 
@@ -42,6 +42,10 @@ async function main(): Promise<void> {
      * Persisted in the URL hash (f=) so a reload re-selects the right dropdown
      * entry instead of leaving it stale. */
     let currentFile = '';
+    /* Library scene manifest (value=file key, label=dropdown text); filled once
+     * the manifest is fetched.  Declared up here so the load helpers can map a
+     * file key to a dropdown entry. */
+    let scenes: { value: string; label: string }[] = [];
     /* Scenario JSON modal (assigned after controls/inspector exist; the toolbar
      * handler calls jsonModal.open() only at click time). */
     let jsonModal: ReturnType<typeof initJsonModal>;
@@ -111,15 +115,38 @@ async function main(): Promise<void> {
         inspector.renderEditors();
     }
 
+    /* Apply an already-validated scenario: tag it with its library file (or mark
+     * it custom/"(shared)") and build it.  The single post-validation entry. */
+    function applyLoadedScenario(scn: Scenario, file: string | null): void {
+        currentFile = (file && scenes.some((s) => s.value === file)) ? file : '';
+        loadScenario(scn);
+        if (currentFile) controls.setScenario(currentFile);
+        else controls.setCustomScenario(scn.name);
+    }
+
+    /* THE one validated load path: a JSON string -> parseScenarioText (syntax +
+     * format + value ranges) -> applyLoadedScenario.  Used by the library
+     * fetch, the URL hash, and the paste modal alike.  Returns [] on success or
+     * the list of problems (caller decides how to surface them). */
+    function loadScenarioFromText(text: string, file: string | null): string[] {
+        const res = parseScenarioText(text);
+        if ('errors' in res) return res.errors;
+        applyLoadedScenario(res.scenario, file);
+        return [];
+    }
+
     /* Load a scenario by name from the JSON library (public/scenes/<name>.json).
      * The JSON files are the single source of truth -- there is no in-code copy. */
     async function buildByName(name: string): Promise<void> {
         try {
             const res = await fetch(`/scenes/${name}.json`, { cache: 'no-cache' });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            currentFile = name;                 // tag the run with its library file
-            loadScenario(validate(await res.json()));
-            controls.setScenario(name);
+            const errs = loadScenarioFromText(await res.text(), name);
+            if (errs.length) {
+                const msg = `scene "${name}" failed validation: ${errs[0]}`;
+                console.error(msg, errs);
+                controls.setStatus(msg);
+            }
         } catch (e) {
             const msg = `failed to load /scenes/${name}.json: ${(e as Error).message}`;
             console.error(msg);
@@ -172,7 +199,9 @@ async function main(): Promise<void> {
      * library file), so clear currentFile and reflect it as "(shared)". */
     jsonModal = initJsonModal({
         getScenario: () => current,
-        onLoad: (scn) => { currentFile = ''; loadScenario(scn); controls.setCustomScenario(scn.name); },
+        /* Pasted text goes through the same validated pipeline; a pasted scenario
+         * has no library file (custom).  Returns problems for the modal to show. */
+        onLoadText: (text) => loadScenarioFromText(text, null),
     });
 
     /* Click to select the nearest particle. */
@@ -186,7 +215,6 @@ async function main(): Promise<void> {
 
     /* Populate the scenario dropdown from the library manifest (the JSON
      * files define what's available; no hard-coded option list). */
-    let scenes: { value: string; label: string }[] = [];
     try {
         const res = await fetch('/scenes/index.json', { cache: 'no-cache' });
         if (res.ok) {
@@ -204,11 +232,13 @@ async function main(): Promise<void> {
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
     const hashState = readFromHash();
     if (hashState) {
-        currentFile = (hashState.file && scenes.some((s) => s.value === hashState.file))
-            ? hashState.file : '';
-        loadScenario(hashState.scenario);
-        if (currentFile) controls.setScenario(currentFile);
-        else controls.setCustomScenario(hashState.scenario.name);
+        /* Same validated pipeline as the paste modal: decoded JSON string ->
+         * loadScenarioFromText.  On bad/invalid hash, warn and fall back. */
+        const errs = loadScenarioFromText(hashState.json, hashState.file);
+        if (errs.length) {
+            console.warn('ignoring invalid scenario in URL hash:', errs);
+            await buildByName(DEFAULT_SCENARIO);
+        }
     } else {
         await buildByName(DEFAULT_SCENARIO);
     }
