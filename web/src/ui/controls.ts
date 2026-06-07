@@ -13,6 +13,7 @@ export interface ControlHandlers {
     onVectorsChange: (index: number) => void;
     onVectorSpacingChange: (cells: number) => void;
     onUndo: () => void;
+    onAddParticle?: () => void;
     onCopyLink?: () => void;
     onSaveJson?: () => void;
     onOpenJson?: () => void;
@@ -28,6 +29,9 @@ export interface ScenarioItem { value: string; label: string; group?: string; }
 export interface Controls {
     setPaused: (paused: boolean) => void;
     setStatus: (text: string) => void;
+    /* Reveal the particle inspector (e.g. after adding a particle, so the new
+     * one is immediately editable even if the panel was toggled off). */
+    showParticlePanel: () => void;
     /* Feedback line inside the scenario modal (save/delete results), since the
      * page status line is hidden behind the modal backdrop. */
     setSceneMsg: (text: string, ok?: boolean) => void;
@@ -122,6 +126,8 @@ export function wireControls(h: ControlHandlers): Controls {
     const panelParticle = document.getElementById('panelParticle') as HTMLElement;
     togGlobal.addEventListener('click', () => panelGlobal.classList.toggle('hidden'));
     togParticle.addEventListener('click', () => panelParticle.classList.toggle('hidden'));
+    const addParticleBtn = document.getElementById('addparticle') as HTMLButtonElement | null;
+    if (addParticleBtn && h.onAddParticle) addParticleBtn.addEventListener('click', h.onAddParticle);
     const copyBtn = document.getElementById('copylink') as HTMLButtonElement | null;
     const saveBtn = document.getElementById('savejson') as HTMLButtonElement | null;
     const jsonBtn = document.getElementById('jsonbtn') as HTMLButtonElement | null;
@@ -136,6 +142,7 @@ export function wireControls(h: ControlHandlers): Controls {
     return {
         setPaused: (paused) => { pauseBtn.textContent = paused ? 'resume' : 'pause'; },
         setStatus: (text) => { statusEl.textContent = text; },
+        showParticlePanel: () => { panelParticle.classList.remove('hidden'); },
         setSceneMsg: (text, ok = false) => { scenarioMsgEl.textContent = text; scenarioMsgEl.style.color = ok ? '#7c9' : '#e88'; },
         setField: (index) => { fieldSel.value = String(index); },
         setSource: (source) => { sourceSel.value = source; },

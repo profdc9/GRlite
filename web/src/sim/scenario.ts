@@ -238,6 +238,12 @@ export function defaultBackground(W: number, H: number): BackgroundSpec {
     return { x: W * 0.5, y: H * 0.5, epsilon: 8, GM: 0, Q: 0, Jz: 0, gFactor: 2 };
 }
 
+/* A fresh particle for the "add particle" affordance: at rest at the grid
+ * center with a small (visible, valid: mass > 0) mass and no charge. */
+export function defaultParticle(W: number, H: number): ParticleSpec {
+    return { x: W * 0.5, y: H * 0.5, vx: 0, vy: 0, mass: 0.01, charge: 0 };
+}
+
 export function emptyScenario(name = 'untitled'): Scenario {
     return {
         program: SCENARIO_PROGRAM, format: SCENARIO_FORMAT, version: SCENARIO_VERSION,

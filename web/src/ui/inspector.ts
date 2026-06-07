@@ -19,6 +19,8 @@ export interface InspectorHandlers {
     /* Visualization-only edit: mutate the scenario WITHOUT rebuilding the sim
      * (so the run keeps going) -- used for per-particle ticks/clock + tick Δ. */
     onViewEdit: (mutate: (s: Scenario) => void) => void;
+    /* Remove the particle at `index` (rebuilds; undoable via the edit stack). */
+    onDeleteParticle: (index: number) => void;
 }
 
 function numRow(label: string, value: number, step: number,
@@ -220,6 +222,12 @@ export class Inspector {
             this.particleLive = null;
             return;
         }
+        /* Live readout up top (mirrors the Status panel), so the running values
+         * stay visible above the editable fields. */
+        const pl = document.createElement('div'); pl.className = 'live'; pl.textContent = '—';
+        pl.style.marginTop = '0';
+        this.particleEl.appendChild(pl); this.particleLive = pl;
+
         const mk = (label: string, key: 'x' | 'y' | 'vx' | 'vy' | 'mass' | 'charge', step: number) =>
             this.particleEl.appendChild(numRow(label, s.particles[sel][key], step,
                 (v) => edit((sc) => { sc.particles[sel][key] = v; })));
@@ -265,8 +273,13 @@ export class Inspector {
         this.particleEl.appendChild(checkRow('clock', !!s.particles[sel].clock,
             (v) => viewEdit((sc) => { sc.particles[sel].clock = v; })));
 
-        const pl = document.createElement('div'); pl.className = 'live'; pl.textContent = '—';
-        this.particleEl.appendChild(pl); this.particleLive = pl;
+        /* Remove this particle (rebuilds; undoable). */
+        const del = document.createElement('button');
+        del.textContent = 'delete particle';
+        del.className = 'del-btn';
+        del.title = 'remove this particle (undo restores it)';
+        del.addEventListener('click', () => this.h.onDeleteParticle(sel));
+        this.particleEl.appendChild(del);
     }
 
     updateLive(): void {

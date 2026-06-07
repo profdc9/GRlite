@@ -16,7 +16,7 @@ import { computeView, computeVectorField, colormapEnabled } from './sim/fieldVie
 import { fullReport, stabilityProbe } from './dev/diagnostics';
 import { STEPS_PER_FRAME } from './sim/config';
 import { applyScenario } from './sim/build';
-import { emptyScenario, type Scenario } from './sim/scenario';
+import { emptyScenario, defaultParticle, type Scenario } from './sim/scenario';
 import { readFromHash, writeToHash, downloadScenario, parseScenarioText, toJSON } from './sim/serialization';
 import { listLocalScenes, getLocalSceneText, saveLocalScene, deleteLocalScene } from './sim/localScenes';
 
@@ -98,8 +98,17 @@ async function main(): Promise<void> {
     function applyEdit(mutate: (s: Scenario) => void): void {
         undoStack.push(structuredClone(current));
         if (undoStack.length > 50) undoStack.shift();
+        /* loadScenario clears the selection (a fresh scenario has a different
+         * particle set); for an in-place edit the set is unchanged, so restore
+         * the selection if it's still valid -- otherwise editing a field would
+         * deselect the particle being edited. */
+        const keepSel = state.selected;
         mutate(current);
         loadScenario(current);
+        if (keepSel >= 0 && keepSel < current.particles.length) {
+            state.selected = keepSel;
+            inspector.renderEditors();
+        }
     }
     function undo(): void {
         const prev = undoStack.pop();
@@ -193,6 +202,16 @@ async function main(): Promise<void> {
         onVectorsChange: (i) => { current.view.vectorField = i; },
         onVectorSpacingChange: (n) => { current.view.vectorSpacing = n; },
         onUndo: () => undo(),
+        /* Add a fresh particle at the grid center and select it for editing.
+         * applyEdit rebuilds (and resets selection), so set selection + re-render
+         * afterwards.  Undo removes it. */
+        onAddParticle: () => {
+            applyEdit((sc) => { sc.particles.push(defaultParticle(sc.grid.W, sc.grid.H)); });
+            state.selected = current.particles.length - 1;
+            controls.showParticlePanel();
+            inspector.renderEditors();
+            controls.setStatus('added particle — edit it in the particle inspector');
+        },
         onCopyLink: () => {
             writeToHash(current, currentFile || null);
             void navigator.clipboard?.writeText(location.href);
@@ -252,6 +271,15 @@ async function main(): Promise<void> {
         getWorld: () => world,
         onEdit: applyEdit,
         onViewEdit: applyViewEdit,
+        /* Remove the particle; applyEdit rebuilds and clears the selection, so
+         * the panel falls back to "click a particle".  Undoable. */
+        onDeleteParticle: (index) => {
+            if (index < 0 || index >= current.particles.length) return;
+            applyEdit((sc) => { sc.particles.splice(index, 1); });
+            state.selected = -1;          // don't silently jump to a neighbor
+            inspector.renderEditors();
+            controls.setStatus('deleted particle (undo to restore)');
+        },
     });
 
     /* Scenario JSON import/export modal.  A pasted scenario is a custom one (no
