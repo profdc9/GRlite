@@ -7,7 +7,7 @@ import type { Particle } from '../sim/world';
 import type { VectorData } from '../sim/fieldViews';
 import type { TickMode, ForceArrows } from '../sim/scenario';
 
-const VEL_PX_PER_C = 420;   // arrow pixels at |v| = c
+export const VEL_PX_PER_C = 420;   // arrow pixels at |v| = c
 const TRAIL_MAX = 1200;      // points kept per particle (long enough to show a precessing rosette)
 const TRAIL_STRIDE = 4;      // [x, y, t, tau] per trail point
 const CLOCK_PERIOD = 120.0;  // time units per full hand revolution (gentle sweep)

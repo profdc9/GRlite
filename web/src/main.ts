@@ -11,7 +11,7 @@ import { wireControls } from './ui/controls';
 import { Inspector } from './ui/inspector';
 import { initJsonModal } from './ui/jsonModal';
 import { FieldPass } from './render/fieldPass';
-import { Overlay2D, createTrails, type Trails } from './render/overlay2d';
+import { Overlay2D, createTrails, VEL_PX_PER_C, type Trails } from './render/overlay2d';
 import { computeView, computeVectorField, colormapEnabled } from './sim/fieldViews';
 import { fullReport, stabilityProbe } from './dev/diagnostics';
 import { STEPS_PER_FRAME } from './sim/config';
@@ -291,13 +291,129 @@ async function main(): Promise<void> {
         onLoadText: (text) => loadScenarioFromText(text, null),
     });
 
-    /* Click to select the nearest particle. */
-    overlayCanvas.addEventListener('click', (ev) => {
+    /* Canvas interaction: click selects the nearest particle; once a particle is
+     * selected you can drag it to reposition (grab the marker), or Shift-drag its
+     * velocity arrow tip to set its initial velocity.  Live feedback is written
+     * straight to the sim (setParticleFields); the drop bakes it into the
+     * scenario via applyEdit (deterministic restart, undoable, saved/shared). */
+    const GRAB_TOL = 16;                       // px radius to grab a handle
+    let drag: { mode: 'pos' | 'vel'; index: number; moved: boolean } | null = null;
+
+    const pointerPx = (ev: PointerEvent): { px: number; py: number } => {
         const r = overlayCanvas.getBoundingClientRect();
-        const px = (ev.clientX - r.left) * (overlayCanvas.width / r.width);
-        const py = (ev.clientY - r.top) * (overlayCanvas.height / r.height);
-        state.selected = overlay.pick(px, py, world.particles());
-        inspector.renderEditors();
+        return {
+            px: (ev.clientX - r.left) * (overlayCanvas.width / r.width),
+            py: (ev.clientY - r.top) * (overlayCanvas.height / r.height),
+        };
+    };
+    const cw = () => overlayCanvas.width, ch = () => overlayCanvas.height;
+    /* sim<->canvas mapping, matching Overlay2D.sx/sy (sim y is +up). */
+    const toCanvas = (x: number, y: number) => ({ sx: (x / world.W) * cw(), sy: ch() - (y / world.H) * ch() });
+    const toWorld = (px: number, py: number) => ({ x: (px / cw()) * world.W, y: ((ch() - py) / ch()) * world.H });
+    const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+    /* Canvas pixel of a particle's velocity-arrow tip (mirrors Overlay2D). */
+    const velTipPx = (p: ReturnType<typeof world.particle>) => {
+        const { sx, sy } = toCanvas(p.x, p.y);
+        const g = p.mass > 0 ? Math.sqrt(1 + (p.px * p.px + p.py * p.py) / (p.mass * p.mass)) : 1;
+        const vx = p.mass > 0 ? p.px / (g * p.mass) : 0;
+        const vy = p.mass > 0 ? p.py / (g * p.mass) : 0;
+        return { sx: sx + vx * VEL_PX_PER_C, sy: sy - vy * VEL_PX_PER_C };
+    };
+
+    /* Write live drag values straight to the sim for instant feedback. */
+    const applyDrag = (px: number, py: number): void => {
+        if (!drag) return;
+        const i = drag.index;
+        const p = world.particle(i);
+        if (drag.mode === 'pos') {
+            const w = toWorld(px, py);
+            world.setParticleFields(i, { x: clamp(w.x, 0, world.W), y: clamp(w.y, 0, world.H) });
+        } else {
+            const { sx, sy } = toCanvas(p.x, p.y);
+            let vx = (px - sx) / VEL_PX_PER_C;
+            let vy = (sy - py) / VEL_PX_PER_C;          // canvas +down -> sim +up
+            const cMax = 0.99 * current.grid.cEff;
+            const sp = Math.hypot(vx, vy);
+            if (sp > cMax) { vx *= cMax / sp; vy *= cMax / sp; }
+            const c = current.grid.cEff;
+            const gamma = 1 / Math.sqrt(Math.max(1e-9, 1 - (vx * vx + vy * vy) / (c * c)));
+            world.setParticleFields(i, { px: gamma * p.mass * vx, py: gamma * p.mass * vy });
+        }
+        state.liveModified = true;
+        drag.moved = true;
+    };
+
+    overlayCanvas.addEventListener('pointerdown', (ev) => {
+        const { px, py } = pointerPx(ev);
+        const sel = state.selected;
+        if (sel >= 0 && sel < world.particleCount()) {
+            const p = world.particle(sel);
+            if (ev.shiftKey) {
+                /* Shift => velocity: grab the arrow tip (or the marker when v=0). */
+                const tip = velTipPx(p);
+                const m = toCanvas(p.x, p.y);
+                if (Math.hypot(px - tip.sx, py - tip.sy) <= GRAB_TOL ||
+                    Math.hypot(px - m.sx, py - m.sy) <= GRAB_TOL) {
+                    drag = { mode: 'vel', index: sel, moved: false };
+                }
+            } else {
+                const m = toCanvas(p.x, p.y);
+                if (Math.hypot(px - m.sx, py - m.sy) <= GRAB_TOL) drag = { mode: 'pos', index: sel, moved: false };
+            }
+        }
+        if (drag) {
+            overlayCanvas.setPointerCapture(ev.pointerId);
+            overlayCanvas.style.cursor = 'grabbing';
+            ev.preventDefault();
+            applyDrag(px, py);
+        }
+    });
+
+    overlayCanvas.addEventListener('pointermove', (ev) => {
+        const { px, py } = pointerPx(ev);
+        if (drag) { applyDrag(px, py); return; }
+        /* Hover cursor: 'grab' over the selected particle's draggable handle
+         * (marker, or arrow tip when Shift is held) to advertise drag-to-place. */
+        const sel = state.selected;
+        let over = false;
+        if (sel >= 0 && sel < world.particleCount()) {
+            const p = world.particle(sel);
+            const h = ev.shiftKey ? velTipPx(p) : toCanvas(p.x, p.y);
+            over = Math.hypot(px - h.sx, py - h.sy) <= GRAB_TOL;
+        }
+        overlayCanvas.style.cursor = over ? 'grab' : 'crosshair';
+    });
+
+    const endDrag = (ev: PointerEvent): void => {
+        if (!drag) {
+            /* A plain click (no drag started): select the nearest particle. */
+            const { px, py } = pointerPx(ev);
+            state.selected = overlay.pick(px, py, world.particles());
+            inspector.renderEditors();
+            return;
+        }
+        const { index, mode, moved } = drag;
+        drag = null;
+        overlayCanvas.style.cursor = 'crosshair';
+        if (overlayCanvas.hasPointerCapture(ev.pointerId)) overlayCanvas.releasePointerCapture(ev.pointerId);
+        if (!moved) return;                       // a click on the handle: nothing to commit
+        /* Bake the live (dragged) value into the scenario; applyEdit rebuilds
+         * deterministically and preserves the selection. */
+        const p = world.particle(index);
+        if (mode === 'pos') {
+            applyEdit((sc) => { sc.particles[index].x = p.x; sc.particles[index].y = p.y; });
+        } else {
+            const g = p.mass > 0 ? Math.sqrt(1 + (p.px * p.px + p.py * p.py) / (p.mass * p.mass)) : 1;
+            const vx = p.mass > 0 ? p.px / (g * p.mass) : 0;
+            const vy = p.mass > 0 ? p.py / (g * p.mass) : 0;
+            applyEdit((sc) => { sc.particles[index].vx = vx; sc.particles[index].vy = vy; });
+        }
+    };
+    overlayCanvas.addEventListener('pointerup', endDrag);
+    overlayCanvas.addEventListener('pointercancel', (ev) => {
+        if (drag) { drag = null; overlayCanvas.style.cursor = 'crosshair'; }
+        if (overlayCanvas.hasPointerCapture(ev.pointerId)) overlayCanvas.releasePointerCapture(ev.pointerId);
     });
 
     /* Populate the scenario dropdown from the library manifest (the JSON
