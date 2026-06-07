@@ -1,5 +1,7 @@
 # GRlite
 
+[![Deploy to GitHub Pages](https://github.com/profdc9/GRlite/actions/workflows/deploy.yml/badge.svg)](https://github.com/profdc9/GRlite/actions/workflows/deploy.yml)
+
 **▶ [Live sandbox](https://profdc9.github.io/GRlite/)** — runs in the browser
 (WebGL2 + WASM), no install. Auto-deployed from `main` to GitHub Pages by
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
