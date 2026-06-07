@@ -10,6 +10,77 @@ import type { World } from '../sim/world';
 import type { AppState } from '../state';
 import type { Scenario } from '../sim/scenario';
 import { backgroundLabel, defaultBackground } from '../sim/scenario';
+import { attachTooltip } from './tooltip';
+
+/* Brief descriptions shown as a delayed hover tooltip on each field label
+ * (keyed by the exact label string used in the rows below).  Plain-language,
+ * one line each -- the labels are terse so this is where the meaning lives. */
+const TIPS: Record<string, string> = {
+    /* quick toggles */
+    'trails': "Draw each particle's past path as a fading trail.",
+    'velocity': "Draw each particle's velocity as an arrow (length ∝ speed; brighter when relativistic).",
+    'radiation': 'Include radiation-reaction (inductive / retarded) field terms. Off = quasi-static fields only.',
+    /* global */
+    'G_eff': 'Effective gravitational coupling — overall strength of gravity / GEM. 0 disables gravity.',
+    'k_e': 'Effective electrostatic (Coulomb) coupling. 0 disables EM.',
+    'force tier': 'newtonian = simple 1/r force; relativistic = full linearized-GR force law (post-Newtonian style).',
+    'shape': 'Particle deposition shape on the grid: cic (linear), tsc (quadratic, smoother), bump (compact smooth).',
+    'kernel R': 'Radius in cells of the deposit / interpolation kernel. Larger = smoother but slower and more diffuse.',
+    'self-field': "Default for new particles: subtract a particle's own field so it feels only the others (kills PIC self-force).",
+    'GEM force': "Gravitomagnetic force — the 'magnetic' part of gravity from mass currents (frame-dragging force).",
+    'EM Lorentz': 'Apply the electromagnetic Lorentz force (qE + qv×B) to charged particles.',
+    'perturbation': 'Evolve and source the dynamic (particle-generated) fields. Off = particles feel only the background body.',
+    /* absorber */
+    'outer BC': 'Outer-boundary condition for the field solve: dirichlet (value = 0) or neumann (zero normal gradient).',
+    'friction floor': 'Baseline derivative-friction damping applied everywhere (gently bleeds off field energy).',
+    'friction wall': 'Peak derivative-friction at the domain edge — the absorbing layer that soaks up outgoing waves.',
+    'friction depth': 'Thickness in cells of the absorbing friction taper at the boundary.',
+    'zero-mean φ': 'Subtract the mean of the scalar potentials each step (removes the unconstrained DC offset in a closed box).',
+    /* background body */
+    'present': 'Whether a fixed analytic background body (mass / charge / spin) exists at all.',
+    'bg mode': 'How the background is applied: sampled onto the grid, or evaluated analytically per particle.',
+    'mass GM': 'Background body gravitational mass parameter GM (Schwarzschild-like central mass).',
+    'charge Q': 'Background body electric charge (Reissner–Nordström-like).',
+    'ang.mom. Jz': 'Background body angular momentum about z — sources frame-dragging (Kerr / Lense–Thirring).',
+    'gyromag. g': 'Gyromagnetic ratio of the background body (couples its spin to EM).',
+    'softening ε': "Core softening length in cells — smooths the 1/r singularity at the body's center.",
+    'x': 'Horizontal position in grid cells (origin at bottom-left).',
+    'y': 'Vertical position in grid cells (origin at bottom-left).',
+    /* advanced */
+    'force interp': 'Force-interpolation scheme: legacy gather, or lewis-birdsall (momentum-conserving, no self-force).',
+    'GM inductive': 'Include the inductive (time-derivative) part of the gravitomagnetic field.',
+    'EM electrostatic': 'Include the electrostatic (Coulomb) part of the EM field.',
+    'EM magnetic': 'Include the magnetostatic (current-sourced B) part of the EM field.',
+    'EM inductive': 'Include the inductive (∂A/∂t) part of the EM field — needed for radiation.',
+    'EM stress-energy': 'Let EM field energy gravitate (EM stress-energy sources the gravitational field).',
+    'EM Shapiro': 'Slow EM propagation in a gravitational potential (Shapiro delay / gravitational lensing of light).',
+    'Shapiro dynamic': 'Recompute the Shapiro light speed each step from the total dynamic mass field, so moving mass lenses EM.',
+    'Esirkepov': 'Use charge-conserving Esirkepov current deposition (exact continuity for the EM source).',
+    'periodic BC': 'Wrap the domain periodically instead of using the absorbing boundary.',
+    'ρ smooth': 'Number of smoothing passes on the deposited mass density (reduces grid noise).',
+    'J smooth': 'Number of smoothing passes on the deposited current density.',
+    'field init': 'How the field is initialized: lw-settled (Liénard–Wiechert + settle), lw, none (auto), or zero.',
+    'settle steps': 'Extra frozen-particle relaxation steps used to settle the initial field to its fixed point.',
+    /* visualization */
+    'tick Δ (0=auto)': 'Spacing between trajectory time-ticks (same Δ for coordinate & proper time; 0 = auto-choose).',
+    'force: grav': 'Draw the gravitational / GEM force vector on each particle (orange).',
+    'force: EM': 'Draw the EM Lorentz force vector on each particle (blue).',
+    'force: spin': 'Draw the spin-gradient force vector on each particle (green).',
+    'force: total': 'Draw the total applied force vector on each particle (white).',
+    /* particle */
+    'mass': 'Particle rest mass (> 0). Sets inertia and gravitational charge.',
+    'charge': 'Particle electric charge (may be ±). Sources and feels EM.',
+    'vx': 'Initial x-velocity in units of c (|v| must stay below cEff).',
+    'vy': 'Initial y-velocity in units of c (|v| must stay below cEff).',
+    'forces': 'Whether physical forces act on this particle. Off = pinned / pure source (a drive still applies).',
+    'drive amp': 'Displacement amplitude of a sinusoidal drive (antenna element). 0 = no drive.',
+    'drive ω': 'Angular frequency of the sinusoidal drive.',
+    'drive phase': 'Phase offset of the drive (use π on one of a +q / −q pair for an antiphase dipole).',
+    'drive axis x': 'X-component of the drive oscillation direction.',
+    'drive axis y': 'Y-component of the drive oscillation direction.',
+    'ticks': 'Trajectory time-tick markers: coordinate-time (circles), proper-time (triangles), both, or none.',
+    'clock': 'Show a two-hand clock comparing coordinate vs proper time (visualizes time dilation).',
+};
 
 export interface InspectorHandlers {
     getScenario: () => Scenario;
@@ -27,6 +98,7 @@ function numRow(label: string, value: number, step: number,
                 onCommit: (v: number) => void): HTMLElement {
     const row = document.createElement('div'); row.className = 'row';
     const l = document.createElement('label'); l.textContent = label;
+    attachTooltip(l, TIPS[label]);
     const inp = document.createElement('input');
     inp.type = 'number'; inp.step = String(step); inp.value = String(value);
     inp.addEventListener('change', () => {
@@ -41,6 +113,7 @@ function checkRow(label: string, checked: boolean,
                   onCommit: (v: boolean) => void): HTMLElement {
     const row = document.createElement('div'); row.className = 'row';
     const l = document.createElement('label'); l.textContent = label;
+    attachTooltip(l, TIPS[label]);
     const inp = document.createElement('input');
     inp.type = 'checkbox'; inp.checked = checked;
     inp.addEventListener('change', () => onCommit(inp.checked));
@@ -69,6 +142,7 @@ function selRow(label: string, value: string, opts: string[],
                 onCommit: (v: string) => void): HTMLElement {
     const row = document.createElement('div'); row.className = 'row';
     const l = document.createElement('label'); l.textContent = label;
+    attachTooltip(l, TIPS[label]);
     const sel = document.createElement('select');
     for (const o of opts) { const op = document.createElement('option'); op.value = o; op.textContent = o; sel.appendChild(op); }
     sel.value = value;
