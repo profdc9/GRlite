@@ -25,6 +25,10 @@ export interface Particle {
     ftotX: number; ftotY: number;
 }
 
+export interface BackgroundBody {
+    x: number; y: number; GM: number; Q: number; Jz: number; gFactor: number; eps: number;
+}
+
 export class World {
     readonly core: GRliteCore;
     readonly sim: number;
@@ -68,6 +72,30 @@ export class World {
         if (!ptr) return null;
         return new Float32Array(this.core.M.HEAPF32.buffer, ptr, this.W * this.H);
     }
+
+    /* ---- background compact bodies (multi) ---- */
+    backgroundCount(): number { return this.core.backgroundCount(this.sim); }
+
+    /* Read body i's params (x,y,GM,Q,Jz,gFactor,eps), or null if out of range. */
+    backgroundBody(i: number): BackgroundBody | null {
+        const ptr = this.core.getBackgroundBodyPtr(this.sim, i);
+        if (!ptr) return null;
+        const v = new Float32Array(this.core.M.HEAPF32.buffer, ptr, 7);
+        return { x: v[0], y: v[1], GM: v[2], Q: v[3], Jz: v[4], gFactor: v[5], eps: v[6] };
+    }
+
+    /* Live-edit body i (re-derives the sampled background arrays).  Caller flags
+     * the run as live-modified when used mid-run (cf. setParticleFields). */
+    setBackgroundBodyAt(i: number, b: BackgroundBody): void {
+        this.core.setBackgroundBodyAt(this.sim, i, b.x, b.y, b.GM, b.Q, b.Jz, b.gFactor, b.eps);
+    }
+
+    /* Append a compact body live; returns its index or -1 if full. */
+    addBackgroundBody(b: BackgroundBody): number {
+        return this.core.addBackgroundBody(this.sim, b.x, b.y, b.GM, b.Q, b.Jz, b.gFactor, b.eps);
+    }
+
+    clearBackground(): void { this.core.clearBackground(this.sim); }
 
     /* ---- particles ---- */
     /* Re-probe the particle struct stride after a fresh build. */

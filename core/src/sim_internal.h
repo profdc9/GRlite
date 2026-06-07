@@ -242,6 +242,13 @@ struct gr_sim {
      * Only the currently installed kind's fields are meaningful. */
     gr_bg_kind_t bg_kind;
     gr_bg_mode_t bg_mode;
+    /* Multi-body: GR_BG_KIND_COMPACT_BODY superposes up to GR_MAX_BG_BODIES
+     * fixed compact bodies (M, Q, J_z).  The body list is the source of truth;
+     * the sampled arrays are (re)derived from it.  The single-body scalars below
+     * (bg_x0..bg_g_em) remain the meaningful parameters for the OTHER kinds
+     * (point mass/charge, uniform/linear test fields), which stay single-body. */
+    gr_bg_body_t bg_bodies[GR_MAX_BG_BODIES];
+    int          bg_nbody;
     float        bg_x0, bg_y0;
     float        bg_GM;
     float        bg_eps;

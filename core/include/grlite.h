@@ -1015,6 +1015,38 @@ gr_bg_mode_t gr_sim_get_bg_mode(const gr_sim_t* sim);
 gr_bg_kind_t gr_sim_get_bg_kind(const gr_sim_t* sim);
 
 /* ----------------------------------------------------------------------------
+ * Multiple background bodies (GR_BG_KIND_COMPACT_BODY)
+ *
+ * GR_BG_KIND_COMPACT_BODY may superpose up to GR_MAX_BG_BODIES fixed compact
+ * bodies.  Each body has the same 7 parameters as gr_sim_set_background_body
+ * (x, y, GM, Q, Jz, g_em, eps) laid out as 7 contiguous floats, so the heap
+ * pointer from gr_sim_get_background_body_ptr can be read as a Float32Array.
+ *
+ * Usage from the app: gr_sim_clear_background once, then gr_sim_add_background_body
+ * per body.  gr_sim_set_background_body (single) clears then adds one, for
+ * back-compat.  Editing a body (set_at) re-derives the sampled arrays.
+ * --------------------------------------------------------------------------*/
+#define GR_MAX_BG_BODIES 16
+
+typedef struct {
+    float x, y, GM, Q, Jz, g_em, eps;   /* 7 contiguous floats — see ptr accessor */
+} gr_bg_body_t;
+
+/* Append a compact body; sets kind to COMPACT_BODY and accumulates its field
+ * into the sampled arrays.  Returns the new body's index, or -1 if full. */
+int   gr_sim_add_background_body(gr_sim_t* sim, float x, float y,
+                                 float GM, float Q, float Jz,
+                                 float g_em, float epsilon);
+/* Number of installed compact bodies (0 unless the kind is COMPACT_BODY). */
+int   gr_sim_background_count(const gr_sim_t* sim);
+/* Pointer to body i's 7 floats (x,y,GM,Q,Jz,g_em,eps), or NULL if out of range. */
+float* gr_sim_get_background_body_ptr(gr_sim_t* sim, int i);
+/* Overwrite body i's parameters and re-derive the sampled background arrays. */
+void  gr_sim_set_background_body_at(gr_sim_t* sim, int i, float x, float y,
+                                    float GM, float Q, float Jz,
+                                    float g_em, float epsilon);
+
+/* ----------------------------------------------------------------------------
  * Absorbing damping layer (Stage 2)
  *
  * Multiplicative (lossy-material) absorber of n_damping cells on each edge.

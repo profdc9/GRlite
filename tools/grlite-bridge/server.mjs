@@ -112,6 +112,19 @@ passthrough('grlite_set_particle',
       mass: z.number().optional(), charge: z.number().optional(),
       x: z.number().optional(), y: z.number().optional(),
       px: z.number().optional(), py: z.number().optional() }, 'set_particle');
+passthrough('grlite_background',
+    'List the background compact bodies (index + x,y,GM,Q,Jz,gFactor,eps).', {}, 'background');
+passthrough('grlite_set_background',
+    'Live-edit background body i (marks the run live-modified). Only provided fields change.',
+    { index: z.number().int().min(0),
+      x: z.number().optional(), y: z.number().optional(),
+      GM: z.number().optional(), Q: z.number().optional(), Jz: z.number().optional(),
+      gFactor: z.number().optional(), eps: z.number().optional() }, 'set_background');
+passthrough('grlite_add_background',
+    'Live-add a background compact body (max 16); returns its index. Defaults: center, GM 0.01, eps 8.',
+    { x: z.number().optional(), y: z.number().optional(),
+      GM: z.number().optional(), Q: z.number().optional(), Jz: z.number().optional(),
+      gFactor: z.number().optional(), eps: z.number().optional() }, 'add_background');
 passthrough('grlite_set_global',
     'Live-edit global state: gEff, kE (live-modify sim), viewField (display only), paused.',
     { gEff: z.number().optional(), kE: z.number().optional(),

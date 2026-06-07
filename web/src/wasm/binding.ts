@@ -55,6 +55,10 @@ export interface GRliteCore {
     setBackgroundSpinningPointMass: (sim: number, x: number, y: number, GM: number, eps: number, Jz: number) => void;
     setBackgroundPointCharge: (sim: number, x: number, y: number, Q: number, eps: number) => void;
     setBackgroundBody: (sim: number, x: number, y: number, GM: number, Q: number, Jz: number, g: number, eps: number) => void;
+    addBackgroundBody: (sim: number, x: number, y: number, GM: number, Q: number, Jz: number, g: number, eps: number) => number;
+    backgroundCount: (sim: number) => number;
+    getBackgroundBodyPtr: (sim: number, i: number) => number;
+    setBackgroundBodyAt: (sim: number, i: number, x: number, y: number, GM: number, Q: number, Jz: number, g: number, eps: number) => void;
     setBgMode: (sim: number, mode: number) => void;
     setGEff: (sim: number, gEff: number) => void;
     setKE: (sim: number, kE: number) => void;
@@ -151,6 +155,10 @@ function bindCore(M: GRliteModule): GRliteCore {
         setBackgroundSpinningPointMass: vfn('gr_sim_set_background_spinning_point_mass', ['number','number','number','number','number','number']),
         setBackgroundPointCharge: vfn('gr_sim_set_background_point_charge', ['number','number','number','number','number']),
         setBackgroundBody: vfn('gr_sim_set_background_body', ['number','number','number','number','number','number','number','number']),
+        addBackgroundBody: num('gr_sim_add_background_body', ['number','number','number','number','number','number','number','number']),
+        backgroundCount: num('gr_sim_background_count', ['number']),
+        getBackgroundBodyPtr: num('gr_sim_get_background_body_ptr', ['number','number']),
+        setBackgroundBodyAt: vfn('gr_sim_set_background_body_at', ['number','number','number','number','number','number','number','number','number']),
         setBgMode: vfn('gr_sim_set_bg_mode', ['number','number']),
         setGEff: vfn('gr_sim_set_G_eff', ['number','number']),
         setKE: vfn('gr_sim_set_k_e', ['number','number']),

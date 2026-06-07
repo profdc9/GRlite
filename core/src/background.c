@@ -39,14 +39,21 @@ float* gr_sim_background_ptr(gr_sim_t* sim, gr_field_id_t which) {
     return slot ? *slot : NULL;
 }
 
-void gr_sim_clear_background(gr_sim_t* sim) {
-    if (!sim) return;
+/* Free the six sampled background arrays (but keep the body list / params). */
+static void free_bg_arrays(gr_sim_t* sim) {
     free(sim->phi_g_bg); sim->phi_g_bg = NULL;
     free(sim->Agx_bg);   sim->Agx_bg   = NULL;
     free(sim->Agy_bg);   sim->Agy_bg   = NULL;
     free(sim->phi_bg);   sim->phi_bg   = NULL;
     free(sim->Ax_bg);    sim->Ax_bg    = NULL;
     free(sim->Ay_bg);    sim->Ay_bg    = NULL;
+}
+
+void gr_sim_clear_background(gr_sim_t* sim) {
+    if (!sim) return;
+    free_bg_arrays(sim);
+    /* Drop the compact-body list too. */
+    sim->bg_nbody = 0;
     /* Clear analytic generator parameters too — they're paired with the
      * sampled array.  Mode is left alone (user-set). */
     sim->bg_kind   = GR_BG_KIND_NONE;
@@ -92,7 +99,7 @@ static void fill_bg_grav_scalar(gr_sim_t* sim, float x0, float y0,
         const int row = j * W;
         for (int i = 0; i < W; i++) {
             const float xx = (float) i * dx, dxi = xx - x0;
-            phi_bg[row + i] = -GM / sqrtf(dxi * dxi + dy * dy + eps2);
+            phi_bg[row + i] += -GM / sqrtf(dxi * dxi + dy * dy + eps2);
         }
     }
 }
@@ -113,7 +120,7 @@ static void fill_bg_gravomag_dipole(gr_sim_t* sim, float x0, float y0,
         for (int i = 0; i < W; i++) {
             const float xc = ((float) i + 0.5f) * dx, dxc = xc - x0;
             const float s2 = dxc * dxc + dyc * dyc + eps2;
-            Agx[row + i] = -coeff * dyc / (s2 * sqrtf(s2));
+            Agx[row + i] += -coeff * dyc / (s2 * sqrtf(s2));
         }
     }
     for (int j = 0; j < H; j++) {
@@ -122,7 +129,7 @@ static void fill_bg_gravomag_dipole(gr_sim_t* sim, float x0, float y0,
         for (int i = 0; i < W; i++) {
             const float xc = (float) i * dx, dxc = xc - x0;
             const float s2 = dxc * dxc + dyc * dyc + eps2;
-            Agy[row + i] = +coeff * dxc / (s2 * sqrtf(s2));
+            Agy[row + i] += +coeff * dxc / (s2 * sqrtf(s2));
         }
     }
 }
@@ -144,7 +151,7 @@ static void fill_bg_magnetic_dipole(gr_sim_t* sim, float x0, float y0,
         for (int i = 0; i < W; i++) {
             const float xc = ((float) i + 0.5f) * dx, dxc = xc - x0;
             const float s2 = dxc * dxc + dyc * dyc + eps2;
-            Ax[row + i] = -coeff * dyc / (s2 * sqrtf(s2));
+            Ax[row + i] += -coeff * dyc / (s2 * sqrtf(s2));
         }
     }
     for (int j = 0; j < H; j++) {
@@ -153,7 +160,7 @@ static void fill_bg_magnetic_dipole(gr_sim_t* sim, float x0, float y0,
         for (int i = 0; i < W; i++) {
             const float xc = (float) i * dx, dxc = xc - x0;
             const float s2 = dxc * dxc + dyc * dyc + eps2;
-            Ay[row + i] = +coeff * dxc / (s2 * sqrtf(s2));
+            Ay[row + i] += +coeff * dxc / (s2 * sqrtf(s2));
         }
     }
 }
@@ -179,7 +186,7 @@ static void fill_bg_coulomb(gr_sim_t* sim, float x0, float y0,
         const int row = j * W;
         for (int i = 0; i < W; i++) {
             const float xx = (float) i * dx, dxi = xx - x0;
-            phi[row + i] = coeff / sqrtf(dxi * dxi + dy * dy + eps2);
+            phi[row + i] += coeff / sqrtf(dxi * dxi + dy * dy + eps2);
         }
     }
 }
@@ -195,6 +202,7 @@ void gr_sim_set_background_point_mass(gr_sim_t* sim,
                                       float x0, float y0,
                                       float GM, float epsilon) {
     if (!sim) return;
+    gr_sim_clear_background(sim);   /* generators are additive — start from zero */
     fill_bg_grav_scalar(sim, x0, y0, GM, epsilon);
     /* Store generator parameters for the analytic-mode evaluator. */
     sim->bg_kind = GR_BG_KIND_POINT_MASS;
@@ -226,6 +234,7 @@ void gr_sim_set_background_spinning_point_mass(gr_sim_t* sim,
                                                float GM, float epsilon,
                                                float Jz) {
     if (!sim) return;
+    gr_sim_clear_background(sim);   /* generators are additive — start from zero */
     /* Scalar (grav) piece + gravitomagnetic dipole, via the shared generators. */
     fill_bg_grav_scalar(sim, x0, y0, GM, epsilon);
     fill_bg_gravomag_dipole(sim, x0, y0, Jz, epsilon);
@@ -457,30 +466,74 @@ void gr_sim_set_background_point_charge(gr_sim_t* sim,
  * superposes the grav scalar, gravitomagnetic dipole, and Coulomb generators.
  * Components with a zero coefficient are skipped (the sampled path treats a
  * NULL array as zero; the analytic evaluators use the stored zero param). */
+/* Accumulate one compact body's sampled field into the (already-allocated or
+ * lazily-allocated, zero-initialized) background arrays.  Additive, so several
+ * bodies superpose.  Skips zero-coefficient components. */
+static void accumulate_body_sampled(gr_sim_t* sim, const gr_bg_body_t* b) {
+    const float mu_z = compact_body_mu_z(sim, b->GM, b->Q, b->Jz, b->g_em);
+    if (b->GM != 0.0f) fill_bg_grav_scalar(sim, b->x, b->y, b->GM, b->eps);
+    if (b->Jz != 0.0f) fill_bg_gravomag_dipole(sim, b->x, b->y, b->Jz, b->eps);
+    if (b->Q  != 0.0f) fill_bg_coulomb(sim, b->x, b->y, b->Q, b->eps);
+    if (mu_z  != 0.0f) fill_bg_magnetic_dipole(sim, b->x, b->y, mu_z, b->eps);
+}
+
+/* Re-derive the sampled arrays from the current compact-body list (after an
+ * in-place edit / removal): drop the arrays, then re-accumulate every body. */
+static void rebuild_sampled_from_bodies(gr_sim_t* sim) {
+    free_bg_arrays(sim);
+    for (int i = 0; i < sim->bg_nbody; i++)
+        accumulate_body_sampled(sim, &sim->bg_bodies[i]);
+}
+
+int gr_sim_add_background_body(gr_sim_t* sim,
+                               float x0, float y0,
+                               float GM, float Q, float Jz,
+                               float g_em, float epsilon) {
+    if (!sim) return -1;
+    if (sim->bg_nbody >= GR_MAX_BG_BODIES) return -1;
+    const int idx = sim->bg_nbody;
+    gr_bg_body_t* b = &sim->bg_bodies[idx];
+    b->x = x0; b->y = y0; b->GM = GM; b->Q = Q; b->Jz = Jz; b->g_em = g_em; b->eps = epsilon;
+    accumulate_body_sampled(sim, b);   /* additive into the sampled arrays */
+    sim->bg_nbody = idx + 1;
+    sim->bg_kind  = GR_BG_KIND_COMPACT_BODY;
+    /* Mirror the first body into the legacy scalars (informational; the
+     * COMPACT_BODY evaluators read bg_bodies, not these). */
+    if (idx == 0) {
+        sim->bg_x0 = x0; sim->bg_y0 = y0; sim->bg_GM = GM; sim->bg_eps = epsilon;
+        sim->bg_Jz = Jz; sim->bg_charge = Q; sim->bg_g_em = g_em;
+        sim->bg_B0 = 0.0f; sim->bg_B0_em = 0.0f; sim->bg_Ex_em = 0.0f; sim->bg_Ey_em = 0.0f;
+    }
+    return idx;
+}
+
+int gr_sim_background_count(const gr_sim_t* sim) {
+    return sim ? sim->bg_nbody : 0;
+}
+
+float* gr_sim_get_background_body_ptr(gr_sim_t* sim, int i) {
+    if (!sim || i < 0 || i >= sim->bg_nbody) return NULL;
+    return &sim->bg_bodies[i].x;   /* 7 contiguous floats */
+}
+
+void gr_sim_set_background_body_at(gr_sim_t* sim, int i,
+                                   float x0, float y0,
+                                   float GM, float Q, float Jz,
+                                   float g_em, float epsilon) {
+    if (!sim || i < 0 || i >= sim->bg_nbody) return;
+    gr_bg_body_t* b = &sim->bg_bodies[i];
+    b->x = x0; b->y = y0; b->GM = GM; b->Q = Q; b->Jz = Jz; b->g_em = g_em; b->eps = epsilon;
+    rebuild_sampled_from_bodies(sim);   /* the edit changes the whole field */
+}
+
+/* Single compact body — back-compat convenience: clear, then add one body. */
 void gr_sim_set_background_body(gr_sim_t* sim,
                                 float x0, float y0,
                                 float GM, float Q, float Jz,
                                 float g_em, float epsilon) {
     if (!sim) return;
     gr_sim_clear_background(sim);
-    const float mu_z = compact_body_mu_z(sim, GM, Q, Jz, g_em);
-    if (GM   != 0.0f) fill_bg_grav_scalar(sim, x0, y0, GM, epsilon);
-    if (Jz   != 0.0f) fill_bg_gravomag_dipole(sim, x0, y0, Jz, epsilon);
-    if (Q    != 0.0f) fill_bg_coulomb(sim, x0, y0, Q, epsilon);
-    if (mu_z != 0.0f) fill_bg_magnetic_dipole(sim, x0, y0, mu_z, epsilon);
-
-    sim->bg_kind   = GR_BG_KIND_COMPACT_BODY;
-    sim->bg_x0     = x0;
-    sim->bg_y0     = y0;
-    sim->bg_GM     = GM;
-    sim->bg_eps    = epsilon;
-    sim->bg_Jz     = Jz;
-    sim->bg_charge = Q;
-    sim->bg_g_em   = g_em;
-    sim->bg_B0     = 0.0f;
-    sim->bg_B0_em  = 0.0f;
-    sim->bg_Ex_em  = 0.0f;
-    sim->bg_Ey_em  = 0.0f;
+    gr_sim_add_background_body(sim, x0, y0, GM, Q, Jz, g_em, epsilon);
 }
 
 /* Analytic-mode evaluation of the installed background generator at the
@@ -495,9 +548,8 @@ int gr_bg_eval_analytic(const struct gr_sim* sim, float x, float y,
 
     switch (sim->bg_kind) {
     case GR_BG_KIND_POINT_MASS:
-    case GR_BG_KIND_SPINNING_POINT_MASS:
-    case GR_BG_KIND_COMPACT_BODY: {
-        /* Scalar (grav) piece uses bg_GM for all three kinds. */
+    case GR_BG_KIND_SPINNING_POINT_MASS: {
+        /* Scalar (grav) piece uses bg_GM for the single-body kinds. */
         /*   Phi(x,y) = -G*M / sqrt(r^2 + eps^2)                    */
         /*   grad     =  G*M * (r - r0) / (r^2 + eps^2)^{3/2}       */
         const float dxi = x - sim->bg_x0;
@@ -509,7 +561,21 @@ int gr_bg_eval_analytic(const struct gr_sim* sim, float x, float y,
         *phi_out = -sim->bg_GM * inv_s;
         *gx_out  =  sim->bg_GM * dxi * inv_s3;
         *gy_out  =  sim->bg_GM * dyi * inv_s3;
-        (void) x; (void) y;
+        return 1;
+    }
+    case GR_BG_KIND_COMPACT_BODY: {
+        /* Sum the grav scalar + gradient over all compact bodies. */
+        float phi = 0.0f, gx = 0.0f, gy = 0.0f;
+        for (int k = 0; k < sim->bg_nbody; k++) {
+            const gr_bg_body_t* b = &sim->bg_bodies[k];
+            const float dxi = x - b->x, dyi = y - b->y;
+            const float s2  = dxi * dxi + dyi * dyi + b->eps * b->eps;
+            const float inv_s = 1.0f / sqrtf(s2), inv_s3 = inv_s / s2;
+            phi += -b->GM * inv_s;
+            gx  +=  b->GM * dxi * inv_s3;
+            gy  +=  b->GM * dyi * inv_s3;
+        }
+        *phi_out = phi; *gx_out = gx; *gy_out = gy;
         return 1;
     }
     case GR_BG_KIND_UNIFORM_GRAVITOMAGNETIC:
@@ -536,8 +602,7 @@ int gr_bg_eval_A_g(const struct gr_sim* sim, float x, float y,
         return 0;
     }
     switch (sim->bg_kind) {
-    case GR_BG_KIND_SPINNING_POINT_MASS:
-    case GR_BG_KIND_COMPACT_BODY: {
+    case GR_BG_KIND_SPINNING_POINT_MASS: {
         /* Same dipole formula used in the sampler (bg_Jz=0 => zero A_g). */
         const float dxi = x - sim->bg_x0;
         const float dyi = y - sim->bg_y0;
@@ -547,6 +612,23 @@ int gr_bg_eval_A_g(const struct gr_sim* sim, float x, float y,
                            / (2.0f * sim->c_eff * sim->c_eff);
         *Ax_out = -coeff * dyi * inv_s3;
         *Ay_out =  coeff * dxi * inv_s3;
+        return 1;
+    }
+    case GR_BG_KIND_COMPACT_BODY: {
+        /* Sum the gravitomagnetic dipole over all compact bodies. */
+        const float k = sim->G_eff / (2.0f * sim->c_eff * sim->c_eff);
+        float ax = 0.0f, ay = 0.0f;
+        for (int n = 0; n < sim->bg_nbody; n++) {
+            const gr_bg_body_t* b = &sim->bg_bodies[n];
+            if (b->Jz == 0.0f) continue;
+            const float dxi = x - b->x, dyi = y - b->y;
+            const float s2  = dxi * dxi + dyi * dyi + b->eps * b->eps;
+            const float inv_s3 = 1.0f / (s2 * sqrtf(s2));
+            const float coeff = k * b->Jz;
+            ax += -coeff * dyi * inv_s3;
+            ay +=  coeff * dxi * inv_s3;
+        }
+        *Ax_out = ax; *Ay_out = ay;
         return 1;
     }
     case GR_BG_KIND_UNIFORM_GRAVITOMAGNETIC: {
@@ -579,21 +661,12 @@ int gr_bg_eval_B_g(const struct gr_sim* sim, float x, float y,
         *Bgz_out = sim->bg_B0;
         return 1;
     }
-    case GR_BG_KIND_SPINNING_POINT_MASS:
-    case GR_BG_KIND_COMPACT_BODY: {
+    case GR_BG_KIND_SPINNING_POINT_MASS: {
         /* Differentiating A_g = coeff * (J × r) / s^{3/2} gives
-         *   B_g_z = coeff * (2 r^2 + 3 eps^2 - r^2) / s^{5/2}  ... let me just
-         * recompute from scratch using the explicit form below.
-         *
          *   A_{g,x} = -k dy / s^{3/2},     A_{g,y} =  k dx / s^{3/2}
          *   s       = dx^2 + dy^2 + eps^2,   k = G J_z / (2 c^2)
-         *   d/dx A_{g,y} = k [ 1/s^{3/2} - 3 dx^2 / s^{5/2} ]
-         *   d/dy A_{g,x} = k [ -1/s^{3/2} + 3 dy^2 / s^{5/2} ]
          *   B_g_z = d/dx A_{g,y} - d/dy A_{g,x}
-         *         = k [ 2/s^{3/2} - 3 (dx^2 + dy^2) / s^{5/2} ]
-         *         = k (2 s - 3 (dx^2 + dy^2)) / s^{5/2}
-         *         = k (2 eps^2 - (dx^2 + dy^2)) / s^{5/2}    after grouping
-         *  (using 2 s = 2(dx^2 + dy^2) + 2 eps^2). */
+         *         = k (2 eps^2 - (dx^2 + dy^2)) / s^{5/2}. */
         const float dxi = x - sim->bg_x0;
         const float dyi = y - sim->bg_y0;
         const float r2  = dxi * dxi + dyi * dyi;
@@ -603,6 +676,23 @@ int gr_bg_eval_B_g(const struct gr_sim* sim, float x, float y,
         const float coeff  = sim->G_eff * sim->bg_Jz
                            / (2.0f * sim->c_eff * sim->c_eff);
         *Bgz_out = coeff * (2.0f * eps2 - r2) * inv_s52;
+        return 1;
+    }
+    case GR_BG_KIND_COMPACT_BODY: {
+        /* Sum B_g_z = k (2 eps^2 - r^2) / s^{5/2} over all compact bodies. */
+        const float k = sim->G_eff / (2.0f * sim->c_eff * sim->c_eff);
+        float bz = 0.0f;
+        for (int n = 0; n < sim->bg_nbody; n++) {
+            const gr_bg_body_t* b = &sim->bg_bodies[n];
+            if (b->Jz == 0.0f) continue;
+            const float dxi = x - b->x, dyi = y - b->y;
+            const float r2 = dxi * dxi + dyi * dyi;
+            const float eps2 = b->eps * b->eps;
+            const float s2 = r2 + eps2;
+            const float inv_s52 = 1.0f / (s2 * s2 * sqrtf(s2));
+            bz += k * b->Jz * (2.0f * eps2 - r2) * inv_s52;
+        }
+        *Bgz_out = bz;
         return 1;
     }
     default:
@@ -639,17 +729,22 @@ int gr_bg_eval_A_em(const struct gr_sim* sim, float x, float y,
         return 1;
     }
     case GR_BG_KIND_COMPACT_BODY: {
-        /* Magnetic dipole of the spinning charge: A_em = (k_e mu_z/c^2)(z x r)
-         * / s^{3/2}, mirroring A_g (mu_z=0 => zero). */
-        const float mu_z = compact_body_mu_z(sim, sim->bg_GM, sim->bg_charge,
-                                             sim->bg_Jz, sim->bg_g_em);
-        const float dxi = x - sim->bg_x0;
-        const float dyi = y - sim->bg_y0;
-        const float s2  = dxi * dxi + dyi * dyi + sim->bg_eps * sim->bg_eps;
-        const float inv_s3 = 1.0f / (s2 * sqrtf(s2));
-        const float coeff  = sim->k_e * mu_z / (sim->c_eff * sim->c_eff);
-        *Ax_out = -coeff * dyi * inv_s3;
-        *Ay_out =  coeff * dxi * inv_s3;
+        /* Sum the magnetic dipole of each spinning charged body:
+         * A_em = (k_e mu_z/c^2)(z x r)/s^{3/2}, mirroring A_g (mu_z=0 => zero). */
+        const float kc = sim->k_e / (sim->c_eff * sim->c_eff);
+        float ax = 0.0f, ay = 0.0f;
+        for (int n = 0; n < sim->bg_nbody; n++) {
+            const gr_bg_body_t* b = &sim->bg_bodies[n];
+            const float mu_z = compact_body_mu_z(sim, b->GM, b->Q, b->Jz, b->g_em);
+            if (mu_z == 0.0f) continue;
+            const float dxi = x - b->x, dyi = y - b->y;
+            const float s2  = dxi * dxi + dyi * dyi + b->eps * b->eps;
+            const float inv_s3 = 1.0f / (s2 * sqrtf(s2));
+            const float coeff  = kc * mu_z;
+            ax += -coeff * dyi * inv_s3;
+            ay +=  coeff * dxi * inv_s3;
+        }
+        *Ax_out = ax; *Ay_out = ay;
         return 1;
     }
     default:
@@ -680,17 +775,21 @@ int gr_bg_eval_B_em(const struct gr_sim* sim, float x, float y,
         return 1;
     }
     case GR_BG_KIND_COMPACT_BODY: {
-        /* Curl of the magnetic dipole, same form as B_g (mu_z=0 => zero). */
-        const float mu_z = compact_body_mu_z(sim, sim->bg_GM, sim->bg_charge,
-                                             sim->bg_Jz, sim->bg_g_em);
-        const float dxi = x - sim->bg_x0;
-        const float dyi = y - sim->bg_y0;
-        const float r2  = dxi * dxi + dyi * dyi;
-        const float eps2 = sim->bg_eps * sim->bg_eps;
-        const float s2  = r2 + eps2;
-        const float inv_s52 = 1.0f / (s2 * s2 * sqrtf(s2));
-        const float coeff  = sim->k_e * mu_z / (sim->c_eff * sim->c_eff);
-        *Bz_out = coeff * (2.0f * eps2 - r2) * inv_s52;
+        /* Curl of the magnetic dipole summed over bodies (mu_z=0 => zero). */
+        const float kc = sim->k_e / (sim->c_eff * sim->c_eff);
+        float bz = 0.0f;
+        for (int n = 0; n < sim->bg_nbody; n++) {
+            const gr_bg_body_t* b = &sim->bg_bodies[n];
+            const float mu_z = compact_body_mu_z(sim, b->GM, b->Q, b->Jz, b->g_em);
+            if (mu_z == 0.0f) continue;
+            const float dxi = x - b->x, dyi = y - b->y;
+            const float r2  = dxi * dxi + dyi * dyi;
+            const float eps2 = b->eps * b->eps;
+            const float s2  = r2 + eps2;
+            const float inv_s52 = 1.0f / (s2 * s2 * sqrtf(s2));
+            bz += kc * mu_z * (2.0f * eps2 - r2) * inv_s52;
+        }
+        *Bz_out = bz;
         return 1;
     }
     default:
@@ -840,8 +939,7 @@ int gr_bg_eval_phi_em(const struct gr_sim* sim, float x, float y,
         *gy_out  = -sim->bg_Ey_em;
         return 1;
     }
-    case GR_BG_KIND_POINT_CHARGE:
-    case GR_BG_KIND_COMPACT_BODY: {
+    case GR_BG_KIND_POINT_CHARGE: {
         /* phi(x,y) = +k_e Q / sqrt(r^2 + eps^2)  (bg_charge=0 => zero E),
          * grad     = -k_e Q (r - r0) / (r^2 + eps^2)^{3/2}. */
         const float dxi = x - sim->bg_x0;
@@ -854,6 +952,23 @@ int gr_bg_eval_phi_em(const struct gr_sim* sim, float x, float y,
         *phi_out = coeff * inv_s;
         *gx_out  = -coeff * dxi * inv_s3;
         *gy_out  = -coeff * dyi * inv_s3;
+        return 1;
+    }
+    case GR_BG_KIND_COMPACT_BODY: {
+        /* Sum the Coulomb scalar + gradient over all charged bodies. */
+        float phi = 0.0f, gx = 0.0f, gy = 0.0f;
+        for (int n = 0; n < sim->bg_nbody; n++) {
+            const gr_bg_body_t* b = &sim->bg_bodies[n];
+            if (b->Q == 0.0f) continue;
+            const float dxi = x - b->x, dyi = y - b->y;
+            const float s2  = dxi * dxi + dyi * dyi + b->eps * b->eps;
+            const float inv_s = 1.0f / sqrtf(s2), inv_s3 = inv_s / s2;
+            const float coeff = sim->k_e * b->Q;
+            phi += coeff * inv_s;
+            gx  += -coeff * dxi * inv_s3;
+            gy  += -coeff * dyi * inv_s3;
+        }
+        *phi_out = phi; *gx_out = gx; *gy_out = gy;
         return 1;
     }
     default:

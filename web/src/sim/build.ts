@@ -55,10 +55,12 @@ export function applyScenario(world: World, scn: Scenario): void {
     c.setJSmoothPasses(s, g.jSmooth);
 
     c.setBgMode(s, g.bgMode === 'analytic' ? 1 : 0);
-    /* Unified compact body (M, Q, Jz) -- superposes grav + Coulomb + frame
-     * dragging in one background.  The classic metrics are special cases. */
+    /* Compact bodies (M, Q, Jz) -- each superposes grav + Coulomb + frame
+     * dragging; multiple bodies superpose onto the background (the field was
+     * cleared above).  addBackgroundBody accumulates (vs setBackgroundBody,
+     * which clears each call). */
     for (const bg of scn.background) {
-        c.setBackgroundBody(s, bg.x, bg.y, bg.GM ?? 0, bg.Q ?? 0, bg.Jz ?? 0, bg.gFactor ?? 2, bg.epsilon);
+        c.addBackgroundBody(s, bg.x, bg.y, bg.GM ?? 0, bg.Q ?? 0, bg.Jz ?? 0, bg.gFactor ?? 2, bg.epsilon);
     }
     /* Shapiro c_local^2 is built from the background Phi_g, so (re)compute it
      * AFTER the background is installed -- the switch above ran before it. */

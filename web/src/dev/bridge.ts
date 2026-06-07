@@ -77,6 +77,35 @@ function buildHandlers(ctx: BridgeContext): Record<string, Handler> {
             state.liveModified = true;
             return `particle ${p.index} updated (run is now live-modified)`;
         },
+        /* List the background compact bodies (index + params). */
+        background: () => {
+            const n = w().backgroundCount();
+            const bodies = [];
+            for (let i = 0; i < n; i++) bodies.push({ index: i, ...w().backgroundBody(i) });
+            return { count: n, bodies };
+        },
+        /* Live-edit background body i: { index, x?, y?, GM?, Q?, Jz?, gFactor?, eps? }. */
+        set_background: (p) => {
+            if (p?.index == null) throw new Error('set_background requires { index }');
+            const cur = w().backgroundBody(p.index);
+            if (!cur) throw new Error(`no background body ${p.index} (count=${w().backgroundCount()})`);
+            w().setBackgroundBodyAt(p.index, {
+                x: p.x ?? cur.x, y: p.y ?? cur.y, GM: p.GM ?? cur.GM, Q: p.Q ?? cur.Q,
+                Jz: p.Jz ?? cur.Jz, gFactor: p.gFactor ?? cur.gFactor, eps: p.eps ?? cur.eps,
+            });
+            state.liveModified = true;
+            return `background body ${p.index} updated (run is now live-modified)`;
+        },
+        /* Live-add a background body; returns its index or errors when full. */
+        add_background: (p) => {
+            const idx = w().addBackgroundBody({
+                x: p?.x ?? (w().W >> 1), y: p?.y ?? (w().H >> 1), GM: p?.GM ?? 0.01,
+                Q: p?.Q ?? 0, Jz: p?.Jz ?? 0, gFactor: p?.gFactor ?? 2, eps: p?.eps ?? 8,
+            });
+            if (idx < 0) throw new Error('background body list full (max 16)');
+            state.liveModified = true;
+            return `added background body ${idx} (run is now live-modified)`;
+        },
         set_global: (p) => {
             let live = false;
             if (p?.gEff !== undefined) { w().setGEff(p.gEff); live = true; }
