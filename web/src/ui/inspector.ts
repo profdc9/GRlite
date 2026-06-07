@@ -115,13 +115,20 @@ export class Inspector {
 
         /* ---- Global (editable config) ---- */
         this.globalEl.innerHTML = '';
+
+        /* Quick display/physics toggles up top (the common ones).  trails and
+         * velocity are view-only (no rebuild); radiation flips global.noRadiation
+         * and so rebuilds.  `radiation` is the user-facing inverse of noRadiation. */
+        this.globalEl.appendChild(checkRow('trails', s.view.showTrails, (v) => viewEdit((sc) => { sc.view.showTrails = v; })));
+        this.globalEl.appendChild(checkRow('velocity', s.view.showVelocity, (v) => viewEdit((sc) => { sc.view.showVelocity = v; })));
+        this.globalEl.appendChild(checkRow('radiation', !s.global.noRadiation, (v) => edit((sc) => { sc.global.noRadiation = !v; })));
+
         this.globalEl.appendChild(numRow('G_eff', s.global.gEff, 0.1, (v) => edit((sc) => { sc.global.gEff = v; })));
         this.globalEl.appendChild(numRow('k_e', s.global.kE, 0.1, (v) => edit((sc) => { sc.global.kE = v; })));
         this.globalEl.appendChild(selRow('force tier', s.global.forceTier, ['newtonian', 'relativistic'], (v) => edit((sc) => { sc.global.forceTier = v as Scenario['global']['forceTier']; })));
         this.globalEl.appendChild(selRow('shape', s.global.shape, ['cic', 'tsc', 'bump'], (v) => edit((sc) => { sc.global.shape = v as Scenario['global']['shape']; })));
         this.globalEl.appendChild(numRow('kernel R', s.global.kernelRadius, 1, (v) => edit((sc) => { sc.global.kernelRadius = v; })));
         this.globalEl.appendChild(checkRow('self-field', s.global.selfFieldDefault, (v) => edit((sc) => { sc.global.selfFieldDefault = v; })));
-        this.globalEl.appendChild(checkRow('no-radiation', s.global.noRadiation, (v) => edit((sc) => { sc.global.noRadiation = v; })));
         this.globalEl.appendChild(checkRow('GEM force', s.global.switches.gravitomagneticForce, (v) => edit((sc) => { sc.global.switches.gravitomagneticForce = v; })));
         this.globalEl.appendChild(checkRow('EM Lorentz', s.global.switches.emLorentz, (v) => edit((sc) => { sc.global.switches.emLorentz = v; })));
 

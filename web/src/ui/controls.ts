@@ -12,16 +12,12 @@ export interface ControlHandlers {
     onSourceChange: (source: FieldSourceName) => void;
     onVectorsChange: (index: number) => void;
     onVectorSpacingChange: (cells: number) => void;
-    onToggleTrails: () => void;
-    onToggleVelocity: () => void;
     onUndo: () => void;
-    onToggleRadiation: () => void;
     onCopyLink?: () => void;
     onSaveJson?: () => void;
     onOpenJson?: () => void;
     onSaveScene?: () => void;
     onDeleteScene?: () => void;
-    onProbe?: () => void;
 }
 
 /* A scenario dropdown entry; `group` puts it under an <optgroup>. */
@@ -30,8 +26,6 @@ export interface ScenarioItem { value: string; label: string; group?: string; }
 export interface Controls {
     setPaused: (paused: boolean) => void;
     setStatus: (text: string) => void;
-    setTrails: (on: boolean) => void;
-    setVelocity: (on: boolean) => void;
     setField: (index: number) => void;
     setSource: (source: FieldSourceName) => void;
     setVectors: (index: number) => void;
@@ -41,7 +35,6 @@ export interface Controls {
     /* Select a synthetic "(shared)" entry for a scenario with no library file
      * (loaded from a URL hash / edited), so the dropdown reflects what's loaded. */
     setCustomScenario: (label: string) => void;
-    setRadiation: (on: boolean) => void;
 }
 
 export function wireControls(h: ControlHandlers): Controls {
@@ -54,9 +47,6 @@ export function wireControls(h: ControlHandlers): Controls {
     const sourceSel = document.getElementById('source') as HTMLSelectElement;
     const vectorsSel = document.getElementById('vectors') as HTMLSelectElement;
     const vecSpacingInp = document.getElementById('vecspacing') as HTMLInputElement;
-    const trailsBtn = document.getElementById('trails') as HTMLButtonElement;
-    const velocityBtn = document.getElementById('velocity') as HTMLButtonElement;
-    const probeBtn = document.getElementById('probe') as HTMLButtonElement | null;
 
     /* Populate field selector from FIELD_VIEWS. */
     fieldSel.innerHTML = '';
@@ -87,12 +77,8 @@ export function wireControls(h: ControlHandlers): Controls {
         const n = parseInt(vecSpacingInp.value, 10);
         if (Number.isFinite(n) && n >= 2) h.onVectorSpacingChange(n);
     });
-    trailsBtn.addEventListener('click', h.onToggleTrails);
-    velocityBtn.addEventListener('click', h.onToggleVelocity);
     const undoBtn = document.getElementById('undo') as HTMLButtonElement;
-    const radBtn = document.getElementById('radiation') as HTMLButtonElement;
     undoBtn.addEventListener('click', h.onUndo);
-    radBtn.addEventListener('click', h.onToggleRadiation);
     /* Panel show/hide toggles (DOM-only). */
     const togGlobal = document.getElementById('toggleGlobal') as HTMLButtonElement;
     const togParticle = document.getElementById('toggleParticle') as HTMLButtonElement;
@@ -110,18 +96,14 @@ export function wireControls(h: ControlHandlers): Controls {
     const delSceneBtn = document.getElementById('deletescene') as HTMLButtonElement | null;
     if (saveSceneBtn && h.onSaveScene) saveSceneBtn.addEventListener('click', h.onSaveScene);
     if (delSceneBtn && h.onDeleteScene) delSceneBtn.addEventListener('click', h.onDeleteScene);
-    if (probeBtn && h.onProbe) probeBtn.addEventListener('click', h.onProbe);
 
     return {
         setPaused: (paused) => { pauseBtn.textContent = paused ? 'resume' : 'pause'; },
         setStatus: (text) => { statusEl.textContent = text; },
-        setTrails: (on) => { trailsBtn.textContent = `trails: ${on ? 'on' : 'off'}`; },
-        setVelocity: (on) => { velocityBtn.textContent = `velocity: ${on ? 'on' : 'off'}`; },
         setField: (index) => { fieldSel.value = String(index); },
         setSource: (source) => { sourceSel.value = source; },
         setVectors: (index) => { vectorsSel.value = String(index); },
         setVectorSpacing: (cells) => { vecSpacingInp.value = String(cells); },
-        setRadiation: (on) => { radBtn.textContent = `radiation: ${on ? 'on' : 'off'}`; },
         setScenarios: (items, selected) => {
             scenarioSel.innerHTML = '';
             /* Group entries under <optgroup> by their `group` field (preserving

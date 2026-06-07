@@ -72,8 +72,6 @@ async function main(): Promise<void> {
         controls.setSource(current.view.source);
         controls.setVectors(current.view.vectorField);
         controls.setVectorSpacing(current.view.vectorSpacing);
-        controls.setTrails(current.view.showTrails);
-        controls.setVelocity(current.view.showVelocity);
     }
 
     function loadScenario(scn: Scenario): void {
@@ -88,7 +86,6 @@ async function main(): Promise<void> {
         controls.setPaused(true);
         viewDirty = true;                 // redraw the field view for the new state
         syncViewControls();
-        controls.setRadiation(scn.global.noRadiation);
         inspector.renderEditors();
         writeToHash(scn, currentFile || null);
         console.log(`[${scn.name}] built\n` + fullReport(world));
@@ -195,10 +192,7 @@ async function main(): Promise<void> {
         onSourceChange: (sourceName) => { current.view.source = sourceName; },
         onVectorsChange: (i) => { current.view.vectorField = i; },
         onVectorSpacingChange: (n) => { current.view.vectorSpacing = n; },
-        onToggleTrails: () => { current.view.showTrails = !current.view.showTrails; controls.setTrails(current.view.showTrails); },
-        onToggleVelocity: () => { current.view.showVelocity = !current.view.showVelocity; controls.setVelocity(current.view.showVelocity); },
         onUndo: () => undo(),
-        onToggleRadiation: () => applyEdit((sc) => { sc.global.noRadiation = !sc.global.noRadiation; }),
         onCopyLink: () => {
             writeToHash(current, currentFile || null);
             void navigator.clipboard?.writeText(location.href);
@@ -234,15 +228,14 @@ async function main(): Promise<void> {
             controls.setCustomScenario(current.name);
             controls.setStatus(`deleted scene "${name}"`);
         },
-        onProbe: () => {
-            controls.setStatus('running stability probe…');
-            requestAnimationFrame(() => {
-                console.log(stabilityProbe(world, 20, 200));
-                controls.setStatus('probe complete — see console');
-            });
-        },
     });
     syncViewControls();
+
+    /* Frozen-particle field-stability probe -- a dev diagnostic, not a sandbox
+     * feature.  No toolbar button; run `grProbe()` (optionally grProbe(batches,
+     * perBatch)) from the browser console.  Logs Φ_g's swing over time. */
+    (window as unknown as { grProbe: (b?: number, p?: number) => void }).grProbe =
+        (b = 20, p = 200) => { console.log(stabilityProbe(world, b, p)); };
 
     controls.setStatus('loading WASM…');
     core = await loadCore();
