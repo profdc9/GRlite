@@ -17,7 +17,9 @@ export interface ControlHandlers {
     onSaveJson?: () => void;
     onOpenJson?: () => void;
     onSaveScene?: () => void;
-    onDeleteScene?: () => void;
+    /* Delete the scene identified by the highlighted listbox value (a "local:"
+     * key for a saved scene; anything else is rejected by the handler). */
+    onDeleteScene?: (value: string) => void;
 }
 
 /* A scenario dropdown entry; `group` puts it under an <optgroup>. */
@@ -26,6 +28,9 @@ export interface ScenarioItem { value: string; label: string; group?: string; }
 export interface Controls {
     setPaused: (paused: boolean) => void;
     setStatus: (text: string) => void;
+    /* Feedback line inside the scenario modal (save/delete results), since the
+     * page status line is hidden behind the modal backdrop. */
+    setSceneMsg: (text: string, ok?: boolean) => void;
     setField: (index: number) => void;
     setSource: (source: FieldSourceName) => void;
     setVectors: (index: number) => void;
@@ -42,7 +47,14 @@ export function wireControls(h: ControlHandlers): Controls {
     const resetBtn = document.getElementById('reset') as HTMLButtonElement;
     const pauseBtn = document.getElementById('pause') as HTMLButtonElement;
     const stepBtn = document.getElementById('stepFrame') as HTMLButtonElement;
-    const scenarioSel = document.getElementById('scenario') as HTMLSelectElement;
+    /* Scenario picker: a "scenario list" button opens a modal holding a
+     * scrollable listbox; selection is applied on Load, not on highlight. */
+    const scenarioSel = document.getElementById('scenarioSelect') as HTMLSelectElement;
+    const scenarioListBtn = document.getElementById('scenariolist') as HTMLButtonElement;
+    const scenarioModal = document.getElementById('scenarioModal') as HTMLElement;
+    const scenarioLoadBtn = document.getElementById('scenarioLoad') as HTMLButtonElement;
+    const scenarioCancelBtn = document.getElementById('scenarioCancel') as HTMLButtonElement;
+    const scenarioMsgEl = document.getElementById('scenarioMsg') as HTMLElement;
     const fieldSel = document.getElementById('field') as HTMLSelectElement;
     const sourceSel = document.getElementById('source') as HTMLSelectElement;
     const vectorsSel = document.getElementById('vectors') as HTMLSelectElement;
@@ -69,7 +81,31 @@ export function wireControls(h: ControlHandlers): Controls {
     pauseBtn.addEventListener('click', h.onTogglePause);
     stepBtn.addEventListener('click', h.onStep);
     resetBtn.addEventListener('click', h.onReset);
-    scenarioSel.addEventListener('change', () => h.onScenarioChange(scenarioSel.value));
+    /* Modal open/close + load.  On open, snapshot the highlighted value so a
+     * Cancel restores it (the highlight tracks what's actually loaded, kept in
+     * sync by setScenario/setCustomScenario).  Load applies the highlight. */
+    let scenarioReopenValue = '';
+    const openScenarioModal = (): void => {
+        scenarioReopenValue = scenarioSel.value;
+        scenarioMsgEl.textContent = '';
+        scenarioModal.classList.remove('hidden');
+        scenarioSel.focus();
+    };
+    const closeScenarioModal = (): void => scenarioModal.classList.add('hidden');
+    const cancelScenarioModal = (): void => { scenarioSel.value = scenarioReopenValue; closeScenarioModal(); };
+    const loadScenarioModal = (): void => {
+        if (!scenarioSel.value) return;
+        closeScenarioModal();
+        h.onScenarioChange(scenarioSel.value);
+    };
+    scenarioListBtn.addEventListener('click', openScenarioModal);
+    scenarioLoadBtn.addEventListener('click', loadScenarioModal);
+    scenarioCancelBtn.addEventListener('click', cancelScenarioModal);
+    scenarioSel.addEventListener('dblclick', loadScenarioModal);
+    scenarioModal.addEventListener('click', (e) => { if (e.target === scenarioModal) cancelScenarioModal(); });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !scenarioModal.classList.contains('hidden')) cancelScenarioModal();
+    });
     fieldSel.addEventListener('change', () => h.onFieldChange(parseInt(fieldSel.value, 10)));
     sourceSel.addEventListener('change', () => h.onSourceChange(sourceSel.value as FieldSourceName));
     vectorsSel.addEventListener('change', () => h.onVectorsChange(parseInt(vectorsSel.value, 10)));
@@ -95,11 +131,12 @@ export function wireControls(h: ControlHandlers): Controls {
     const saveSceneBtn = document.getElementById('savescene') as HTMLButtonElement | null;
     const delSceneBtn = document.getElementById('deletescene') as HTMLButtonElement | null;
     if (saveSceneBtn && h.onSaveScene) saveSceneBtn.addEventListener('click', h.onSaveScene);
-    if (delSceneBtn && h.onDeleteScene) delSceneBtn.addEventListener('click', h.onDeleteScene);
+    if (delSceneBtn && h.onDeleteScene) delSceneBtn.addEventListener('click', () => h.onDeleteScene!(scenarioSel.value));
 
     return {
         setPaused: (paused) => { pauseBtn.textContent = paused ? 'resume' : 'pause'; },
         setStatus: (text) => { statusEl.textContent = text; },
+        setSceneMsg: (text, ok = false) => { scenarioMsgEl.textContent = text; scenarioMsgEl.style.color = ok ? '#7c9' : '#e88'; },
         setField: (index) => { fieldSel.value = String(index); },
         setSource: (source) => { sourceSel.value = source; },
         setVectors: (index) => { vectorsSel.value = String(index); },

@@ -78,6 +78,15 @@
                    overflow-y: auto; font-family: ui-monospace, Consolas, monospace;
                    font-size: 11px; color: #e88; }
       .modal-buttons { display: flex; gap: 8px; justify-content: flex-end; }
+      .modal-buttons.split { justify-content: space-between; }
+      .btn-group { display: flex; gap: 8px; }
+      /* Scenario picker modal: a scrollable listbox of scenario names. */
+      .modal-box.narrow { width: 420px; }
+      #scenarioSelect { width: 100%; box-sizing: border-box; background: #0e0e12;
+                  color: #cde; border: 1px solid #333; border-radius: 4px;
+                  padding: 4px; font-size: 13px; outline: none; }
+      #scenarioSelect option { padding: 3px 6px; }
+      #scenarioSelect optgroup { color: #9ab; font-style: normal; }
     </style>
   </head>
   <body>
@@ -110,10 +119,7 @@
         </div>
       </div>
       <div class="controls">
-          <label for="scenario">scenario</label>
-          <select id="scenario"><!-- populated from /scenes/index.json + local saves --></select>
-          <button id="savescene" title="save the current scenario to this browser under a name">save scene…</button>
-          <button id="deletescene" title="delete the selected saved scene">delete scene</button>
+          <button id="scenariolist" title="browse, load, save and delete scenarios">scenario list</button>
           <label for="field">field</label>
           <select id="field"></select>
           <label for="source">source</label>
@@ -142,6 +148,25 @@
         </div>
       <div id="status">initializing&hellip;</div>
     </main>
+    <div id="scenarioModal" class="modal hidden">
+      <div class="modal-box narrow">
+        <h2>Scenarios</h2>
+        <p class="hint">Pick a scenario, then press Load (or double-click it).
+           Save stores the current scenario; Delete removes the selected saved scene.</p>
+        <select id="scenarioSelect" size="14"></select>
+        <div id="scenarioMsg" class="modal-msg"></div>
+        <div class="modal-buttons split">
+          <div class="btn-group">
+            <button id="savescene" title="save the current scenario to this browser under a name">save scene…</button>
+            <button id="deletescene" title="delete the selected saved scene">delete scene</button>
+          </div>
+          <div class="btn-group">
+            <button id="scenarioLoad" title="load the selected scenario">load</button>
+            <button id="scenarioCancel">cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
     <div id="jsonModal" class="modal hidden">
       <div class="modal-box">
         <h2>Scenario JSON</h2>

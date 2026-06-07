@@ -205,28 +205,34 @@ async function main(): Promise<void> {
         onSaveScene: () => {
             const name = (window.prompt('Save scenario as:', current.name) || '').trim();
             if (!name) return;
-            if (name.startsWith(LOCAL_PREFIX)) { controls.setStatus(`name cannot start with "${LOCAL_PREFIX}"`); return; }
+            if (name.startsWith(LOCAL_PREFIX)) { controls.setSceneMsg(`name cannot start with "${LOCAL_PREFIX}"`); return; }
             current.name = name;
             if (!saveLocalScene(name, toJSON(current))) {
-                controls.setStatus('save failed (localStorage unavailable or full)');
+                controls.setSceneMsg('save failed (localStorage unavailable or full)');
                 return;
             }
             currentFile = LOCAL_PREFIX + name;
             writeToHash(current, currentFile);
             refreshScenarioList(currentFile);
             inspector.renderEditors();
-            controls.setStatus(`saved scene "${name}"`);
+            controls.setSceneMsg(`saved scene "${name}"`, true);
         },
-        /* Delete the currently-selected saved scene (no effect on the running sim). */
-        onDeleteScene: () => {
-            if (!currentFile.startsWith(LOCAL_PREFIX)) { controls.setStatus('select a saved scene to delete'); return; }
-            const name = currentFile.slice(LOCAL_PREFIX.length);
+        /* Delete the saved scene highlighted in the modal list (no effect on the
+         * running sim, even if it's the one currently loaded). */
+        onDeleteScene: (value) => {
+            if (!value.startsWith(LOCAL_PREFIX)) { controls.setSceneMsg('select a saved scene to delete'); return; }
+            const name = value.slice(LOCAL_PREFIX.length);
             if (!window.confirm(`Delete saved scene "${name}"? This cannot be undone.`)) return;
             deleteLocalScene(name);
-            currentFile = '';
-            refreshScenarioList();
-            controls.setCustomScenario(current.name);
-            controls.setStatus(`deleted scene "${name}"`);
+            if (currentFile === value) {
+                /* Deleted the loaded scene: keep it running, just drop the link. */
+                currentFile = '';
+                refreshScenarioList();
+                controls.setCustomScenario(current.name);
+            } else {
+                refreshScenarioList(currentFile || undefined);
+            }
+            controls.setSceneMsg(`deleted scene "${name}"`, true);
         },
     });
     syncViewControls();
