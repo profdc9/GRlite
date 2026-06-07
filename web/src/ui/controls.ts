@@ -18,6 +18,7 @@ export interface ControlHandlers {
     onToggleRadiation: () => void;
     onCopyLink?: () => void;
     onSaveJson?: () => void;
+    onOpenJson?: () => void;
     onProbe?: () => void;
 }
 
@@ -96,8 +97,10 @@ export function wireControls(h: ControlHandlers): Controls {
     togParticle.addEventListener('click', () => panelParticle.classList.toggle('hidden'));
     const copyBtn = document.getElementById('copylink') as HTMLButtonElement | null;
     const saveBtn = document.getElementById('savejson') as HTMLButtonElement | null;
+    const jsonBtn = document.getElementById('jsonbtn') as HTMLButtonElement | null;
     if (copyBtn && h.onCopyLink) copyBtn.addEventListener('click', h.onCopyLink);
     if (saveBtn && h.onSaveJson) saveBtn.addEventListener('click', h.onSaveJson);
+    if (jsonBtn && h.onOpenJson) jsonBtn.addEventListener('click', h.onOpenJson);
     if (probeBtn && h.onProbe) probeBtn.addEventListener('click', h.onProbe);
 
     return {

@@ -3,7 +3,7 @@
  * the exact state.  Encoding is base64url of the JSON (scenarios are small,
  * well under URL limits). */
 
-import { validate, type Scenario } from './scenario';
+import { validate, validateRanges, type Scenario } from './scenario';
 
 function b64urlEncode(str: string): string {
     /* UTF-8 safe: percent-encode then btoa. */
@@ -28,6 +28,20 @@ export function toJSON(scn: Scenario): string {
 
 export function fromJSON(text: string): Scenario {
     return validate(JSON.parse(text));
+}
+
+/* Parse + fully vet user-supplied JSON text: JSON syntax, scenario format
+ * (validate), then value ranges (validateRanges).  Returns the built scenario
+ * or a list of human-readable errors -- never throws. */
+export function parseScenarioText(text: string): { scenario: Scenario } | { errors: string[] } {
+    let obj: unknown;
+    try { obj = JSON.parse(text); }
+    catch (e) { return { errors: ['JSON syntax error: ' + (e as Error).message] }; }
+    let scn: Scenario;
+    try { scn = validate(obj); }
+    catch (e) { return { errors: ['not a valid grlite scenario: ' + (e as Error).message] }; }
+    const issues = validateRanges(scn);
+    return issues.length ? { errors: issues } : { scenario: scn };
 }
 
 /* The hash carries the full scenario (s=) plus, when the run came from a named

@@ -9,6 +9,7 @@ import { World } from './sim/world';
 import { createState } from './state';
 import { wireControls } from './ui/controls';
 import { Inspector } from './ui/inspector';
+import { initJsonModal } from './ui/jsonModal';
 import { FieldPass } from './render/fieldPass';
 import { Overlay2D, createTrails, type Trails } from './render/overlay2d';
 import { computeView, computeVectorField, colormapEnabled } from './sim/fieldViews';
@@ -41,6 +42,9 @@ async function main(): Promise<void> {
      * Persisted in the URL hash (f=) so a reload re-selects the right dropdown
      * entry instead of leaving it stale. */
     let currentFile = '';
+    /* Scenario JSON modal (assigned after controls/inspector exist; the toolbar
+     * handler calls jsonModal.open() only at click time). */
+    let jsonModal: ReturnType<typeof initJsonModal>;
     /* Force the next frame to recompute the field view even while paused -- set
      * on (re)load/reset so the screen reflects the rebuilt (e.g. zeroed) field
      * immediately instead of showing the cached pre-reset colormap. */
@@ -137,11 +141,12 @@ async function main(): Promise<void> {
         onUndo: () => undo(),
         onToggleRadiation: () => applyEdit((sc) => { sc.global.noRadiation = !sc.global.noRadiation; }),
         onCopyLink: () => {
-            writeToHash(current);
+            writeToHash(current, currentFile || null);
             void navigator.clipboard?.writeText(location.href);
             controls.setStatus('copied shareable URL to clipboard');
         },
         onSaveJson: () => downloadScenario(current),
+        onOpenJson: () => jsonModal.open(),
         onProbe: () => {
             controls.setStatus('running stability probe…');
             requestAnimationFrame(() => {
@@ -161,6 +166,13 @@ async function main(): Promise<void> {
         getWorld: () => world,
         onEdit: applyEdit,
         onViewEdit: applyViewEdit,
+    });
+
+    /* Scenario JSON import/export modal.  A pasted scenario is a custom one (no
+     * library file), so clear currentFile and reflect it as "(shared)". */
+    jsonModal = initJsonModal({
+        getScenario: () => current,
+        onLoad: (scn) => { currentFile = ''; loadScenario(scn); controls.setCustomScenario(scn.name); },
     });
 
     /* Click to select the nearest particle. */

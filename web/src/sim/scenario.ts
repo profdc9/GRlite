@@ -290,3 +290,63 @@ export function validate(obj: unknown): Scenario {
         },
     } as Scenario;
 }
+
+/* Range / sanity checks on a (format-validated) scenario.  Returns a list of
+ * human-readable problems; empty array = acceptable.  Focused on values that
+ * would crash, produce NaN, or destabilize the sim -- not cosmetic choices.
+ * Used to vet user-pasted JSON before building it. */
+export function validateRanges(s: Scenario): string[] {
+    const errs: string[] = [];
+    const fin = (v: unknown, name: string): boolean => {
+        if (typeof v !== 'number' || !Number.isFinite(v)) { errs.push(`${name} must be a finite number`); return false; }
+        return true;
+    };
+    const g = s.grid;
+    if (!Number.isInteger(g.W) || g.W < 16 || g.W > 2048) errs.push('grid.W must be an integer in [16, 2048]');
+    if (!Number.isInteger(g.H) || g.H < 16 || g.H > 2048) errs.push('grid.H must be an integer in [16, 2048]');
+    if (!(g.dx > 0)) errs.push('grid.dx must be > 0');
+    if (!(g.cEff > 0)) errs.push('grid.cEff must be > 0');
+    const cflMax = 1 / Math.SQRT2;
+    if (!(g.cfl > 0 && g.cfl <= cflMax + 1e-4))
+        errs.push(`grid.cfl must be in (0, ${cflMax.toFixed(4)}] for 2D stability`);
+
+    fin(s.global.gEff, 'global.gEff');
+    fin(s.global.kE, 'global.kE');
+    if (!(s.global.kernelRadius > 0)) errs.push('global.kernelRadius must be > 0');
+    const ab = s.global.absorber;
+    if (!(ab.frictionFloor >= 0 && ab.frictionFloor <= 0.999)) errs.push('absorber.frictionFloor must be in [0, 0.999]');
+    if (!(ab.frictionWall >= 0 && ab.frictionWall <= 0.999)) errs.push('absorber.frictionWall must be in [0, 0.999]');
+    if (!(ab.frictionDepth >= 0)) errs.push('absorber.frictionDepth must be >= 0');
+    if (!(s.global.init.settleSteps >= 0)) errs.push('init.settleSteps must be >= 0');
+
+    if (!Array.isArray(s.background)) errs.push('background must be an array');
+    else s.background.forEach((b, i) => {
+        fin(b.x, `background[${i}].x`); fin(b.y, `background[${i}].y`);
+        fin(b.GM, `background[${i}].GM`); fin(b.Q, `background[${i}].Q`);
+        fin(b.Jz, `background[${i}].Jz`); fin(b.gFactor, `background[${i}].gFactor`);
+        if (!(b.epsilon > 0)) errs.push(`background[${i}].epsilon must be > 0`);
+    });
+
+    const c = g.cEff;
+    if (!Array.isArray(s.particles)) errs.push('particles must be an array');
+    else s.particles.forEach((p, i) => {
+        fin(p.x, `particles[${i}].x`); fin(p.y, `particles[${i}].y`);
+        const okv = fin(p.vx, `particles[${i}].vx`) && fin(p.vy, `particles[${i}].vy`);
+        fin(p.charge, `particles[${i}].charge`);
+        if (fin(p.mass, `particles[${i}].mass`) && !(p.mass > 0))
+            errs.push(`particles[${i}].mass must be > 0`);
+        if (okv && c > 0 && Math.hypot(p.vx, p.vy) >= c)
+            errs.push(`particles[${i}] speed must be < cEff (${c})`);
+        if (p.drive) {
+            fin(p.drive.amp, `particles[${i}].drive.amp`);
+            fin(p.drive.omega, `particles[${i}].drive.omega`);
+            if (p.drive.phase !== undefined) fin(p.drive.phase, `particles[${i}].drive.phase`);
+            if (!Array.isArray(p.drive.axis) || p.drive.axis.length !== 2 || !p.drive.axis.every((n) => Number.isFinite(n)))
+                errs.push(`particles[${i}].drive.axis must be [x, y] of finite numbers`);
+        }
+    });
+
+    if (!(s.view.vectorSpacing >= 2)) errs.push('view.vectorSpacing must be >= 2');
+    if (!(s.view.tickInterval >= 0)) errs.push('view.tickInterval must be >= 0');
+    return errs;
+}

@@ -55,6 +55,25 @@
       .hint { color: #777; font-size: 11px; margin-top: 6px; }
       .badge { display: inline-block; padding: 1px 6px; border-radius: 3px;
                font-size: 10px; background: #3a2a10; color: #e0a040; }
+      /* Scenario JSON import/export modal */
+      .modal { position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.6);
+               display: flex; align-items: center; justify-content: center; }
+      .modal.hidden { display: none; }
+      .modal-box { width: 680px; max-width: 92vw; max-height: 88vh; display: flex;
+                   flex-direction: column; gap: 10px; background: #15151a;
+                   border: 1px solid #333; border-radius: 6px; padding: 16px; }
+      .modal-box h2 { margin: 0; font-size: 13px; font-weight: 600; color: #9ab;
+                      text-transform: uppercase; letter-spacing: 0.05em; }
+      .modal-box .hint { margin: 0; }
+      #jsonText { flex: 1; min-height: 380px; width: 100%; box-sizing: border-box;
+                  background: #0e0e12; color: #cde; border: 1px solid #333;
+                  border-radius: 4px; padding: 8px; resize: vertical;
+                  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+                  font-size: 12px; line-height: 1.4; }
+      .modal-msg { white-space: pre-wrap; min-height: 14px; max-height: 120px;
+                   overflow-y: auto; font-family: ui-monospace, Consolas, monospace;
+                   font-size: 11px; color: #e88; }
+      .modal-buttons { display: flex; gap: 8px; justify-content: flex-end; }
     </style>
   </head>
   <body>
@@ -109,10 +128,26 @@
           <button id="toggleParticle" title="show/hide the particle inspector">◉ particle</button>
           <button id="copylink" title="copy a shareable URL of the current scenario">copy link</button>
           <button id="savejson" title="download the current scenario as JSON">save .json</button>
+          <button id="jsonbtn" title="view / copy / paste the scenario JSON">scenario JSON…</button>
           <button id="probe" title="frozen-particle stability probe">probe</button>
         </div>
       <div id="status">initializing&hellip;</div>
     </main>
+    <div id="jsonModal" class="modal hidden">
+      <div class="modal-box">
+        <h2>Scenario JSON</h2>
+        <p class="hint">Copy this to save your scenario, or paste a scenario in and press Load.
+           Pasted JSON is validated (format + value ranges) before it runs.</p>
+        <textarea id="jsonText" spellcheck="false"></textarea>
+        <div id="jsonMsg" class="modal-msg"></div>
+        <div class="modal-buttons">
+          <button id="jsonCopy">copy</button>
+          <button id="jsonRevert" title="discard edits, show the current scenario">revert</button>
+          <button id="jsonLoad" title="validate and load the JSON above">load</button>
+          <button id="jsonClose">close</button>
+        </div>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
