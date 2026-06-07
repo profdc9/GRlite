@@ -1,0 +1,1068 @@
+{
+  "program": "grlite",
+  "format": "grlite-scenario",
+  "version": 1,
+  "name": "gravitational lens -- double image (plane wave)",
+  "grid": {
+    "W": 512,
+    "H": 512,
+    "dx": 1,
+    "cEff": 1,
+    "cfl": 0.7071067811865476
+  },
+  "global": {
+    "gEff": 1,
+    "kE": 1,
+    "shape": "bump",
+    "kernelRadius": 8,
+    "forceInterp": "lewis-birdsall",
+    "absorber": {
+      "outerBC": "dirichlet",
+      "frictionFloor": 0,
+      "frictionWall": 0.02,
+      "frictionDepth": 48,
+      "zeroMeanScalar": false
+    },
+    "init": {
+      "method": "zero",
+      "settleSteps": 0
+    },
+    "switches": {
+      "gravitomagneticForce": false,
+      "gravitomagneticInductive": false,
+      "emLorentz": false,
+      "emInductive": false,
+      "emElectrostatic": false,
+      "emMagnetic": false,
+      "emStressEnergy": false,
+      "emShapiro": true,
+      "fieldEvolution": true,
+      "particleSourceDeposition": true,
+      "esirkepov": true,
+      "periodicBC": false
+    },
+    "rhoSmooth": 0,
+    "jSmooth": 0,
+    "bgMode": "analytic",
+    "selfFieldDefault": false,
+    "noRadiation": false
+  },
+  "background": [
+    {
+      "x": 150,
+      "y": 256,
+      "GM": 2.5,
+      "Q": 0,
+      "Jz": 0,
+      "gFactor": 2,
+      "epsilon": 6
+    }
+  ],
+  "particles": [
+    {
+      "x": 24,
+      "y": 40,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 48,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 56,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 64,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 72,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 80,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 88,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 96,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 104,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 112,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 120,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 128,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 136,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 144,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 152,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 160,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 168,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 176,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 184,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 192,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 200,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 208,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 216,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 224,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 232,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 240,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 248,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 256,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 264,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 272,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 280,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 288,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 296,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 304,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 312,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 320,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 328,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 336,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 344,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 352,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 360,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 368,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 376,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 384,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 392,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 400,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 408,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 416,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 424,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 432,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 440,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 448,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 456,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 464,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "x": 24,
+      "y": 472,
+      "vx": 0,
+      "vy": 0,
+      "mass": 0.001,
+      "charge": 1,
+      "forces": false,
+      "drive": {
+        "amp": 1,
+        "omega": 0.19634954084936207,
+        "phase": 0,
+        "axis": [
+          0,
+          1
+        ]
+      }
+    }
+  ],
+  "view": {
+    "field": 6,
+    "showTrails": false,
+    "showVelocity": false,
+    "source": "perturbation",
+    "vectorField": 0,
+    "vectorSpacing": 12,
+    "tickInterval": 0,
+    "forceArrows": {
+      "grav": false,
+      "em": false,
+      "spin": false,
+      "total": false
+    }
+  }
+}

@@ -41,6 +41,10 @@ async function main(): Promise<void> {
      * Persisted in the URL hash (f=) so a reload re-selects the right dropdown
      * entry instead of leaving it stale. */
     let currentFile = '';
+    /* Force the next frame to recompute the field view even while paused -- set
+     * on (re)load/reset so the screen reflects the rebuilt (e.g. zeroed) field
+     * immediately instead of showing the cached pre-reset colormap. */
+    let viewDirty = false;
 
     function setupGrid(g: Scenario['grid']): void {
         world = new World(core, g.W, g.H, g.dx, g.cEff, g.cfl);
@@ -70,6 +74,7 @@ async function main(): Promise<void> {
         state.selected = -1;
         trails.reset(world.particleCount());
         controls.setPaused(true);
+        viewDirty = true;                 // redraw the field view for the new state
         syncViewControls();
         controls.setRadiation(scn.global.noRadiation);
         inspector.renderEditors();
@@ -233,8 +238,9 @@ async function main(): Promise<void> {
 
         const view = current.view;
         const key = `${view.field}|${view.source}|${view.vectorField}`;
-        const recompute = advanced || key !== viewKey || cmCache === null;
+        const recompute = advanced || viewDirty || key !== viewKey || cmCache === null;
         viewKey = key;
+        viewDirty = false;
 
         gl!.viewport(0, 0, canvas.width, canvas.height);
         gl!.clearColor(0, 0, 0, 1);
@@ -285,7 +291,8 @@ async function main(): Promise<void> {
             { showTrails: view.showTrails, showVelocity: view.showVelocity, selected: state.selected,
               vectors: vec ? { data: vec, spacing: view.vectorSpacing } : null,
               display, tickInterval: view.tickInterval, time: tNow,
-              forces: view.forceArrows });
+              forces: view.forceArrows,
+              bodies: current.background.map((b) => ({ x: b.x, y: b.y, r: b.epsilon })) });
 
         inspector.updateLive();
         controls.setStatus(

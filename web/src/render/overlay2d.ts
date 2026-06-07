@@ -92,7 +92,8 @@ export class Overlay2D {
            opts: { showTrails: boolean; showVelocity: boolean; selected: number;
                    vectors?: { data: VectorData; spacing: number } | null;
                    display?: ParticleDisplay[]; tickInterval?: number; time?: number;
-                   forces?: ForceArrows }): void {
+                   forces?: ForceArrows;
+                   bodies?: { x: number; y: number; r: number }[] }): void {
         const ctx = this.ctx;
         const S = TRAIL_STRIDE;
         ctx.clearRect(0, 0, this.cw, this.ch);
@@ -115,6 +116,19 @@ export class Overlay2D {
                     ctx.lineTo(this.sx(a[S * k]), this.sy(a[S * k + 1]));
                     ctx.stroke();
                 }
+            }
+        }
+
+        /* Background compact body: a hollow bright-red circle at its position,
+         * sized to its softening length (the body's effective core radius). */
+        if (opts.bodies) {
+            ctx.strokeStyle = '#ff2020';
+            ctx.lineWidth = 2;
+            for (const b of opts.bodies) {
+                const rPx = Math.max(6, b.r * (this.cw / this.W));
+                ctx.beginPath();
+                ctx.arc(this.sx(b.x), this.sy(b.y), rPx, 0, Math.PI * 2);
+                ctx.stroke();
             }
         }
 

@@ -199,6 +199,9 @@ float* gr_sim_array_ptr(gr_sim_t* sim, gr_array_id_t which);
  * --------------------------------------------------------------------------*/
 
 void gr_sim_clear_sources(gr_sim_t* sim);
+/* Zero all perturbation field buffers (prev/curr/next) + current history, so a
+ * rebuild starts from a quiet field regardless of init method. */
+void gr_sim_clear_fields(gr_sim_t* sim);
 void gr_sim_deposit_point_mass(gr_sim_t* sim, float x, float y, float mass);
 void gr_sim_deposit_point_charge(gr_sim_t* sim, float x, float y, float charge);
 

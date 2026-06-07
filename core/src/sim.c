@@ -1519,6 +1519,26 @@ void gr_sim_clear_sources(gr_sim_t* sim) {
     if (sim->J_qy)       memset(sim->J_qy,       0, n * sizeof(float));
 }
 
+/* Zero every perturbation field buffer (prev/curr/next for all six potentials)
+ * plus the current-history buffers.  Needed so a rebuild/reset starts from a
+ * quiet field regardless of the init method -- otherwise an 'init=zero' (or
+ * 'none') scene keeps the previous run's wave because nothing overwrites the
+ * leapfrog buffers.  The L-W / settled inits overwrite the field anyway, so
+ * calling this first is always safe. */
+void gr_sim_clear_fields(gr_sim_t* sim) {
+    if (!sim) return;
+    const size_t n = (size_t) sim->width * (size_t) sim->height;
+    for (int f = 0; f < GR_FIELD_COUNT; f++) {
+        if (sim->fields[f].prev) memset(sim->fields[f].prev, 0, n * sizeof(float));
+        if (sim->fields[f].curr) memset(sim->fields[f].curr, 0, n * sizeof(float));
+        if (sim->fields[f].next) memset(sim->fields[f].next, 0, n * sizeof(float));
+    }
+    if (sim->J_mx_prev) memset(sim->J_mx_prev, 0, n * sizeof(float));
+    if (sim->J_my_prev) memset(sim->J_my_prev, 0, n * sizeof(float));
+    if (sim->J_qx_prev) memset(sim->J_qx_prev, 0, n * sizeof(float));
+    if (sim->J_qy_prev) memset(sim->J_qy_prev, 0, n * sizeof(float));
+}
+
 void gr_sim_deposit_point_mass(gr_sim_t* sim, float x, float y, float mass) {
     if (!sim || !sim->rho_matter) return;
     /* rho_matter lives on the CORNER sublattice (§9, v35). */

@@ -59,6 +59,7 @@ export interface GRliteCore {
     addParticle: (sim: number, x: number, y: number, mass: number, charge: number, vx: number, vy: number) => number;
     clearParticles: (sim: number) => void;
     clearSources: (sim: number) => void;
+    clearFields: (sim: number) => void;
     clearBackground: (sim: number) => void;
     stepCount: (sim: number) => number;
     simTime: (sim: number) => number;
@@ -154,6 +155,7 @@ function bindCore(M: GRliteModule): GRliteCore {
             (sim: number, x: number, y: number, m: number, q: number, vx: number, vy: number) => number,
         clearParticles: vfn('gr_sim_clear_particles', ['number']),
         clearSources: vfn('gr_sim_clear_sources', ['number']),
+        clearFields: vfn('gr_sim_clear_fields', ['number']),
         clearBackground: vfn('gr_sim_clear_background', ['number']),
         stepCount: num('gr_sim_step_count', ['number']),
         simTime: num('gr_sim_time', ['number']),

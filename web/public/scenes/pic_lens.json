@@ -17,7 +17,7 @@
     "rhoSmooth": 0, "jSmooth": 0, "bgMode": "analytic", "selfFieldDefault": false, "noRadiation": false
   },
   "background": [
-    { "x": 192.0, "y": 192.0, "GM": 0.8, "Q": 0.0, "Jz": 0.0, "gFactor": 2.0, "epsilon": 6.0 }
+    { "x": 192.0, "y": 192.0, "GM": 2.0, "Q": 0.0, "Jz": 0.0, "gFactor": 2.0, "epsilon": 8.0 }
   ],
   "particles": [
     { "x": 70.0, "y": 196.0, "vx": 0.0, "vy": 0.0, "mass": 0.001, "charge": 1.0,  "forces": false, "drive": { "amp": 1.5, "omega": 0.19635, "phase": 0.0, "axis": [0, 1] } },

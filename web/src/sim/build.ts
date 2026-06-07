@@ -21,6 +21,10 @@ export function applyScenario(world: World, scn: Scenario): void {
     c.clearParticles(s);
     c.clearSources(s);
     c.clearBackground(s);
+    /* Zero the field buffers so every (re)build starts from a quiet field.  The
+     * L-W/settled inits overwrite the field anyway, but 'zero'/'none' rely on it
+     * being clean -- otherwise reset keeps the previous run's wave. */
+    c.clearFields(s);
 
     c.setGEff(s, g.gEff);
     c.setKE(s, g.kE);
