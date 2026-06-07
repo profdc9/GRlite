@@ -46,6 +46,7 @@ export interface GRliteCore {
     setJSmoothPasses: (sim: number, n: number) => void;
     setPeriodicBC: (sim: number, e: number) => void;
     setParticleSpin: (sim: number, idx: number, spin: number, g: number) => void;
+    setParticleDrive: (sim: number, idx: number, amp: number, omega: number, phase: number, axisX: number, axisY: number, forces: number) => void;
     particleEnableSelfField: (sim: number, idx: number) => number;
     particleSetSelfFieldEpsilon: (sim: number, idx: number, ex: number, ey: number) => void;
     setBackgroundPointMass: (sim: number, x: number, y: number, GM: number, eps: number) => void;
@@ -138,6 +139,7 @@ function bindCore(M: GRliteModule): GRliteCore {
         setJSmoothPasses: vfn('gr_sim_set_j_smooth_passes', ['number','number']),
         setPeriodicBC: vfn('gr_sim_set_periodic_bc', ['number','number']),
         setParticleSpin: vfn('gr_sim_set_particle_spin', ['number','number','number','number']),
+        setParticleDrive: vfn('gr_sim_set_particle_drive', ['number','number','number','number','number','number','number','number']),
         particleEnableSelfField: num('gr_sim_particle_enable_self_field', ['number','number']),
         particleSetSelfFieldEpsilon: vfn('gr_sim_particle_set_self_field_epsilon', ['number','number','number','number']),
         setBackgroundPointMass: vfn('gr_sim_set_background_point_mass', ['number','number','number','number','number']),

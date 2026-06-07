@@ -1223,8 +1223,30 @@ void gr_particle_push_all(struct gr_sim* sim) {
         p->fspin_x = Fx_spin; p->fspin_y = Fy_spin;
         p->ftot_x  = Fx;     p->ftot_y  = Fy;
 
-        p->px += Fx * dt;
-        p->py += Fy * dt;
+        /* Apply physical forces unless this particle opts out (forces_enabled
+         * = 0 -> driven/pinned source). */
+        if (p->forces_enabled != 0.0f) {
+            p->px += Fx * dt;
+            p->py += Fy * dt;
+        }
+        /* v43 driven velocity modulation: add dv(t) in velocity space, then
+         * convert back to momentum so the Esirkepov current (rebuilt from the
+         * resulting motion) stays charge-conserving.  v is the half-step
+         * velocity over [t_n, t_{n+1}], so evaluate the drive at the midpoint. */
+        if (p->drive_vx != 0.0f || p->drive_vy != 0.0f) {
+            const float pm2 = p->px * p->px + p->py * p->py;
+            const float gb  = sqrtf(1.0f + pm2 / (p->mass * p->mass * c2));
+            const float t_mid = dt * ((float) sim->step_count + 0.5f);
+            const float cph = cosf(p->drive_omega * t_mid + p->drive_phase);
+            float vtx = p->px / (gb * p->mass) + p->drive_vx * cph;
+            float vty = p->py / (gb * p->mass) + p->drive_vy * cph;
+            float v2 = vtx * vtx + vty * vty;
+            const float vmax2 = 0.998001f * c2;            /* (0.999 c_eff)^2 */
+            if (v2 > vmax2) { const float s = sqrtf(vmax2 / v2); vtx *= s; vty *= s; v2 = vmax2; }
+            const float gv = 1.0f / sqrtf(1.0f - v2 / c2);
+            p->px = gv * p->mass * vtx;
+            p->py = gv * p->mass * vty;
+        }
         pmag2 = p->px * p->px + p->py * p->py;
         gamma = sqrtf(1.0f + pmag2 / (p->mass * p->mass * c2));
         const float vx = p->px / (gamma * p->mass);
@@ -1375,6 +1397,9 @@ int gr_sim_add_particle(gr_sim_t* sim, float x, float y,
     sim->particles[idx].fem_x   = 0.0f; sim->particles[idx].fem_y   = 0.0f;
     sim->particles[idx].fspin_x = 0.0f; sim->particles[idx].fspin_y = 0.0f;
     sim->particles[idx].ftot_x  = 0.0f; sim->particles[idx].ftot_y  = 0.0f;
+    sim->particles[idx].drive_vx = 0.0f; sim->particles[idx].drive_vy = 0.0f;
+    sim->particles[idx].drive_omega = 0.0f; sim->particles[idx].drive_phase = 0.0f;
+    sim->particles[idx].forces_enabled = 1.0f;
     return idx;
 }
 
@@ -1382,6 +1407,22 @@ void gr_sim_set_particle_spin(gr_sim_t* sim, int idx, float spin, float g_factor
     if (!sim || idx < 0 || idx >= sim->n_particles) return;
     sim->particles[idx].spin     = spin;
     sim->particles[idx].g_factor = g_factor;
+}
+
+void gr_sim_set_particle_drive(gr_sim_t* sim, int idx, float amp, float omega,
+                               float phase, float axis_x, float axis_y,
+                               int forces_enabled) {
+    if (!sim || idx < 0 || idx >= sim->n_particles) return;
+    gr_particle_t* p = &sim->particles[idx];
+    const float n = sqrtf(axis_x * axis_x + axis_y * axis_y);
+    if (n > 0.0f) { axis_x /= n; axis_y /= n; } else { axis_x = 0.0f; axis_y = 0.0f; }
+    /* Store a VELOCITY amplitude (= displacement amp * omega along the axis);
+     * dv(t) = drive_v * cos(omega t + phase) in the pusher. */
+    p->drive_vx = amp * omega * axis_x;
+    p->drive_vy = amp * omega * axis_y;
+    p->drive_omega = omega;
+    p->drive_phase = phase;
+    p->forces_enabled = forces_enabled ? 1.0f : 0.0f;
 }
 
 void gr_sim_set_particle_phi_spin(gr_sim_t* sim, int idx, float phi_spin) {

@@ -305,6 +305,22 @@ typedef struct {
     float fem_x,   fem_y;
     float fspin_x, fspin_y;
     float ftot_x,  ftot_y;
+    /* v43 driven velocity modulation -- turns the particle into a controlled
+     * oscillating-current source (e.g. an EM dipole antenna for the lensing
+     * demo).  Each push adds, in velocity space,
+     *   dv(t) = (drive_vx, drive_vy) * cos(drive_omega * t + drive_phase)
+     * then re-derives momentum, so the Esirkepov current is rebuilt from the
+     * resulting motion and discrete charge continuity is preserved (modulating
+     * momentum, NOT bolting a displacement onto position, is what keeps it
+     * conservation-safe).  (drive_vx, drive_vy) is a VELOCITY amplitude
+     * (= displacement_amp * omega along the drive axis); the displacement
+     * amplitude is |drive_v| / omega.  All-zero (default) = no drive.
+     * forces_enabled: 1 = physical forces applied with the drive on top; 0 =
+     * forces omitted (pure kinematic source / pinned).  Default 1. */
+    float drive_vx, drive_vy;
+    float drive_omega;
+    float drive_phase;
+    float forces_enabled;
 } gr_particle_t;
 
 /* Force tier — selects which terms enter the gravitational force.
@@ -492,6 +508,25 @@ void gr_sim_clear_particles(gr_sim_t* sim);
  * phases 2/3 land). */
 void gr_sim_set_particle_spin(gr_sim_t* sim, int idx, float spin, float g_factor);
 void gr_sim_set_particle_phi_spin(gr_sim_t* sim, int idx, float phi_spin);
+
+/* v43 -- driven velocity modulation (oscillating-current source).
+ *
+ * Make particle idx an oscillating source: each push adds a sinusoidal
+ * velocity dv(t) = amp*omega*cos(omega t + phase) along the unit of
+ * (axis_x, axis_y), in velocity space, then re-derives momentum -- so the
+ * Esirkepov current is rebuilt from the motion and charge continuity holds.
+ *   amp    : DISPLACEMENT amplitude (length units); set 0 to disable the drive.
+ *   omega  : angular frequency (rad / time); wavelength ~ 2*pi*c_eff/omega.
+ *   phase  : phase offset (rad) -- use pi between a +q/-q pair for an antiphase
+ *            dipole.
+ *   axis   : drive direction (normalized internally; (0,0) disables).
+ *   forces_enabled : 1 = physical forces applied with the drive on top;
+ *            0 = forces omitted (pure source / pinned).
+ * Keep amp*omega*dt (per-step displacement) below ~1 cell so the Esirkepov
+ * deposit stays in its conservative window. */
+void gr_sim_set_particle_drive(gr_sim_t* sim, int idx, float amp, float omega,
+                               float phase, float axis_x, float axis_y,
+                               int forces_enabled);
 
 /* v39: per-particle self-field subtraction (gr_sandbox_v39.tex).
  *

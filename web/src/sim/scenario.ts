@@ -12,7 +12,12 @@ export const SCENARIO_VERSION = 1;
 export type ShapeName = 'cic' | 'tsc' | 'bump';
 export type ForceInterpName = 'legacy' | 'lewis-birdsall';
 export type OuterBCName = 'dirichlet' | 'neumann';
-export type InitMethod = 'lw-settled' | 'lw' | 'none';
+/* Field initialization: 'lw-settled' = Lienard-Wiechert + frozen-friction
+ * settle to the discrete fixed point; 'lw' = direct-sum L-W only; 'none' = no
+ * explicit init (auto: settle if perturbation is active, else leave zero);
+ * 'zero' = always leave the field at zero (e.g. a wave-emission/antenna demo
+ * that must start from a quiet field even with perturbation on). */
+export type InitMethod = 'lw-settled' | 'lw' | 'none' | 'zero';
 export type BgModeName = 'sampled' | 'analytic';
 /* Which part of a field the visualizations (colormap + vector overlay) show.
  * (Turning the colormap OFF entirely is the 'none' entry of FIELD_VIEWS, not a
@@ -121,6 +126,14 @@ export interface ParticleSpec {
      * live (no rebuild) but persisted in the scenario so links reproduce them. */
     ticks?: TickMode;
     clock?: boolean;
+    /* Driven oscillating-current source (e.g. an EM dipole antenna): adds a
+     * sinusoidal velocity dv = amp*omega*cos(omega t + phase) along `axis` each
+     * step (continuity-safe; applied in the pusher).  Displacement amplitude is
+     * `amp`.  Use phase = pi on one of a +q/-q pair for an antiphase dipole. */
+    drive?: { amp: number; omega: number; phase?: number; axis: [number, number] };
+    /* Omit physical forces on this particle (pure source / pinned).  Default
+     * true (forces applied; a drive, if any, rides on top). */
+    forces?: boolean;
 }
 
 export interface ViewSpec {

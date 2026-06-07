@@ -31,6 +31,7 @@ export const GR_FIELD_A_Y = 5;
 export const DISPLAY_SCALE = 5.0;
 
 /* Particle struct stride (floats) in gr_particle_t.  7 pre-v40, 10 with spin,
- * 18 with the v43 per-particle force breakdown (fgrav/fem/fspin/ftot). */
+ * 18 with the v43 force breakdown (fgrav/fem/fspin/ftot), 23 with the v43 drive
+ * (drive_vx/vy, drive_omega, drive_phase, forces_enabled). */
 export const PARTICLE_STRIDE_F32_OLD = 7;
-export const PARTICLE_STRIDE_F32_NEW = 18;
+export const PARTICLE_STRIDE_F32_NEW = 23;

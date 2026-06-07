@@ -54,12 +54,25 @@ export function applyScenario(world: World, scn: Scenario): void {
     for (const bg of scn.background) {
         c.setBackgroundBody(s, bg.x, bg.y, bg.GM ?? 0, bg.Q ?? 0, bg.Jz ?? 0, bg.gFactor ?? 2, bg.epsilon);
     }
+    /* Shapiro c_local^2 is built from the background Phi_g, so (re)compute it
+     * AFTER the background is installed -- the switch above ran before it. */
+    if (sw.emShapiro) c.setEmShapiro(s, 1);
 
     scn.particles.forEach((p, i) => {
         c.addParticle(s, p.x, p.y, p.mass, p.charge, p.vx, p.vy);
         if (p.spin) c.setParticleSpin(s, i, p.spin, p.gFactor ?? 2.0);
-        /* Per-particle selfField overrides the global default. */
-        const selfOn = p.selfField !== undefined ? p.selfField : g.selfFieldDefault;
+        /* Driven source / pinned: set the oscillation and the forces-on flag.
+         * forces === false also disables self-field below (a source should
+         * radiate its full field and feel nothing). */
+        const pinned = p.forces === false;
+        if (p.drive || pinned) {
+            const d = p.drive;
+            c.setParticleDrive(s, i, d?.amp ?? 0, d?.omega ?? 0, d?.phase ?? 0,
+                               d?.axis?.[0] ?? 1, d?.axis?.[1] ?? 0, pinned ? 0 : 1);
+        }
+        /* Per-particle selfField overrides the global default; never on a
+         * pinned source. */
+        const selfOn = !pinned && (p.selfField !== undefined ? p.selfField : g.selfFieldDefault);
         if (selfOn) {
             c.particleEnableSelfField(s, i);
             if (p.selfFieldEps) c.particleSetSelfFieldEpsilon(s, i, p.selfFieldEps[0], p.selfFieldEps[1]);
@@ -88,7 +101,7 @@ export function applyScenario(world: World, scn: Scenario): void {
     } else if (g.init.method === 'lw') {
         c.initPotentialsLW(s);
     }
-    /* else: 'none' + perturbation off -> leave fields zero. */
+    /* else: 'zero' (always), or 'none' + perturbation off -> leave fields zero. */
 
     /* Every (re)build starts a fresh run at t=0.  initPotentialsSettled already
      * zeroes step_count, but 'none'/'lw' inits do not -- without this the sim
