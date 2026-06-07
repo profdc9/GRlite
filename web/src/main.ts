@@ -17,7 +17,11 @@ import { fullReport, stabilityProbe } from './dev/diagnostics';
 import { STEPS_PER_FRAME } from './sim/config';
 import { applyScenario } from './sim/build';
 import { emptyScenario, type Scenario } from './sim/scenario';
-import { readFromHash, writeToHash, downloadScenario, parseScenarioText } from './sim/serialization';
+import { readFromHash, writeToHash, downloadScenario, parseScenarioText, toJSON } from './sim/serialization';
+import { listLocalScenes, getLocalSceneText, saveLocalScene, deleteLocalScene } from './sim/localScenes';
+
+/* Dropdown value prefix marking a user-saved (localStorage) scene. */
+const LOCAL_PREFIX = 'local:';
 
 const DEFAULT_SCENARIO = 'pic_binary';
 
@@ -115,13 +119,37 @@ async function main(): Promise<void> {
         inspector.renderEditors();
     }
 
-    /* Apply an already-validated scenario: tag it with its library file (or mark
-     * it custom/"(shared)") and build it.  The single post-validation entry. */
+    /* Is `file` a value that exists as a dropdown option (a library file key or
+     * a saved local scene)?  Used so the dropdown can re-select what loaded. */
+    function isDropdownValue(file: string): boolean {
+        if (file.startsWith(LOCAL_PREFIX)) return listLocalScenes().includes(file.slice(LOCAL_PREFIX.length));
+        return scenes.some((s) => s.value === file);
+    }
+
+    /* Rebuild the scenario dropdown: demo library + the user's saved scenes. */
+    function refreshScenarioList(selected?: string): void {
+        const items = [
+            ...scenes.map((s) => ({ value: s.value, label: s.label, group: 'library' })),
+            ...listLocalScenes().map((n) => ({ value: LOCAL_PREFIX + n, label: n, group: 'saved' })),
+        ];
+        controls.setScenarios(items, selected);
+    }
+
+    /* Apply an already-validated scenario: tag it with its dropdown value (library
+     * file or local:name) or mark it custom/"(shared)", then build it. */
     function applyLoadedScenario(scn: Scenario, file: string | null): void {
-        currentFile = (file && scenes.some((s) => s.value === file)) ? file : '';
+        currentFile = (file && isDropdownValue(file)) ? file : '';
         loadScenario(scn);
         if (currentFile) controls.setScenario(currentFile);
         else controls.setCustomScenario(scn.name);
+    }
+
+    /* Load one of the user's saved scenes through the shared validated pipeline. */
+    function loadLocalScene(name: string): void {
+        const text = getLocalSceneText(name);
+        if (text === null) { controls.setStatus(`no saved scene "${name}"`); return; }
+        const errs = loadScenarioFromText(text, LOCAL_PREFIX + name);
+        if (errs.length) controls.setStatus(`saved scene "${name}" failed validation: ${errs[0]}`);
     }
 
     /* THE one validated load path: a JSON string -> parseScenarioText (syntax +
@@ -158,7 +186,11 @@ async function main(): Promise<void> {
         onTogglePause: () => { state.paused = !state.paused; controls.setPaused(state.paused); },
         onStep: () => { state.singleStep = true; },
         onReset: () => loadScenario(current),
-        onScenarioChange: (name) => { void buildByName(name); },
+        onScenarioChange: (value) => {
+            if (value === '__custom__') return;                  // synthetic "(shared)" entry
+            if (value.startsWith(LOCAL_PREFIX)) loadLocalScene(value.slice(LOCAL_PREFIX.length));
+            else void buildByName(value);
+        },
         onFieldChange: (i) => { current.view.field = i; },
         onSourceChange: (sourceName) => { current.view.source = sourceName; },
         onVectorsChange: (i) => { current.view.vectorField = i; },
@@ -174,6 +206,34 @@ async function main(): Promise<void> {
         },
         onSaveJson: () => downloadScenario(current),
         onOpenJson: () => jsonModal.open(),
+        /* Save the current scenario to this browser under a name; it then appears
+         * under "saved" in the dropdown.  The saved JSON carries the chosen name. */
+        onSaveScene: () => {
+            const name = (window.prompt('Save scenario as:', current.name) || '').trim();
+            if (!name) return;
+            if (name.startsWith(LOCAL_PREFIX)) { controls.setStatus(`name cannot start with "${LOCAL_PREFIX}"`); return; }
+            current.name = name;
+            if (!saveLocalScene(name, toJSON(current))) {
+                controls.setStatus('save failed (localStorage unavailable or full)');
+                return;
+            }
+            currentFile = LOCAL_PREFIX + name;
+            writeToHash(current, currentFile);
+            refreshScenarioList(currentFile);
+            inspector.renderEditors();
+            controls.setStatus(`saved scene "${name}"`);
+        },
+        /* Delete the currently-selected saved scene (no effect on the running sim). */
+        onDeleteScene: () => {
+            if (!currentFile.startsWith(LOCAL_PREFIX)) { controls.setStatus('select a saved scene to delete'); return; }
+            const name = currentFile.slice(LOCAL_PREFIX.length);
+            if (!window.confirm(`Delete saved scene "${name}"? This cannot be undone.`)) return;
+            deleteLocalScene(name);
+            currentFile = '';
+            refreshScenarioList();
+            controls.setCustomScenario(current.name);
+            controls.setStatus(`deleted scene "${name}"`);
+        },
         onProbe: () => {
             controls.setStatus('running stability probe…');
             requestAnimationFrame(() => {
@@ -223,7 +283,7 @@ async function main(): Promise<void> {
         }
     } catch (e) { console.warn('scene manifest fetch failed:', (e as Error).message); }
     if (scenes.length === 0) scenes = [{ value: DEFAULT_SCENARIO, label: DEFAULT_SCENARIO }];
-    controls.setScenarios(scenes, DEFAULT_SCENARIO);
+    refreshScenarioList(DEFAULT_SCENARIO);   // demo library + the user's saved scenes
 
     /* Initial scenario: URL hash if present (shareable/reproducible state), else
      * the default library file.  Keep the dropdown in sync with what actually

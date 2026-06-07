@@ -19,8 +19,13 @@ export interface ControlHandlers {
     onCopyLink?: () => void;
     onSaveJson?: () => void;
     onOpenJson?: () => void;
+    onSaveScene?: () => void;
+    onDeleteScene?: () => void;
     onProbe?: () => void;
 }
+
+/* A scenario dropdown entry; `group` puts it under an <optgroup>. */
+export interface ScenarioItem { value: string; label: string; group?: string; }
 
 export interface Controls {
     setPaused: (paused: boolean) => void;
@@ -31,7 +36,7 @@ export interface Controls {
     setSource: (source: FieldSourceName) => void;
     setVectors: (index: number) => void;
     setVectorSpacing: (cells: number) => void;
-    setScenarios: (items: { value: string; label: string }[], selected?: string) => void;
+    setScenarios: (items: ScenarioItem[], selected?: string) => void;
     setScenario: (value: string) => void;
     /* Select a synthetic "(shared)" entry for a scenario with no library file
      * (loaded from a URL hash / edited), so the dropdown reflects what's loaded. */
@@ -101,6 +106,10 @@ export function wireControls(h: ControlHandlers): Controls {
     if (copyBtn && h.onCopyLink) copyBtn.addEventListener('click', h.onCopyLink);
     if (saveBtn && h.onSaveJson) saveBtn.addEventListener('click', h.onSaveJson);
     if (jsonBtn && h.onOpenJson) jsonBtn.addEventListener('click', h.onOpenJson);
+    const saveSceneBtn = document.getElementById('savescene') as HTMLButtonElement | null;
+    const delSceneBtn = document.getElementById('deletescene') as HTMLButtonElement | null;
+    if (saveSceneBtn && h.onSaveScene) saveSceneBtn.addEventListener('click', h.onSaveScene);
+    if (delSceneBtn && h.onDeleteScene) delSceneBtn.addEventListener('click', h.onDeleteScene);
     if (probeBtn && h.onProbe) probeBtn.addEventListener('click', h.onProbe);
 
     return {
@@ -115,10 +124,28 @@ export function wireControls(h: ControlHandlers): Controls {
         setRadiation: (on) => { radBtn.textContent = `radiation: ${on ? 'on' : 'off'}`; },
         setScenarios: (items, selected) => {
             scenarioSel.innerHTML = '';
+            /* Group entries under <optgroup> by their `group` field (preserving
+             * first-seen order); ungrouped entries go straight in. */
+            const groups = new Map<string, ScenarioItem[]>();
             for (const it of items) {
+                const g = it.group ?? '';
+                if (!groups.has(g)) groups.set(g, []);
+                groups.get(g)!.push(it);
+            }
+            const mkOpt = (it: ScenarioItem): HTMLOptionElement => {
                 const o = document.createElement('option');
                 o.value = it.value; o.textContent = it.label;
-                scenarioSel.appendChild(o);
+                return o;
+            };
+            for (const [g, list] of groups) {
+                if (g) {
+                    const og = document.createElement('optgroup');
+                    og.label = g;
+                    for (const it of list) og.appendChild(mkOpt(it));
+                    scenarioSel.appendChild(og);
+                } else {
+                    for (const it of list) scenarioSel.appendChild(mkOpt(it));
+                }
             }
             if (selected !== undefined) scenarioSel.value = selected;
         },
