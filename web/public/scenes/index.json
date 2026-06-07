@@ -7,6 +7,7 @@
     { "file": "pic_three_body", "label": "three-body (equilateral)" },
     { "file": "pic_gyroscope", "label": "frame-dragging gyroscopes" },
     { "file": "pic_coulomb_bg", "label": "charge in Coulomb background" },
+    { "file": "pic_two_body_magnetic", "label": "two fixed bodies + magnetic dipole" },
     { "file": "pic_time_dilation", "label": "gravitational time dilation (two clocks)" },
     { "file": "pic_gravitomagnetic_clock", "label": "gravitomagnetic clock (prograde vs retrograde)" },
     { "file": "pic_lens", "label": "gravitational lens (EM wave through a mass)" },

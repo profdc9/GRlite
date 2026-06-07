@@ -1,0 +1,44 @@
+{
+  "program": "grlite",
+  "format": "grlite-scenario",
+  "version": 1,
+  "name": "two fixed bodies + magnetic dipole",
+  "description": "Two fixed background bodies. Left: a massive spinning charge (M,Q,Jz) — by the no-hair relation mu = g(Q/2M)Jz it carries an EM magnetic dipole (view B_z / A) plus a Coulomb field and frame-drag A_g. Right: a plain mass (no EM field) — a superposition sanity check. A charged test particle crosses the field and is deflected by qv×B + Coulomb + gravity. Crank the left body's Jz to grow the magnetic deviation.",
+  "grid": { "W": 256, "H": 256, "dx": 1.0, "cEff": 1.0, "cfl": 0.7071067811865476 },
+  "global": {
+    "gEff": 1.0,
+    "kE": 1.0,
+    "shape": "bump",
+    "kernelRadius": 8,
+    "forceInterp": "lewis-birdsall",
+    "absorber": { "outerBC": "dirichlet", "frictionFloor": 0.0, "frictionWall": 0.02, "frictionDepth": 32, "zeroMeanScalar": false },
+    "init": { "method": "none", "settleSteps": 0 },
+    "switches": {
+      "gravitomagneticForce": true,
+      "gravitomagneticInductive": false,
+      "emLorentz": true,
+      "emInductive": false,
+      "emElectrostatic": true,
+      "emMagnetic": true,
+      "emStressEnergy": false,
+      "emShapiro": false,
+      "fieldEvolution": false,
+      "particleSourceDeposition": false,
+      "esirkepov": false,
+      "periodicBC": false
+    },
+    "rhoSmooth": 0,
+    "jSmooth": 0,
+    "bgMode": "analytic",
+    "selfFieldDefault": false,
+    "noRadiation": false
+  },
+  "background": [
+    { "x": 100.0, "y": 127.5, "GM": 0.6, "Q": 0.8, "Jz": 24.0, "gFactor": 2.0, "epsilon": 6.0 },
+    { "x": 175.0, "y": 127.5, "GM": 0.4, "Q": 0.0, "Jz": 0.0, "gFactor": 2.0, "epsilon": 6.0 }
+  ],
+  "particles": [
+    { "x": 100.0, "y": 60.0, "vx": 0.22, "vy": 0.0, "mass": 0.02, "charge": 0.05 }
+  ],
+  "view": { "field": 6, "showTrails": true, "showVelocity": true, "source": "background", "vectorField": 3, "vectorSpacing": 12 }
+}
