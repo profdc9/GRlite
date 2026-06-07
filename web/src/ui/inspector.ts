@@ -8,8 +8,9 @@
 
 import type { World } from '../sim/world';
 import type { AppState } from '../state';
+import { selectedOf } from '../state';
 import type { Scenario } from '../sim/scenario';
-import { backgroundLabel, defaultBackground } from '../sim/scenario';
+import { backgroundLabel } from '../sim/scenario';
 import { attachTooltip } from './tooltip';
 
 /* Brief descriptions shown as a delayed hover tooltip on each field label
@@ -92,6 +93,10 @@ export interface InspectorHandlers {
     onViewEdit: (mutate: (s: Scenario) => void) => void;
     /* Remove the particle at `index` (rebuilds; undoable via the edit stack). */
     onDeleteParticle: (index: number) => void;
+    /* Remove the background body at `index` (rebuilds; undoable). */
+    onDeleteBody: (index: number) => void;
+    /* Select a background body for editing (e.g. clicking the Global list). */
+    onSelectBody: (index: number) => void;
 }
 
 function numRow(label: string, value: number, step: number,
@@ -121,15 +126,6 @@ function checkRow(label: string, checked: boolean,
     return row;
 }
 
-/* Add or remove the single (unified) background body.  When adding, seed a
- * Schwarzschild-ish body at the grid center (mass only; user dials in Q/Jz). */
-function setBackgroundPresent(sc: Scenario, present: boolean): void {
-    if (!present) { sc.background = []; return; }
-    if (sc.background[0]) return;
-    /* Seed from the canonical default body (mass 0.01 so it's visible). */
-    sc.background = [{ ...defaultBackground(sc.grid.W, sc.grid.H), GM: 0.01 }];
-}
-
 function header(text: string): HTMLElement {
     const h = document.createElement('div');
     h.textContent = text;
@@ -155,6 +151,7 @@ export class Inspector {
     private statusEl: HTMLElement;
     private globalEl: HTMLElement;
     private particleEl: HTMLElement;
+    private selectionTitle: HTMLElement | null;
     private statusLive: HTMLElement | null = null;
     private particleLive: HTMLElement | null = null;
     private h: InspectorHandlers;
@@ -164,6 +161,8 @@ export class Inspector {
         this.statusEl = document.getElementById('statusInfo') as HTMLElement;
         this.globalEl = document.getElementById('globalInfo') as HTMLElement;
         this.particleEl = document.getElementById('particleInfo') as HTMLElement;
+        /* The Selection panel's heading -- retitled per what's selected. */
+        this.selectionTitle = document.querySelector('#panelParticle h2');
     }
 
     renderEditors(): void {
@@ -234,22 +233,27 @@ export class Inspector {
         this.globalEl.appendChild(checkRow('zero-mean φ', ab.zeroMeanScalar,
             (v) => edit((sc) => { sc.global.absorber.zeroMeanScalar = v; })));
 
-        /* ---- Background body (unified M, Q, Jz -- see backgroundLabel) ---- */
-        const bg = s.background[0];
-        this.globalEl.appendChild(header(`background — ${backgroundLabel(bg)}`));
-        this.globalEl.appendChild(checkRow('present', !!bg,
-            (v) => edit((sc) => setBackgroundPresent(sc, v))));
-        if (bg) {
-            this.globalEl.appendChild(selRow('bg mode', s.global.bgMode, ['sampled', 'analytic'],
-                (v) => edit((sc) => { sc.global.bgMode = v as Scenario['global']['bgMode']; })));
-            this.globalEl.appendChild(numRow('mass GM', bg.GM, 0.001, (v) => edit((sc) => { sc.background[0].GM = v; })));
-            this.globalEl.appendChild(numRow('charge Q', bg.Q, 0.001, (v) => edit((sc) => { sc.background[0].Q = v; })));
-            this.globalEl.appendChild(numRow('ang.mom. Jz', bg.Jz, 0.1, (v) => edit((sc) => { sc.background[0].Jz = v; })));
-            this.globalEl.appendChild(numRow('gyromag. g', bg.gFactor, 0.1, (v) => edit((sc) => { sc.background[0].gFactor = v; })));
-            this.globalEl.appendChild(numRow('softening ε', bg.epsilon, 0.5, (v) => edit((sc) => { sc.background[0].epsilon = v; })));
-            this.globalEl.appendChild(numRow('x', bg.x, 1, (v) => edit((sc) => { sc.background[0].x = v; })));
-            this.globalEl.appendChild(numRow('y', bg.y, 1, (v) => edit((sc) => { sc.background[0].y = v; })));
-        }
+        /* ---- Background bodies (a list; "+ body" is on the toolbar) ----
+         * The per-body fields live in the Selection panel; here we show the
+         * count, the global bg-eval mode, and a clickable list to select one. */
+        const bodySelNow = selectedOf(this.h.getState(), 'body');
+        this.globalEl.appendChild(header(`background bodies (${s.background.length})`));
+        this.globalEl.appendChild(selRow('bg mode', s.global.bgMode, ['sampled', 'analytic'],
+            (v) => edit((sc) => { sc.global.bgMode = v as Scenario['global']['bgMode']; })));
+        const bgNote = document.createElement('div');
+        bgNote.className = 'hint';
+        bgNote.textContent = s.background.length === 0
+            ? 'none — use "+ body" to add one.'
+            : 'click a body below (or its circle) to edit it:';
+        this.globalEl.appendChild(bgNote);
+        s.background.forEach((b, i) => {
+            const row = document.createElement('div');
+            row.className = 'list-row' + (i === bodySelNow ? ' sel' : '');
+            row.textContent = `▸ body ${i} — ${backgroundLabel(b)}`;
+            row.title = 'select this background body to edit it';
+            row.addEventListener('click', () => this.h.onSelectBody(i));
+            this.globalEl.appendChild(row);
+        });
 
         /* ---- Advanced switches (less commonly changed) ---- */
         this.globalEl.appendChild(header('advanced'));
@@ -288,14 +292,28 @@ export class Inspector {
         faRow('force: spin', 'spin');
         faRow('force: total', 'total');
 
-        /* ---- Particle ---- */
+        /* ---- Selection panel: the selected particle OR background body ---- */
         this.particleEl.innerHTML = '';
-        const sel = this.h.getState().selected;
-        if (sel < 0 || sel >= s.particles.length) {
-            this.particleEl.textContent = 'click a particle to select';
-            this.particleLive = null;
-            return;
+        this.particleLive = null;
+        const st = this.h.getState();
+        const pSel = selectedOf(st, 'particle');
+        const bSel = selectedOf(st, 'body');
+        if (pSel >= 0 && pSel < s.particles.length) {
+            if (this.selectionTitle) this.selectionTitle.textContent = `Particle ${pSel}`;
+            this.renderParticleEditor(s, pSel, edit, viewEdit);
+        } else if (bSel >= 0 && bSel < s.background.length) {
+            if (this.selectionTitle) this.selectionTitle.textContent = `Background body ${bSel}`;
+            this.renderBodyEditor(s, bSel, edit);
+        } else {
+            if (this.selectionTitle) this.selectionTitle.textContent = 'Selection';
+            this.particleEl.textContent = 'click a particle or a background body';
         }
+    }
+
+    /* Editable fields for the selected particle (+ live readout, drive, ticks). */
+    private renderParticleEditor(s: Scenario, sel: number,
+                                 edit: (m: (s: Scenario) => void) => void,
+                                 viewEdit: (m: (s: Scenario) => void) => void): void {
         /* Live readout up top (mirrors the Status panel), so the running values
          * stay visible above the editable fields. */
         const pl = document.createElement('div'); pl.className = 'live'; pl.textContent = '—';
@@ -356,6 +374,29 @@ export class Inspector {
         this.particleEl.appendChild(del);
     }
 
+    /* Editable fields for the selected background body (fixed compact source). */
+    private renderBodyEditor(s: Scenario, sel: number,
+                             edit: (m: (s: Scenario) => void) => void): void {
+        const b = s.background[sel];
+        const mk = (label: string, key: 'GM' | 'Q' | 'Jz' | 'gFactor' | 'epsilon' | 'x' | 'y', step: number) =>
+            this.particleEl.appendChild(numRow(label, b[key], step,
+                (v) => edit((sc) => { sc.background[sel][key] = v; })));
+        mk('mass GM', 'GM', 0.001);
+        mk('charge Q', 'Q', 0.001);
+        mk('ang.mom. Jz', 'Jz', 0.1);
+        mk('gyromag. g', 'gFactor', 0.1);
+        mk('softening ε', 'epsilon', 0.5);
+        mk('x', 'x', 1);
+        mk('y', 'y', 1);
+
+        const del = document.createElement('button');
+        del.textContent = 'delete body';
+        del.className = 'del-btn';
+        del.title = 'remove this background body (undo restores it)';
+        del.addEventListener('click', () => this.h.onDeleteBody(sel));
+        this.particleEl.appendChild(del);
+    }
+
     updateLive(): void {
         const w = this.h.getWorld();
         const st = this.h.getState();
@@ -370,8 +411,9 @@ export class Inspector {
                 `${st.liveModified ? '  [live-modified]' : ''}\n` +
                 `P=(${Px.toExponential(2)},${Py.toExponential(2)})  COM=${com}  sep=${sep}`;
         }
-        if (this.particleLive && st.selected >= 0 && st.selected < w.particleCount()) {
-            const p = w.particle(st.selected);
+        const pSel = selectedOf(st, 'particle');
+        if (this.particleLive && pSel >= 0 && pSel < w.particleCount()) {
+            const p = w.particle(pSel);
             const g = p.mass > 0 ? Math.sqrt(1 + (p.px * p.px + p.py * p.py) / (p.mass * p.mass)) : 1;
             const v = p.mass > 0 ? Math.hypot(p.px, p.py) / (g * p.mass) : 0;
             this.particleLive.textContent =

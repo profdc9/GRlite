@@ -89,7 +89,8 @@ export class Overlay2D {
     }
 
     render(particles: Particle[], trails: Trails | null,
-           opts: { showTrails: boolean; showVelocity: boolean; selected: number;
+           opts: { showTrails: boolean; showVelocity: boolean;
+                   selectedParticle: number; selectedBody?: number;
                    vectors?: { data: VectorData; spacing: number } | null;
                    display?: ParticleDisplay[]; tickInterval?: number; time?: number;
                    forces?: ForceArrows;
@@ -122,13 +123,22 @@ export class Overlay2D {
         /* Background compact body: a hollow bright-red circle at its position,
          * sized to its softening length (the body's effective core radius). */
         if (opts.bodies) {
-            ctx.strokeStyle = '#ff2020';
             ctx.lineWidth = 2;
-            for (const b of opts.bodies) {
+            for (let bi = 0; bi < opts.bodies.length; bi++) {
+                const b = opts.bodies[bi];
                 const rPx = Math.max(6, b.r * (this.cw / this.W));
+                const bx = this.sx(b.x), by = this.sy(b.y);
+                ctx.strokeStyle = '#ff2020';
                 ctx.beginPath();
-                ctx.arc(this.sx(b.x), this.sy(b.y), rPx, 0, Math.PI * 2);
+                ctx.arc(bx, by, rPx, 0, Math.PI * 2);
                 ctx.stroke();
+                /* Selected background body: amber highlight ring + center dot. */
+                if (bi === opts.selectedBody) {
+                    ctx.strokeStyle = '#ffe070';
+                    ctx.beginPath(); ctx.arc(bx, by, rPx + 4, 0, Math.PI * 2); ctx.stroke();
+                    ctx.fillStyle = '#ffe070';
+                    ctx.beginPath(); ctx.arc(bx, by, 3, 0, Math.PI * 2); ctx.fill();
+                }
             }
         }
 
@@ -180,7 +190,7 @@ export class Overlay2D {
             }
 
             /* Marker. */
-            const sel = p.index === opts.selected;
+            const sel = p.index === opts.selectedParticle;
             ctx.beginPath();
             ctx.arc(x, y, sel ? 7 : 5, 0, Math.PI * 2);
             ctx.fillStyle = sel ? '#ffe070' : '#ffffff';

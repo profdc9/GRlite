@@ -6,7 +6,7 @@
 
 import { loadCore, type GRliteCore } from './wasm/binding';
 import { World } from './sim/world';
-import { createState } from './state';
+import { createState, selectedOf } from './state';
 import { wireControls } from './ui/controls';
 import { Inspector } from './ui/inspector';
 import { initJsonModal } from './ui/jsonModal';
@@ -16,7 +16,7 @@ import { computeView, computeVectorField, colormapEnabled } from './sim/fieldVie
 import { fullReport, stabilityProbe } from './dev/diagnostics';
 import { STEPS_PER_FRAME } from './sim/config';
 import { applyScenario } from './sim/build';
-import { emptyScenario, defaultParticle, type Scenario } from './sim/scenario';
+import { emptyScenario, defaultParticle, defaultBackground, type Scenario } from './sim/scenario';
 import { readFromHash, writeToHash, downloadScenario, parseScenarioText, toJSON } from './sim/serialization';
 import { listLocalScenes, getLocalSceneText, saveLocalScene, deleteLocalScene } from './sim/localScenes';
 
@@ -81,7 +81,7 @@ async function main(): Promise<void> {
         current = scn;
         state.paused = true;
         state.liveModified = false;
-        state.selected = -1;
+        state.selection = null;
         trails.reset(world.particleCount());
         controls.setPaused(true);
         viewDirty = true;                 // redraw the field view for the new state
@@ -99,15 +99,18 @@ async function main(): Promise<void> {
         undoStack.push(structuredClone(current));
         if (undoStack.length > 50) undoStack.shift();
         /* loadScenario clears the selection (a fresh scenario has a different
-         * particle set); for an in-place edit the set is unchanged, so restore
-         * the selection if it's still valid -- otherwise editing a field would
-         * deselect the particle being edited. */
-        const keepSel = state.selected;
+         * particle/body set); for an in-place edit the set is unchanged, so
+         * restore the selection if it's still valid -- otherwise editing a field
+         * would deselect the object being edited. */
+        const keep = state.selection;
         mutate(current);
         loadScenario(current);
-        if (keepSel >= 0 && keepSel < current.particles.length) {
-            state.selected = keepSel;
-            inspector.renderEditors();
+        if (keep) {
+            const n = keep.kind === 'particle' ? current.particles.length : current.background.length;
+            if (keep.index >= 0 && keep.index < n) {
+                state.selection = keep;
+                inspector.renderEditors();
+            }
         }
     }
     function undo(): void {
@@ -207,10 +210,19 @@ async function main(): Promise<void> {
          * afterwards.  Undo removes it. */
         onAddParticle: () => {
             applyEdit((sc) => { sc.particles.push(defaultParticle(sc.grid.W, sc.grid.H)); });
-            state.selected = current.particles.length - 1;
+            state.selection = { kind: 'particle', index: current.particles.length - 1 };
             controls.showParticlePanel();
             inspector.renderEditors();
-            controls.setStatus('added particle — edit it in the particle inspector');
+            controls.setStatus('added particle — edit it in the selection inspector');
+        },
+        /* Add a fixed background body at the grid center (GM 0.01 so it's visible)
+         * and select it for editing.  Undoable. */
+        onAddBody: () => {
+            applyEdit((sc) => { sc.background.push({ ...defaultBackground(sc.grid.W, sc.grid.H), GM: 0.01 }); });
+            state.selection = { kind: 'body', index: current.background.length - 1 };
+            controls.showParticlePanel();
+            inspector.renderEditors();
+            controls.setStatus('added background body — edit it in the selection inspector');
         },
         onCopyLink: () => {
             writeToHash(current, currentFile || null);
@@ -276,9 +288,21 @@ async function main(): Promise<void> {
         onDeleteParticle: (index) => {
             if (index < 0 || index >= current.particles.length) return;
             applyEdit((sc) => { sc.particles.splice(index, 1); });
-            state.selected = -1;          // don't silently jump to a neighbor
+            state.selection = null;       // don't silently jump to a neighbor
             inspector.renderEditors();
             controls.setStatus('deleted particle (undo to restore)');
+        },
+        onDeleteBody: (index) => {
+            if (index < 0 || index >= current.background.length) return;
+            applyEdit((sc) => { sc.background.splice(index, 1); });
+            state.selection = null;
+            inspector.renderEditors();
+            controls.setStatus('deleted background body (undo to restore)');
+        },
+        onSelectBody: (index) => {
+            state.selection = { kind: 'body', index };
+            controls.showParticlePanel();
+            inspector.renderEditors();
         },
     });
 
@@ -326,6 +350,19 @@ async function main(): Promise<void> {
         return { sx: sx + vx * VEL_PX_PER_C, sy: sy - vy * VEL_PX_PER_C };
     };
 
+    /* Nearest background body to a canvas pixel (hit-test its circle), or -1.
+     * Tolerance is the larger of the marker grab radius and the drawn circle. */
+    const pickBody = (px: number, py: number): number => {
+        let best = -1, bestD = Infinity;
+        current.background.forEach((b, i) => {
+            const c = toCanvas(b.x, b.y);
+            const rPx = Math.max(6, b.epsilon * (cw() / world.W));
+            const d = Math.hypot(px - c.sx, py - c.sy);
+            if (d <= Math.max(GRAB_TOL, rPx + 6) && d < bestD) { bestD = d; best = i; }
+        });
+        return best;
+    };
+
     /* Write live drag values straight to the sim for instant feedback. */
     const applyDrag = (px: number, py: number): void => {
         if (!drag) return;
@@ -351,7 +388,7 @@ async function main(): Promise<void> {
 
     overlayCanvas.addEventListener('pointerdown', (ev) => {
         const { px, py } = pointerPx(ev);
-        const sel = state.selected;
+        const sel = selectedOf(state, 'particle');
         if (sel >= 0 && sel < world.particleCount()) {
             const p = world.particle(sel);
             if (ev.shiftKey) {
@@ -380,7 +417,7 @@ async function main(): Promise<void> {
         if (drag) { applyDrag(px, py); return; }
         /* Hover cursor: 'grab' over the selected particle's draggable handle
          * (marker, or arrow tip when Shift is held) to advertise drag-to-place. */
-        const sel = state.selected;
+        const sel = selectedOf(state, 'particle');
         let over = false;
         if (sel >= 0 && sel < world.particleCount()) {
             const p = world.particle(sel);
@@ -392,9 +429,15 @@ async function main(): Promise<void> {
 
     const endDrag = (ev: PointerEvent): void => {
         if (!drag) {
-            /* A plain click (no drag started): select the nearest particle. */
+            /* A plain click (no drag started): select the nearest particle,
+             * else the nearest background body, else clear the selection. */
             const { px, py } = pointerPx(ev);
-            state.selected = overlay.pick(px, py, world.particles());
+            const pick = overlay.pick(px, py, world.particles());
+            if (pick >= 0) state.selection = { kind: 'particle', index: pick };
+            else {
+                const bp = pickBody(px, py);
+                state.selection = bp >= 0 ? { kind: 'body', index: bp } : null;
+            }
             inspector.renderEditors();
             return;
         }
@@ -542,7 +585,8 @@ async function main(): Promise<void> {
         }));
 
         overlay.render(parts, trails,
-            { showTrails: view.showTrails, showVelocity: view.showVelocity, selected: state.selected,
+            { showTrails: view.showTrails, showVelocity: view.showVelocity,
+              selectedParticle: selectedOf(state, 'particle'), selectedBody: selectedOf(state, 'body'),
               vectors: vec ? { data: vec, spacing: view.vectorSpacing } : null,
               display, tickInterval: view.tickInterval, time: tNow,
               forces: view.forceArrows,

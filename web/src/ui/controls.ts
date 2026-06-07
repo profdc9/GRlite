@@ -14,6 +14,7 @@ export interface ControlHandlers {
     onVectorSpacingChange: (cells: number) => void;
     onUndo: () => void;
     onAddParticle?: () => void;
+    onAddBody?: () => void;
     onCopyLink?: () => void;
     onSaveJson?: () => void;
     onOpenJson?: () => void;
@@ -128,6 +129,8 @@ export function wireControls(h: ControlHandlers): Controls {
     togParticle.addEventListener('click', () => panelParticle.classList.toggle('hidden'));
     const addParticleBtn = document.getElementById('addparticle') as HTMLButtonElement | null;
     if (addParticleBtn && h.onAddParticle) addParticleBtn.addEventListener('click', h.onAddParticle);
+    const addBodyBtn = document.getElementById('addbody') as HTMLButtonElement | null;
+    if (addBodyBtn && h.onAddBody) addBodyBtn.addEventListener('click', h.onAddBody);
     const copyBtn = document.getElementById('copylink') as HTMLButtonElement | null;
     const saveBtn = document.getElementById('savejson') as HTMLButtonElement | null;
     const jsonBtn = document.getElementById('jsonbtn') as HTMLButtonElement | null;
