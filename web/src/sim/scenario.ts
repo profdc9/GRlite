@@ -11,6 +11,7 @@ export const SCENARIO_VERSION = 1;
 
 export type ShapeName = 'cic' | 'tsc' | 'bump';
 export type ForceInterpName = 'legacy' | 'lewis-birdsall';
+export type ForceTierName = 'newtonian' | 'relativistic';
 export type OuterBCName = 'dirichlet' | 'neumann';
 /* Field initialization: 'lw-settled' = Lienard-Wiechert + frozen-friction
  * settle to the discrete fixed point; 'lw' = direct-sum L-W only; 'none' = no
@@ -68,6 +69,9 @@ export interface GlobalSpec {
     shape: ShapeName;
     kernelRadius: number;
     forceInterp: ForceInterpName;
+    /* Gravitational force law: 'newtonian' (-m grad Phi_g) or 'relativistic'
+     * (EIH 1PN, velocity-dependent -> perihelion precession / weak-field ISCO). */
+    forceTier: ForceTierName;
     absorber: AbsorberSpec;
     init: InitSpec;
     switches: Switches;
@@ -207,6 +211,7 @@ export function defaultGlobal(): GlobalSpec {
         shape: 'bump',
         kernelRadius: 8,
         forceInterp: 'lewis-birdsall',
+        forceTier: 'newtonian',
         absorber: { outerBC: 'dirichlet', frictionFloor: 0.0, frictionWall: 0.02,
                     frictionDepth: 48, zeroMeanScalar: false },
         init: { method: 'lw-settled', settleSteps: 384 },

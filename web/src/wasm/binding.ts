@@ -27,6 +27,7 @@ export interface GRliteCore {
     setShapeFunction: (sim: number, shape: number) => void;
     setKernelRadius: (sim: number, radiusCells: number) => void;
     setForceInterp: (sim: number, scheme: number) => void;
+    setForceTier: (sim: number, tier: number) => void;
     setOuterBcNeumann: (sim: number, neumann: number) => void;
     setVolumeFrictionTaper: (sim: number, uniform: number, taperMax: number, taperDepth: number) => void;
     setZeroMeanScalarPotentials: (sim: number, enabled: number) => void;
@@ -123,6 +124,7 @@ function bindCore(M: GRliteModule): GRliteCore {
         setShapeFunction: vfn('gr_sim_set_shape_function', ['number','number']),
         setKernelRadius: vfn('gr_sim_set_kernel_radius', ['number','number']),
         setForceInterp: vfn('gr_sim_set_force_interp', ['number','number']),
+        setForceTier: vfn('gr_sim_set_force_tier', ['number','number']),
         setOuterBcNeumann: vfn('gr_sim_set_outer_bc_neumann', ['number','number']),
         setVolumeFrictionTaper: vfn('gr_sim_set_volume_friction_taper', ['number','number','number','number']),
         setZeroMeanScalarPotentials: vfn('gr_sim_set_zero_mean_scalar_potentials', ['number','number']),

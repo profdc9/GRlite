@@ -7,7 +7,8 @@
 import type { World } from './world';
 import type { Scenario, ShapeName, ForceInterpName } from './scenario';
 import { GR_SHAPE_CIC, GR_SHAPE_TSC, GR_SHAPE_BUMP,
-         GR_FORCE_INTERP_LEGACY, GR_FORCE_INTERP_LB } from './config';
+         GR_FORCE_INTERP_LEGACY, GR_FORCE_INTERP_LB,
+         GR_FORCE_NEWTONIAN, GR_FORCE_RELATIVISTIC } from './config';
 
 const shapeId = (s: ShapeName): number =>
     s === 'bump' ? GR_SHAPE_BUMP : s === 'tsc' ? GR_SHAPE_TSC : GR_SHAPE_CIC;
@@ -32,6 +33,7 @@ export function applyScenario(world: World, scn: Scenario): void {
     c.setShapeFunction(s, shapeId(g.shape));
     if (g.shape === 'bump') c.setKernelRadius(s, g.kernelRadius);
     c.setForceInterp(s, forceId(g.forceInterp));
+    c.setForceTier(s, g.forceTier === 'relativistic' ? GR_FORCE_RELATIVISTIC : GR_FORCE_NEWTONIAN);
 
     const sw = g.switches;
     /* No-radiation mode forces the inductive (radiation-reaction) pieces off. */

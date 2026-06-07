@@ -19,6 +19,12 @@ export const GR_SHAPE_BUMP = 2;
 export const GR_FORCE_INTERP_LEGACY = 0;
 export const GR_FORCE_INTERP_LB = 1;
 
+/* Force tier (mirror gr_force_tier_t): Newtonian (-m grad Phi_g) vs the EIH 1PN
+ * relativistic acceleration g(1+v^2/c^2+4phi/c^2) - 4(v.g)v/c^2 (gives the
+ * weak-field perihelion precession / ISCO via the velocity-dependent terms). */
+export const GR_FORCE_NEWTONIAN = 0;
+export const GR_FORCE_RELATIVISTIC = 1;
+
 /* GR field ids (mirror gr_field_id_t in grlite.h). */
 export const GR_FIELD_PHI_GRAV = 0;
 export const GR_FIELD_A_GX = 1;
