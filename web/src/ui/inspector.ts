@@ -76,14 +76,16 @@ function selRow(label: string, value: string, opts: string[],
 }
 
 export class Inspector {
+    private statusEl: HTMLElement;
     private globalEl: HTMLElement;
     private particleEl: HTMLElement;
-    private globalLive: HTMLElement | null = null;
+    private statusLive: HTMLElement | null = null;
     private particleLive: HTMLElement | null = null;
     private h: InspectorHandlers;
 
     constructor(h: InspectorHandlers) {
         this.h = h;
+        this.statusEl = document.getElementById('statusInfo') as HTMLElement;
         this.globalEl = document.getElementById('globalInfo') as HTMLElement;
         this.particleEl = document.getElementById('particleInfo') as HTMLElement;
     }
@@ -93,14 +95,23 @@ export class Inspector {
         const edit = this.h.onEdit;
         const viewEdit = this.h.onViewEdit;
 
-        /* ---- Global ---- */
-        this.globalEl.innerHTML = '';
+        /* ---- Status (read-only: title, description, live sim info) ---- */
+        this.statusEl.innerHTML = '';
+        const title = document.createElement('div');
+        title.textContent = s.name;
+        title.style.cssText = 'font-weight:600;color:#cde;margin-bottom:4px;';
+        this.statusEl.appendChild(title);
         if (s.description) {
             const note = document.createElement('div');
             note.className = 'hint';
             note.textContent = s.description;
-            this.globalEl.appendChild(note);
+            this.statusEl.appendChild(note);
         }
+        const sl = document.createElement('div'); sl.className = 'live'; sl.textContent = '—';
+        this.statusEl.appendChild(sl); this.statusLive = sl;
+
+        /* ---- Global (editable config) ---- */
+        this.globalEl.innerHTML = '';
         this.globalEl.appendChild(numRow('G_eff', s.global.gEff, 0.1, (v) => edit((sc) => { sc.global.gEff = v; })));
         this.globalEl.appendChild(numRow('k_e', s.global.kE, 0.1, (v) => edit((sc) => { sc.global.kE = v; })));
         this.globalEl.appendChild(selRow('force tier', s.global.forceTier, ['newtonian', 'relativistic'], (v) => edit((sc) => { sc.global.forceTier = v as Scenario['global']['forceTier']; })));
@@ -154,6 +165,28 @@ export class Inspector {
             this.globalEl.appendChild(numRow('y', bg.y, 1, (v) => edit((sc) => { sc.background[0].y = v; })));
         }
 
+        /* ---- Advanced switches (less commonly changed) ---- */
+        this.globalEl.appendChild(header('advanced'));
+        this.globalEl.appendChild(selRow('force interp', s.global.forceInterp, ['legacy', 'lewis-birdsall'],
+            (v) => edit((sc) => { sc.global.forceInterp = v as Scenario['global']['forceInterp']; })));
+        const swRow = (label: string, key: keyof Scenario['global']['switches']) =>
+            this.globalEl.appendChild(checkRow(label, s.global.switches[key],
+                (v) => edit((sc) => { sc.global.switches[key] = v; })));
+        swRow('GM inductive', 'gravitomagneticInductive');
+        swRow('EM electrostatic', 'emElectrostatic');
+        swRow('EM magnetic', 'emMagnetic');
+        swRow('EM inductive', 'emInductive');
+        swRow('EM stress-energy', 'emStressEnergy');
+        swRow('EM Shapiro', 'emShapiro');
+        swRow('Shapiro dynamic', 'shapiroDynamic');
+        swRow('Esirkepov', 'esirkepov');
+        swRow('periodic BC', 'periodicBC');
+        this.globalEl.appendChild(numRow('ρ smooth', s.global.rhoSmooth, 1, (v) => edit((sc) => { sc.global.rhoSmooth = v; })));
+        this.globalEl.appendChild(numRow('J smooth', s.global.jSmooth, 1, (v) => edit((sc) => { sc.global.jSmooth = v; })));
+        this.globalEl.appendChild(selRow('field init', s.global.init.method, ['lw-settled', 'lw', 'none', 'zero'],
+            (v) => edit((sc) => { sc.global.init.method = v as Scenario['global']['init']['method']; })));
+        this.globalEl.appendChild(numRow('settle steps', s.global.init.settleSteps, 1, (v) => edit((sc) => { sc.global.init.settleSteps = v; })));
+
         /* ---- Visualization (view-only; no rebuild) ---- */
         this.globalEl.appendChild(header('visualization'));
         this.globalEl.appendChild(numRow('tick Δ (0=auto)', s.view.tickInterval, 0.5,
@@ -168,9 +201,6 @@ export class Inspector {
         faRow('force: EM', 'em');
         faRow('force: spin', 'spin');
         faRow('force: total', 'total');
-
-        const gl = document.createElement('div'); gl.className = 'live'; gl.textContent = '—';
-        this.globalEl.appendChild(gl); this.globalLive = gl;
 
         /* ---- Particle ---- */
         this.particleEl.innerHTML = '';
@@ -232,13 +262,13 @@ export class Inspector {
     updateLive(): void {
         const w = this.h.getWorld();
         const st = this.h.getState();
-        if (this.globalLive) {
+        if (this.statusLive) {
             const ps = w.particles();
             let Px = 0, Py = 0, Mx = 0, My = 0, M = 0;
             for (const p of ps) { Px += p.px; Py += p.py; Mx += p.mass * p.x; My += p.mass * p.y; M += p.mass; }
             const com = M > 0 ? `(${(Mx / M).toFixed(2)}, ${(My / M).toFixed(2)})` : '—';
             const sep = ps.length === 2 ? Math.hypot(ps[0].x - ps[1].x, ps[0].y - ps[1].y).toFixed(3) : '—';
-            this.globalLive.textContent =
+            this.statusLive.textContent =
                 `step ${w.stepCount()}  t=${w.time().toFixed(2)}  ${st.paused ? 'paused' : 'running'}` +
                 `${st.liveModified ? '  [live-modified]' : ''}\n` +
                 `P=(${Px.toExponential(2)},${Py.toExponential(2)})  COM=${com}  sep=${sep}`;

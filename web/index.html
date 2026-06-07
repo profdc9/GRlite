@@ -38,6 +38,10 @@
       .panel h2 { position: sticky; top: 0; background: #131318; z-index: 1;
                   margin: 0 0 8px; padding: 2px 0 6px; font-size: 12px; font-weight: 600;
                   color: #9ab; text-transform: uppercase; letter-spacing: 0.05em; }
+      /* Status (top) + Particle (bottom) share one column at the sim height,
+         each ~half, scrolling internally. */
+      .col-mid { display: flex; flex-direction: column; gap: 12px; height: 640px; }
+      .panel.half { flex: 1 1 0; min-height: 0; max-height: none; }
       .kv { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
             font-size: 12px; line-height: 1.5; color: #ccd; white-space: pre-wrap; }
       .panel.hidden { display: none; }
@@ -87,11 +91,18 @@
           <canvas id="view" width="640" height="640"></canvas>
           <canvas id="overlay" width="640" height="640"></canvas>
         </div>
-        <!-- Particle inspector sits directly right of the sim box; the global
-             inspector is to its right.  Hiding one lets the other slide adjacent. -->
-        <div class="panel" id="panelParticle">
-          <h2>Particle</h2>
-          <div id="particleInfo" class="kv">click a particle to select</div>
+        <!-- Middle column (right of the sim): read-only Status on top, editable
+             Particle below, each ~half the sim height.  Editable Global is the
+             next column over. -->
+        <div class="col-mid">
+          <div class="panel half" id="panelStatus">
+            <h2>Status</h2>
+            <div id="statusInfo" class="kv">—</div>
+          </div>
+          <div class="panel half" id="panelParticle">
+            <h2>Particle</h2>
+            <div id="particleInfo" class="kv">click a particle to select</div>
+          </div>
         </div>
         <div class="panel" id="panelGlobal">
           <h2>Global</h2>
