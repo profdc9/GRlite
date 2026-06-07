@@ -326,7 +326,10 @@ async function main(): Promise<void> {
      *   - after the sim has advanced: leave it as a live-only nudge to the
      *     physics-engine state; a reset reverts to the scenario. */
     const GRAB_TOL = 16;                       // px radius to grab a handle
-    let drag: { mode: 'pos' | 'vel'; index: number; moved: boolean } | null = null;
+    let drag:
+        | { target: 'particle'; mode: 'pos' | 'vel'; index: number; moved: boolean }
+        | { target: 'body'; index: number; moved: boolean }
+        | null = null;
 
     const pointerPx = (ev: PointerEvent): { px: number; py: number } => {
         const r = overlayCanvas.getBoundingClientRect();
@@ -350,22 +353,44 @@ async function main(): Promise<void> {
         return { sx: sx + vx * VEL_PX_PER_C, sy: sy - vy * VEL_PX_PER_C };
     };
 
-    /* Nearest background body to a canvas pixel (hit-test its circle), or -1.
-     * Tolerance is the larger of the marker grab radius and the drawn circle. */
+    /* Canvas pixel + grab radius of a background body's circle (from the ENGINE,
+     * so it reflects live drags), or null. */
+    const bodyHandle = (i: number): { sx: number; sy: number; tol: number } | null => {
+        const b = world.backgroundBody(i);
+        if (!b) return null;
+        const c = toCanvas(b.x, b.y);
+        const rPx = Math.max(6, b.eps * (cw() / world.W));
+        return { sx: c.sx, sy: c.sy, tol: Math.max(GRAB_TOL, rPx + 6) };
+    };
+
+    /* Nearest background body to a canvas pixel (hit-test its circle), or -1. */
     const pickBody = (px: number, py: number): number => {
         let best = -1, bestD = Infinity;
-        current.background.forEach((b, i) => {
-            const c = toCanvas(b.x, b.y);
-            const rPx = Math.max(6, b.epsilon * (cw() / world.W));
-            const d = Math.hypot(px - c.sx, py - c.sy);
-            if (d <= Math.max(GRAB_TOL, rPx + 6) && d < bestD) { bestD = d; best = i; }
-        });
+        for (let i = 0; i < world.backgroundCount(); i++) {
+            const h = bodyHandle(i);
+            if (!h) continue;
+            const d = Math.hypot(px - h.sx, py - h.sy);
+            if (d <= h.tol && d < bestD) { bestD = d; best = i; }
+        }
         return best;
     };
 
     /* Write live drag values straight to the sim for instant feedback. */
     const applyDrag = (px: number, py: number): void => {
         if (!drag) return;
+        if (drag.target === 'body') {
+            /* Move the body in the engine (re-derives the bg field); the circle
+             * is drawn from the engine, so it follows. */
+            const b = world.backgroundBody(drag.index);
+            if (b) {
+                const w = toWorld(px, py);
+                world.setBackgroundBodyAt(drag.index, { ...b, x: clamp(w.x, 0, world.W), y: clamp(w.y, 0, world.H) });
+                viewDirty = true;            // background field changed -> recompute colormap
+            }
+            state.liveModified = true;
+            drag.moved = true;
+            return;
+        }
         const i = drag.index;
         const p = world.particle(i);
         if (drag.mode === 'pos') {
@@ -389,6 +414,7 @@ async function main(): Promise<void> {
     overlayCanvas.addEventListener('pointerdown', (ev) => {
         const { px, py } = pointerPx(ev);
         const sel = selectedOf(state, 'particle');
+        const bSel = selectedOf(state, 'body');
         if (sel >= 0 && sel < world.particleCount()) {
             const p = world.particle(sel);
             if (ev.shiftKey) {
@@ -397,12 +423,16 @@ async function main(): Promise<void> {
                 const m = toCanvas(p.x, p.y);
                 if (Math.hypot(px - tip.sx, py - tip.sy) <= GRAB_TOL ||
                     Math.hypot(px - m.sx, py - m.sy) <= GRAB_TOL) {
-                    drag = { mode: 'vel', index: sel, moved: false };
+                    drag = { target: 'particle', mode: 'vel', index: sel, moved: false };
                 }
             } else {
                 const m = toCanvas(p.x, p.y);
-                if (Math.hypot(px - m.sx, py - m.sy) <= GRAB_TOL) drag = { mode: 'pos', index: sel, moved: false };
+                if (Math.hypot(px - m.sx, py - m.sy) <= GRAB_TOL) drag = { target: 'particle', mode: 'pos', index: sel, moved: false };
             }
+        } else if (bSel >= 0 && bSel < world.backgroundCount()) {
+            /* Selected background body: drag its circle to reposition (no Shift). */
+            const h = bodyHandle(bSel);
+            if (h && Math.hypot(px - h.sx, py - h.sy) <= h.tol) drag = { target: 'body', index: bSel, moved: false };
         }
         if (drag) {
             overlayCanvas.setPointerCapture(ev.pointerId);
@@ -415,14 +445,18 @@ async function main(): Promise<void> {
     overlayCanvas.addEventListener('pointermove', (ev) => {
         const { px, py } = pointerPx(ev);
         if (drag) { applyDrag(px, py); return; }
-        /* Hover cursor: 'grab' over the selected particle's draggable handle
-         * (marker, or arrow tip when Shift is held) to advertise drag-to-place. */
+        /* Hover cursor: 'grab' over the selected object's draggable handle
+         * (particle marker / arrow tip with Shift, or a body's circle). */
         const sel = selectedOf(state, 'particle');
+        const bSel = selectedOf(state, 'body');
         let over = false;
         if (sel >= 0 && sel < world.particleCount()) {
             const p = world.particle(sel);
             const h = ev.shiftKey ? velTipPx(p) : toCanvas(p.x, p.y);
             over = Math.hypot(px - h.sx, py - h.sy) <= GRAB_TOL;
+        } else if (bSel >= 0 && bSel < world.backgroundCount()) {
+            const h = bodyHandle(bSel);
+            over = !!h && Math.hypot(px - h.sx, py - h.sy) <= h.tol;
         }
         overlayCanvas.style.cursor = over ? 'grab' : 'crosshair';
     });
@@ -441,19 +475,25 @@ async function main(): Promise<void> {
             inspector.renderEditors();
             return;
         }
-        const { index, mode, moved } = drag;
+        const d = drag;
         drag = null;
         overlayCanvas.style.cursor = 'crosshair';
         if (overlayCanvas.hasPointerCapture(ev.pointerId)) overlayCanvas.releasePointerCapture(ev.pointerId);
-        if (!moved) return;                       // a click on the handle: nothing to commit
+        if (!d.moved) return;                     // a click on the handle: nothing to commit
         /* After the sim has advanced this is a live-only nudge (liveModified is
          * already set by applyDrag); a reset reverts it.  Only at the initial
          * state does the drag edit the scenario's initial conditions. */
         if (world.stepCount() > 0) return;
         /* Bake the live (dragged) value into the scenario; applyEdit rebuilds
          * deterministically and preserves the selection. */
+        const index = d.index;
+        if (d.target === 'body') {
+            const b = world.backgroundBody(index);
+            if (b) applyEdit((sc) => { sc.background[index].x = b.x; sc.background[index].y = b.y; });
+            return;
+        }
         const p = world.particle(index);
-        if (mode === 'pos') {
+        if (d.mode === 'pos') {
             applyEdit((sc) => { sc.particles[index].x = p.x; sc.particles[index].y = p.y; });
         } else {
             const g = p.mass > 0 ? Math.sqrt(1 + (p.px * p.px + p.py * p.py) / (p.mass * p.mass)) : 1;
@@ -590,7 +630,11 @@ async function main(): Promise<void> {
               vectors: vec ? { data: vec, spacing: view.vectorSpacing } : null,
               display, tickInterval: view.tickInterval, time: tNow,
               forces: view.forceArrows,
-              bodies: current.background.map((b) => ({ x: b.x, y: b.y, r: b.epsilon })) });
+              /* Bodies from the ENGINE so live drags (setBackgroundBodyAt) show. */
+              bodies: Array.from({ length: world.backgroundCount() }, (_, i) => {
+                  const b = world.backgroundBody(i);
+                  return b ? { x: b.x, y: b.y, r: b.eps } : { x: 0, y: 0, r: 0 };
+              }) });
 
         inspector.updateLive();
         controls.setStatus(
