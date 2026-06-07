@@ -1,0 +1,30 @@
+{
+  "program": "grlite",
+  "format": "grlite-scenario",
+  "version": 1,
+  "name": "approaching the ISCO -- zoom-whirl (qualitative)",
+  "description": "Two test masses on eccentric orbits around a Schwarzschild background (red circle) with the EIH 1PN relativistic force. The OUTER orbit (periapsis well outside the ISCO) precesses gently -- a slow rosette. The INNER orbit dives to a periapsis near the ISCO, where the relativistic precession diverges, so it WHIRLS several times at closest approach before swinging back out (zoom-whirl) -- the precursor to plunging. QUALITATIVE only: 1PN breaks down near the core (the force factor 1+4phi/c^2 -> 0 around r~4GM), so a true plunge-to-center isn't faithful; this shows the orbital instability growing as periapsis nears the ISCO. Toggle force tier to 'newtonian' and both become fixed ellipses.",
+  "grid": { "W": 256, "H": 256, "dx": 1.0, "cEff": 1.0, "cfl": 0.7071067811865476 },
+  "global": {
+    "gEff": 1.0, "kE": 1.0, "shape": "bump", "kernelRadius": 8, "forceInterp": "lewis-birdsall",
+    "forceTier": "relativistic",
+    "absorber": { "outerBC": "dirichlet", "frictionFloor": 0.0, "frictionWall": 0.02, "frictionDepth": 32, "zeroMeanScalar": false },
+    "init": { "method": "none", "settleSteps": 0 },
+    "switches": {
+      "gravitomagneticForce": false, "gravitomagneticInductive": false,
+      "emLorentz": false, "emInductive": false, "emElectrostatic": false, "emMagnetic": false,
+      "emStressEnergy": false, "emShapiro": false, "shapiroDynamic": false,
+      "fieldEvolution": false, "particleSourceDeposition": false, "esirkepov": false, "periodicBC": false
+    },
+    "rhoSmooth": 0, "jSmooth": 0, "bgMode": "analytic", "selfFieldDefault": false, "noRadiation": false
+  },
+  "background": [
+    { "x": 128.0, "y": 128.0, "GM": 6.0, "Q": 0.0, "Jz": 0.0, "gFactor": 2.0, "epsilon": 4.0 }
+  ],
+  "particles": [
+    { "x": 183.0, "y": 128.0, "vx": 0.0, "vy": 0.262, "mass": 0.001, "charge": 0.0 },
+    { "x": 168.0, "y": 128.0, "vx": 0.0, "vy": 0.130, "mass": 0.001, "charge": 0.0 }
+  ],
+  "view": { "field": 0, "showTrails": true, "showVelocity": true, "source": "background", "vectorField": 0, "vectorSpacing": 12, "tickInterval": 0,
+    "forceArrows": { "grav": false, "em": false, "spin": false, "total": false } }
+}
