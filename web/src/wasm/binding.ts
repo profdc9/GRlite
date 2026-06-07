@@ -89,7 +89,7 @@ export async function loadWasmModule(): Promise<GRliteModule> {
         const script = document.createElement('script');
         script.type = 'module';
         script.textContent =
-            `import GRlite from '/grlite/grlite.js?v=${cacheBuster}';` +
+            `import GRlite from '${import.meta.env.BASE_URL}grlite/grlite.js?v=${cacheBuster}';` +
             `window.__GRliteFactory = GRlite;` +
             `window.dispatchEvent(new Event('grlite-ready'));`;
         const onReady = () => { window.removeEventListener('grlite-error', onError); resolve(); };

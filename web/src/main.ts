@@ -176,7 +176,7 @@ async function main(): Promise<void> {
      * The JSON files are the single source of truth -- there is no in-code copy. */
     async function buildByName(name: string): Promise<void> {
         try {
-            const res = await fetch(`/scenes/${name}.json`, { cache: 'no-cache' });
+            const res = await fetch(`${import.meta.env.BASE_URL}scenes/${name}.json`, { cache: 'no-cache' });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const errs = loadScenarioFromText(await res.text(), name);
             if (errs.length) {
@@ -511,7 +511,7 @@ async function main(): Promise<void> {
     /* Populate the scenario dropdown from the library manifest (the JSON
      * files define what's available; no hard-coded option list). */
     try {
-        const res = await fetch('/scenes/index.json', { cache: 'no-cache' });
+        const res = await fetch(`${import.meta.env.BASE_URL}scenes/index.json`, { cache: 'no-cache' });
         if (res.ok) {
             const m = await res.json() as { scenes?: { file: string; label?: string }[] };
             scenes = (m.scenes ?? []).map((s) => ({ value: s.file, label: s.label ?? s.file }));

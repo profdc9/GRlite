@@ -1,5 +1,9 @@
 # GRlite
 
+**▶ [Live sandbox](https://profdc9.github.io/GRlite/)** — runs in the browser
+(WebGL2 + WASM), no install. Auto-deployed from `main` to GitHub Pages by
+[`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
+
 A 2D linearized General Relativity sandbox for interactive pedagogical use.
 The current authoritative spec is [`docs/gr_sandbox_v38.tex`](docs/gr_sandbox_v38.tex)
 (v32 is preserved as the original); the staged build plan is in §12 of v32 and
