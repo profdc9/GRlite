@@ -773,13 +773,20 @@ void gr_em_shapiro_recompute_c_local2(struct gr_sim* sim) {
     if (!sim->c_local2_yedge)  sim->c_local2_yedge  = (float*) calloc(n, sizeof(float));
     if (!sim->c_local2_corner || !sim->c_local2_xedge || !sim->c_local2_yedge) return;
 
+    /* Include the perturbation Phi_g (deposited masses) on top of the analytic
+     * background, so a deposited particle's (2D log r) well also bends the EM
+     * wave -- not just the 1/r background.  Phi_g^pert lives on the CORNER grid;
+     * the edge sublattices average adjacent corners.  This is recomputed per
+     * step when em_shapiro_dynamic is set (a moving lens). */
+    const float* phig = sim->fields[GR_FIELD_PHI_GRAV].curr;
+
     /* CORNER sublattice: nodes at (i, j) * dx -- for phi_em. */
     for (int j = 0; j < H; j++) {
         const float y = (float) j * dx;
         const int   row = j * W;
         for (int i = 0; i < W; i++) {
             const float x   = (float) i * dx;
-            const float phi = bg_phi_g_at(sim, x, y);
+            const float phi = bg_phi_g_at(sim, x, y) + (phig ? phig[row + i] : 0.0f);
             float f = 1.0f + 2.0f * phi * inv_c2;
             if (f < 1.0e-3f) f = 1.0e-3f;
             sim->c_local2_corner[row + i] = c2 * f * f;
@@ -791,7 +798,8 @@ void gr_em_shapiro_recompute_c_local2(struct gr_sim* sim) {
         const int   row = j * W;
         for (int i = 0; i < W; i++) {
             const float x   = ((float) i + 0.5f) * dx;
-            const float phi = bg_phi_g_at(sim, x, y);
+            const float pp  = phig ? 0.5f * (phig[row + i] + phig[row + (i + 1 < W ? i + 1 : i)]) : 0.0f;
+            const float phi = bg_phi_g_at(sim, x, y) + pp;
             float f = 1.0f + 2.0f * phi * inv_c2;
             if (f < 1.0e-3f) f = 1.0e-3f;
             sim->c_local2_xedge[row + i] = c2 * f * f;
@@ -803,7 +811,8 @@ void gr_em_shapiro_recompute_c_local2(struct gr_sim* sim) {
         const int   row = j * W;
         for (int i = 0; i < W; i++) {
             const float x   = (float) i * dx;
-            const float phi = bg_phi_g_at(sim, x, y);
+            const float pp  = phig ? 0.5f * (phig[row + i] + phig[(j + 1 < H ? j + 1 : j) * W + i]) : 0.0f;
+            const float phi = bg_phi_g_at(sim, x, y) + pp;
             float f = 1.0f + 2.0f * phi * inv_c2;
             if (f < 1.0e-3f) f = 1.0e-3f;
             sim->c_local2_yedge[row + i] = c2 * f * f;

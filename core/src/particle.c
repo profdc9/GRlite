@@ -1223,23 +1223,41 @@ void gr_particle_push_all(struct gr_sim* sim) {
         p->fspin_x = Fx_spin; p->fspin_y = Fy_spin;
         p->ftot_x  = Fx;     p->ftot_y  = Fy;
 
+        const int driven = (p->drive_vx != 0.0f || p->drive_vy != 0.0f);
         /* Apply physical forces unless this particle opts out (forces_enabled
-         * = 0 -> driven/pinned source). */
-        if (p->forces_enabled != 0.0f) {
+         * = 0 -> driven/pinned source).  Driven particles handle forces on
+         * their stored BASE velocity below instead (so the oscillation can't
+         * accumulate into the momentum). */
+        if (p->forces_enabled != 0.0f && !driven) {
             p->px += Fx * dt;
             p->py += Fy * dt;
         }
-        /* v43 driven velocity modulation: add dv(t) in velocity space, then
-         * convert back to momentum so the Esirkepov current (rebuilt from the
-         * resulting motion) stays charge-conserving.  v is the half-step
-         * velocity over [t_n, t_{n+1}], so evaluate the drive at the midpoint. */
-        if (p->drive_vx != 0.0f || p->drive_vy != 0.0f) {
-            const float pm2 = p->px * p->px + p->py * p->py;
-            const float gb  = sqrtf(1.0f + pm2 / (p->mass * p->mass * c2));
+        /* v43 driven velocity modulation.  The base (un-modulated) velocity is
+         * stored in drive_base_* and the oscillation dv(t) rides on top:
+         *   v = v_base + drive_v * cos(omega*t + phase)
+         * Storing the base separately (rather than reading it back from the
+         * already-modulated momentum) is what stops the drive accumulating.
+         * The result is written to the momentum so the Esirkepov current
+         * (rebuilt from the resulting motion) stays charge-conserving. */
+        if (driven) {
+            float bvx = p->drive_base_vx, bvy = p->drive_base_vy;
+            if (p->forces_enabled != 0.0f) {
+                /* Evolve the base under the force in momentum space. */
+                float bv2 = bvx * bvx + bvy * bvy;
+                if (bv2 > 0.998001f * c2) bv2 = 0.998001f * c2;
+                const float gbv = 1.0f / sqrtf(1.0f - bv2 / c2);
+                const float bpx = gbv * p->mass * bvx + Fx * dt;
+                const float bpy = gbv * p->mass * bvy + Fy * dt;
+                const float gbp = sqrtf(1.0f + (bpx * bpx + bpy * bpy) / (p->mass * p->mass * c2));
+                bvx = bpx / (gbp * p->mass);
+                bvy = bpy / (gbp * p->mass);
+            }
+            p->drive_base_vx = bvx;
+            p->drive_base_vy = bvy;
             const float t_mid = dt * ((float) sim->step_count + 0.5f);
             const float cph = cosf(p->drive_omega * t_mid + p->drive_phase);
-            float vtx = p->px / (gb * p->mass) + p->drive_vx * cph;
-            float vty = p->py / (gb * p->mass) + p->drive_vy * cph;
+            float vtx = bvx + p->drive_vx * cph;
+            float vty = bvy + p->drive_vy * cph;
             float v2 = vtx * vtx + vty * vty;
             const float vmax2 = 0.998001f * c2;            /* (0.999 c_eff)^2 */
             if (v2 > vmax2) { const float s = sqrtf(vmax2 / v2); vtx *= s; vty *= s; v2 = vmax2; }
@@ -1400,6 +1418,7 @@ int gr_sim_add_particle(gr_sim_t* sim, float x, float y,
     sim->particles[idx].drive_vx = 0.0f; sim->particles[idx].drive_vy = 0.0f;
     sim->particles[idx].drive_omega = 0.0f; sim->particles[idx].drive_phase = 0.0f;
     sim->particles[idx].forces_enabled = 1.0f;
+    sim->particles[idx].drive_base_vx = 0.0f; sim->particles[idx].drive_base_vy = 0.0f;
     return idx;
 }
 
@@ -1423,6 +1442,12 @@ void gr_sim_set_particle_drive(gr_sim_t* sim, int idx, float amp, float omega,
     p->drive_omega = omega;
     p->drive_phase = phase;
     p->forces_enabled = forces_enabled ? 1.0f : 0.0f;
+    /* Seed the base velocity from the particle's current (drift) velocity, so
+     * the oscillation rides on top of whatever motion it was created with. */
+    const float c2 = sim->c_eff * sim->c_eff;
+    const float g  = sqrtf(1.0f + (p->px * p->px + p->py * p->py) / (p->mass * p->mass * c2));
+    p->drive_base_vx = p->px / (g * p->mass);
+    p->drive_base_vy = p->py / (g * p->mass);
 }
 
 void gr_sim_set_particle_phi_spin(gr_sim_t* sim, int idx, float phi_spin) {

@@ -285,6 +285,10 @@ struct gr_sim {
      * Storage: one array per EM-field sublattice, sampled at each field's
      * own Yee node positions.  NULL when the feature is off. */
     int    em_shapiro_enabled;
+    /* When set, c_local2 is recomputed every step from the TOTAL Phi_g
+     * (background + perturbation), so a moving/deposited mass lenses the EM
+     * wave dynamically (vs the default one-shot recompute at setup). */
+    int    em_shapiro_dynamic;
     float* c_local2_corner;  /* phi_em sublattice */
     float* c_local2_xedge;   /* A_x   sublattice */
     float* c_local2_yedge;   /* A_y   sublattice */

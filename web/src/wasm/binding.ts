@@ -39,6 +39,7 @@ export interface GRliteCore {
     setEmMagnetic: (sim: number, e: number) => void;
     setEmStressEnergy: (sim: number, e: number) => void;
     setEmShapiro: (sim: number, e: number) => void;
+    setEmShapiroDynamic: (sim: number, e: number) => void;
     setFieldEvolution: (sim: number, e: number) => void;
     setParticleSourceDeposition: (sim: number, e: number) => void;
     setEsirkepov: (sim: number, e: number) => void;
@@ -133,6 +134,7 @@ function bindCore(M: GRliteModule): GRliteCore {
         setEmMagnetic: vfn('gr_sim_set_em_magnetic_enabled', ['number','number']),
         setEmStressEnergy: vfn('gr_sim_set_em_stress_energy_enabled', ['number','number']),
         setEmShapiro: vfn('gr_sim_set_em_shapiro_enabled', ['number','number']),
+        setEmShapiroDynamic: vfn('gr_sim_set_em_shapiro_dynamic', ['number','number']),
         setFieldEvolution: vfn('gr_sim_set_field_evolution', ['number','number']),
         setParticleSourceDeposition: vfn('gr_sim_set_particle_source_deposition', ['number','number']),
         setEsirkepov: vfn('gr_sim_set_esirkepov_enabled', ['number','number']),

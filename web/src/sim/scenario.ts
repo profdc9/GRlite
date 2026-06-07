@@ -42,6 +42,10 @@ export interface Switches {
     emMagnetic: boolean;
     emStressEnergy: boolean;
     emShapiro: boolean;
+    /* Rebuild the Shapiro c_local each step from the TOTAL Phi_g (background +
+     * deposited-mass perturbation), so a moving/deposited mass lenses the EM
+     * wave (a 2D log r lens).  Needs emShapiro.  Default off. */
+    shapiroDynamic: boolean;
     fieldEvolution: boolean;
     particleSourceDeposition: boolean;
     esirkepov: boolean;
@@ -166,6 +170,8 @@ export interface Scenario {
     format: typeof SCENARIO_FORMAT;
     version: number;
     name: string;
+    /* Optional human-readable note shown in the inspector (documents a preset). */
+    description?: string;
     grid: GridSpec;
     global: GlobalSpec;
     background: BackgroundSpec[];
@@ -185,6 +191,7 @@ export function defaultSwitches(): Switches {
         emMagnetic: true,
         emStressEnergy: false,
         emShapiro: false,
+        shapiroDynamic: false,
         fieldEvolution: true,
         particleSourceDeposition: true,
         esirkepov: true,

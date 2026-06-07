@@ -583,6 +583,12 @@ void gr_sim_step(gr_sim_t* sim) {
      * flux gravitate via the standard linearized-GR coupling. */
     gr_sim_apply_em_stress_energy_sources(sim);
 
+    /* Dynamic Shapiro: refresh c_local^2 from the CURRENT total Phi_g (bg +
+     * perturbation) so a moving/deposited mass lenses the EM wave this step. */
+    if (sim->em_shapiro_enabled && sim->em_shapiro_dynamic) {
+        gr_em_shapiro_recompute_c_local2(sim);
+    }
+
     if (sim->field_evolution_enabled) {
         gr_field_leapfrog_step_all(sim);
 
@@ -1499,6 +1505,18 @@ void gr_sim_set_em_shapiro_enabled(gr_sim_t* sim, int enabled) {
 }
 int gr_sim_get_em_shapiro_enabled(const gr_sim_t* sim) {
     return sim ? sim->em_shapiro_enabled : 0;
+}
+
+void gr_sim_set_em_shapiro_dynamic(gr_sim_t* sim, int enabled) {
+    if (!sim) return;
+    sim->em_shapiro_dynamic = enabled ? 1 : 0;
+    /* Make sure the arrays exist + reflect the current total Phi_g now. */
+    if (sim->em_shapiro_dynamic && sim->em_shapiro_enabled) {
+        gr_em_shapiro_recompute_c_local2(sim);
+    }
+}
+int gr_sim_get_em_shapiro_dynamic(const gr_sim_t* sim) {
+    return sim ? sim->em_shapiro_dynamic : 0;
 }
 
 const float* gr_sim_rho_matter_ptr(const gr_sim_t* sim) {

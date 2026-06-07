@@ -324,6 +324,11 @@ typedef struct {
     float drive_omega;
     float drive_phase;
     float forces_enabled;
+    /* Base (un-modulated) velocity the drive oscillates around -- stored so the
+     * sinusoid can't accumulate into the momentum.  Set to the particle's drift
+     * velocity by gr_sim_set_particle_drive; evolves under forces only when
+     * forces_enabled (otherwise constant). */
+    float drive_base_vx, drive_base_vy;
 } gr_particle_t;
 
 /* Force tier — selects which terms enter the gravitational force.
@@ -492,6 +497,12 @@ int  gr_sim_get_em_stress_energy_enabled(const gr_sim_t* sim);
  * tests that don't expect it stay calibrated. */
 void gr_sim_set_em_shapiro_enabled(gr_sim_t* sim, int enabled);
 int  gr_sim_get_em_shapiro_enabled(const gr_sim_t* sim);
+/* Dynamic Shapiro: when enabled (with em_shapiro on), c_local^2 is rebuilt
+ * every step from the TOTAL Phi_g (background + deposited-mass perturbation),
+ * so a moving/deposited mass lenses the EM wave (a 2D log r lens).  Default
+ * off (one-shot recompute at setup, background only). */
+void gr_sim_set_em_shapiro_dynamic(gr_sim_t* sim, int enabled);
+int  gr_sim_get_em_shapiro_dynamic(const gr_sim_t* sim);
 
 
 int  gr_sim_add_particle(gr_sim_t* sim, float x, float y,

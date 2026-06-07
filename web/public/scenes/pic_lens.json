@@ -3,6 +3,7 @@
   "format": "grlite-scenario",
   "version": 1,
   "name": "gravitational lens (EM wave through a mass)",
+  "description": "A +/- dipole antenna (left) radiates an EM wave that bends passing the GM=2 background mass (red circle) via the Shapiro delay c_local=c(1+2Phi/c^2). Select an antenna charge to edit its drive (amp, omega, phase, axis).",
   "grid": { "W": 384, "H": 384, "dx": 1.0, "cEff": 1.0, "cfl": 0.7071067811865476 },
   "global": {
     "gEff": 1.0, "kE": 1.0, "shape": "bump", "kernelRadius": 8, "forceInterp": "lewis-birdsall",

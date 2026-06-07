@@ -10,6 +10,7 @@
     { "file": "pic_time_dilation", "label": "gravitational time dilation (two clocks)" },
     { "file": "pic_gravitomagnetic_clock", "label": "gravitomagnetic clock (prograde vs retrograde)" },
     { "file": "pic_lens", "label": "gravitational lens (EM wave through a mass)" },
-    { "file": "pic_lens_double", "label": "gravitational lens — focusing/caustic (plane wave)" }
+    { "file": "pic_lens_double", "label": "gravitational lens — focusing/caustic (plane wave)" },
+    { "file": "pic_lens_flash", "label": "microlensing flash (moving mass)" }
   ]
 }

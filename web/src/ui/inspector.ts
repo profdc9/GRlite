@@ -95,6 +95,12 @@ export class Inspector {
 
         /* ---- Global ---- */
         this.globalEl.innerHTML = '';
+        if (s.description) {
+            const note = document.createElement('div');
+            note.className = 'hint';
+            note.textContent = s.description;
+            this.globalEl.appendChild(note);
+        }
         this.globalEl.appendChild(numRow('G_eff', s.global.gEff, 0.1, (v) => edit((sc) => { sc.global.gEff = v; })));
         this.globalEl.appendChild(numRow('k_e', s.global.kE, 0.1, (v) => edit((sc) => { sc.global.kE = v; })));
         this.globalEl.appendChild(selRow('shape', s.global.shape, ['cic', 'tsc', 'bump'], (v) => edit((sc) => { sc.global.shape = v as Scenario['global']['shape']; })));
@@ -168,6 +174,33 @@ export class Inspector {
         mk('y', 'y', 1);
         mk('vx', 'vx', 0.01);
         mk('vy', 'vy', 0.01);
+
+        /* Source / drive: per-particle sinusoidal oscillation (one antenna
+         * element).  `forces` off => pinned / pure source; `amp` 0 => no drive.
+         * Displacement amplitude `amp`, angular freq `ω`, `phase` (use π between
+         * a +q/-q pair), and drive `axis`.  Physics edits => rebuild. */
+        this.particleEl.appendChild(header('source / drive'));
+        this.particleEl.appendChild(checkRow('forces', s.particles[sel].forces !== false,
+            (v) => edit((sc) => { sc.particles[sel].forces = v; })));
+        const drv = s.particles[sel].drive;
+        const driveEdit = (mut: (d: NonNullable<Scenario['particles'][number]['drive']>) => void) =>
+            edit((sc) => {
+                const p = sc.particles[sel];
+                if (!p.drive) p.drive = { amp: 0, omega: 0, phase: 0, axis: [0, 1] };
+                mut(p.drive);
+            });
+        this.particleEl.appendChild(numRow('drive amp', drv?.amp ?? 0, 0.1,
+            (v) => driveEdit((d) => { d.amp = v; })));
+        if ((drv?.amp ?? 0) !== 0 || (drv?.omega ?? 0) !== 0) {
+            this.particleEl.appendChild(numRow('drive ω', drv?.omega ?? 0, 0.01,
+                (v) => driveEdit((d) => { d.omega = v; })));
+            this.particleEl.appendChild(numRow('drive phase', drv?.phase ?? 0, 0.1,
+                (v) => driveEdit((d) => { d.phase = v; })));
+            this.particleEl.appendChild(numRow('drive axis x', drv?.axis?.[0] ?? 0, 0.1,
+                (v) => driveEdit((d) => { d.axis = [v, d.axis[1]]; })));
+            this.particleEl.appendChild(numRow('drive axis y', drv?.axis?.[1] ?? 1, 0.1,
+                (v) => driveEdit((d) => { d.axis = [d.axis[0], v]; })));
+        }
 
         /* Visualization (view-only): trajectory ticks + proper-time clock. */
         this.particleEl.appendChild(header('time visualization'));

@@ -1,0 +1,28 @@
+{
+  "program": "grlite",
+  "format": "grlite-scenario",
+  "version": 1,
+  "name": "microlensing flash (moving mass)",
+  "description": "A +/- EM dipole (left) beams a wave to the right ('toward the telescope'). A massive PARTICLE (white dot) drifts slowly down the center column; its 2D log-r gravity well lenses the wave via the dynamic Shapiro term (c_local rebuilt each step from the total Phi_g). As the mass crosses the source-observer axis the focus sweeps to the right -- a microlensing flash. Select the mass to edit it; select a dipole charge to edit its drive.",
+  "grid": { "W": 256, "H": 256, "dx": 1.0, "cEff": 1.0, "cfl": 0.7071067811865476 },
+  "global": {
+    "gEff": 1.0, "kE": 1.0, "shape": "bump", "kernelRadius": 8, "forceInterp": "lewis-birdsall",
+    "absorber": { "outerBC": "dirichlet", "frictionFloor": 0.0, "frictionWall": 0.02, "frictionDepth": 32, "zeroMeanScalar": false },
+    "init": { "method": "lw-settled", "settleSteps": 256 },
+    "switches": {
+      "gravitomagneticForce": false, "gravitomagneticInductive": false,
+      "emLorentz": false, "emInductive": false, "emElectrostatic": false, "emMagnetic": false,
+      "emStressEnergy": false, "emShapiro": true, "shapiroDynamic": true,
+      "fieldEvolution": true, "particleSourceDeposition": true, "esirkepov": true, "periodicBC": false
+    },
+    "rhoSmooth": 0, "jSmooth": 0, "bgMode": "sampled", "selfFieldDefault": false, "noRadiation": false
+  },
+  "background": [],
+  "particles": [
+    { "x": 40.0, "y": 131.0, "vx": 0.0, "vy": 0.0, "mass": 0.001, "charge": 1.0,  "forces": false, "drive": { "amp": 1.5, "omega": 0.19635, "phase": 0.0, "axis": [0, 1] } },
+    { "x": 40.0, "y": 125.0, "vx": 0.0, "vy": 0.0, "mass": 0.001, "charge": -1.0, "forces": false, "drive": { "amp": 1.5, "omega": 0.19635, "phase": 3.14159, "axis": [0, 1] } },
+    { "x": 128.0, "y": 170.0, "vx": 0.0, "vy": -0.02, "mass": 0.05, "charge": 0.0, "forces": false }
+  ],
+  "view": { "field": 6, "showTrails": false, "showVelocity": false, "source": "perturbation", "vectorField": 0, "vectorSpacing": 12, "tickInterval": 0,
+    "forceArrows": { "grav": false, "em": false, "spin": false, "total": false } }
+}

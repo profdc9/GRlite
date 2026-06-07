@@ -3,6 +3,7 @@
   "format": "grlite-scenario",
   "version": 1,
   "name": "gravitational lens -- double image (plane wave)",
+  "description": "Antenna array: a vertical line of in-phase oscillating charges (a current sheet) emits a plane EM wave that focuses behind the GM=2.5 mass into a caustic with interference -- the 2D wave-optics signature of gravitational focusing (Einstein-ring cross-section). Click any element to see/edit its drive (amp, omega, phase, axis) and forces flag.",
   "grid": {
     "W": 512,
     "H": 512,

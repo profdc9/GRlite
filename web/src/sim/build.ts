@@ -61,6 +61,9 @@ export function applyScenario(world: World, scn: Scenario): void {
     /* Shapiro c_local^2 is built from the background Phi_g, so (re)compute it
      * AFTER the background is installed -- the switch above ran before it. */
     if (sw.emShapiro) c.setEmShapiro(s, 1);
+    /* Dynamic Shapiro: per-step c_local from total Phi_g (moving/deposited mass
+     * lens).  Set after emShapiro so the recompute has the background. */
+    c.setEmShapiroDynamic(s, b(sw.shapiroDynamic));
 
     scn.particles.forEach((p, i) => {
         c.addParticle(s, p.x, p.y, p.mass, p.charge, p.vx, p.vy);
