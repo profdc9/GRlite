@@ -5,6 +5,10 @@
  * sim is built from this via the WASM API (sim/build.ts); the C scenarios
  * remain only for native tests. */
 
+/* View-list lengths for validating field/vector selector indices.  fieldViews
+ * only imports scenario *types* (erased), so this is not a runtime cycle. */
+import { FIELD_VIEWS, VECTOR_FIELDS } from './fieldViews';
+
 export const SCENARIO_PROGRAM = 'grlite';
 export const SCENARIO_FORMAT = 'grlite-scenario';
 export const SCENARIO_VERSION = 1;
@@ -301,6 +305,15 @@ export function validateRanges(s: Scenario): string[] {
         if (typeof v !== 'number' || !Number.isFinite(v)) { errs.push(`${name} must be a finite number`); return false; }
         return true;
     };
+    const oneOf = (v: unknown, allowed: readonly string[], name: string): void => {
+        if (typeof v !== 'string' || !allowed.includes(v)) errs.push(`${name} must be one of: ${allowed.join(', ')}`);
+    };
+    const bool = (v: unknown, name: string): void => {
+        if (typeof v !== 'boolean') errs.push(`${name} must be true or false`);
+    };
+    const intGE = (v: unknown, min: number, name: string): void => {
+        if (!Number.isInteger(v) || (v as number) < min) errs.push(`${name} must be an integer >= ${min}`);
+    };
     const g = s.grid;
     if (!Number.isInteger(g.W) || g.W < 16 || g.W > 2048) errs.push('grid.W must be an integer in [16, 2048]');
     if (!Number.isInteger(g.H) || g.H < 16 || g.H > 2048) errs.push('grid.H must be an integer in [16, 2048]');
@@ -313,6 +326,19 @@ export function validateRanges(s: Scenario): string[] {
     fin(s.global.gEff, 'global.gEff');
     fin(s.global.kE, 'global.kE');
     if (!(s.global.kernelRadius > 0)) errs.push('global.kernelRadius must be > 0');
+    /* Enum / boolean global fields (build.ts silently falls back otherwise). */
+    oneOf(s.global.shape, ['cic', 'tsc', 'bump'], 'global.shape');
+    oneOf(s.global.forceInterp, ['legacy', 'lewis-birdsall'], 'global.forceInterp');
+    oneOf(s.global.forceTier, ['newtonian', 'relativistic'], 'global.forceTier');
+    oneOf(s.global.bgMode, ['sampled', 'analytic'], 'global.bgMode');
+    oneOf(s.global.init.method, ['lw-settled', 'lw', 'none', 'zero'], 'global.init.method');
+    oneOf(s.global.absorber.outerBC, ['dirichlet', 'neumann'], 'global.absorber.outerBC');
+    bool(s.global.selfFieldDefault, 'global.selfFieldDefault');
+    bool(s.global.noRadiation, 'global.noRadiation');
+    intGE(s.global.rhoSmooth, 0, 'global.rhoSmooth');
+    intGE(s.global.jSmooth, 0, 'global.jSmooth');
+    if (s.global.switches && typeof s.global.switches === 'object')
+        for (const [k, v] of Object.entries(s.global.switches)) bool(v, `global.switches.${k}`);
     const ab = s.global.absorber;
     if (!(ab.frictionFloor >= 0 && ab.frictionFloor <= 0.999)) errs.push('absorber.frictionFloor must be in [0, 0.999]');
     if (!(ab.frictionWall >= 0 && ab.frictionWall <= 0.999)) errs.push('absorber.frictionWall must be in [0, 0.999]');
@@ -337,6 +363,12 @@ export function validateRanges(s: Scenario): string[] {
             errs.push(`particles[${i}].mass must be > 0`);
         if (okv && c > 0 && Math.hypot(p.vx, p.vy) >= c)
             errs.push(`particles[${i}] speed must be < cEff (${c})`);
+        if (p.spin !== undefined) fin(p.spin, `particles[${i}].spin`);
+        if (p.gFactor !== undefined) fin(p.gFactor, `particles[${i}].gFactor`);
+        if (p.selfField !== undefined) bool(p.selfField, `particles[${i}].selfField`);
+        if (p.clock !== undefined) bool(p.clock, `particles[${i}].clock`);
+        if (p.forces !== undefined) bool(p.forces, `particles[${i}].forces`);
+        if (p.ticks !== undefined) oneOf(p.ticks, ['none', 'coordinate', 'proper', 'both'], `particles[${i}].ticks`);
         if (p.drive) {
             fin(p.drive.amp, `particles[${i}].drive.amp`);
             fin(p.drive.omega, `particles[${i}].drive.omega`);
@@ -346,7 +378,17 @@ export function validateRanges(s: Scenario): string[] {
         }
     });
 
-    if (!(s.view.vectorSpacing >= 2)) errs.push('view.vectorSpacing must be >= 2');
-    if (!(s.view.tickInterval >= 0)) errs.push('view.tickInterval must be >= 0');
+    const v = s.view;
+    oneOf(v.source, ['perturbation', 'background', 'sum'], 'view.source');
+    bool(v.showTrails, 'view.showTrails');
+    bool(v.showVelocity, 'view.showVelocity');
+    if (!Number.isInteger(v.field) || v.field < 0 || v.field >= FIELD_VIEWS.length)
+        errs.push(`view.field must be an integer in [0, ${FIELD_VIEWS.length - 1}]`);
+    if (!Number.isInteger(v.vectorField) || v.vectorField < 0 || v.vectorField >= VECTOR_FIELDS.length)
+        errs.push(`view.vectorField must be an integer in [0, ${VECTOR_FIELDS.length - 1}]`);
+    if (!(v.vectorSpacing >= 2)) errs.push('view.vectorSpacing must be >= 2');
+    if (!(v.tickInterval >= 0)) errs.push('view.tickInterval must be >= 0');
+    if (v.forceArrows && typeof v.forceArrows === 'object')
+        for (const [k, val] of Object.entries(v.forceArrows)) bool(val, `view.forceArrows.${k}`);
     return errs;
 }
