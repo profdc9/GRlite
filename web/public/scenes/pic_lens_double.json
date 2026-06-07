@@ -19,7 +19,7 @@
     "forceInterp": "lewis-birdsall",
     "absorber": {
       "outerBC": "dirichlet",
-      "frictionFloor": 0,
+      "frictionFloor": 0.003,
       "frictionWall": 0.02,
       "frictionDepth": 48,
       "zeroMeanScalar": false
