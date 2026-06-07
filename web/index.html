@@ -11,8 +11,11 @@
       header { padding: 10px 16px; background: #15151a; border-bottom: 1px solid #222; }
       header h1 { margin: 0; font-size: 15px; font-weight: 500; color: #eee; }
       header .sub { font-size: 12px; color: #888; margin-top: 2px; }
-      main { display: flex; align-items: flex-start; padding: 18px; gap: 18px; }
-      .left { display: flex; flex-direction: column; gap: 10px; }
+      /* Column: top row (sim + inspectors) over the controls + status, so the
+         button row doesn't widen the sim column and push the panels right. */
+      main { display: flex; flex-direction: column; align-items: flex-start;
+             padding: 18px; gap: 12px; }
+      .top { display: flex; align-items: flex-start; gap: 18px; }
       /* Canvas stack: WebGL field under a transparent Canvas2D overlay. */
       .stack { position: relative; width: 640px; height: 640px; }
       .stack canvas { position: absolute; left: 0; top: 0; width: 640px; height: 640px;
@@ -27,15 +30,16 @@
                padding: 5px 12px; font-size: 12px; cursor: pointer; border-radius: 3px; }
       button:hover { background: #2a2a32; }
       button:active { background: #303040; }
-      /* Inspector */
-      .panel { width: 320px; background: #131318; border: 1px solid #24242c;
-               border-radius: 5px; padding: 12px 14px; }
-      .panel h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600;
+      /* Inspector panels: capped to the simulation-box height with an internal
+         vertical scrollbar, sitting in a row to the right of the sim box. */
+      .panel { width: 360px; box-sizing: border-box; background: #131318;
+               border: 1px solid #24242c; border-radius: 5px; padding: 12px 14px;
+               max-height: 640px; overflow-y: auto; align-self: flex-start; }
+      .panel h2 { position: sticky; top: 0; background: #131318; z-index: 1;
+                  margin: 0 0 8px; padding: 2px 0 6px; font-size: 12px; font-weight: 600;
                   color: #9ab; text-transform: uppercase; letter-spacing: 0.05em; }
-      .panel + .panel { margin-top: 12px; }
       .kv { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
             font-size: 12px; line-height: 1.5; color: #ccd; white-space: pre-wrap; }
-      .right { width: 340px; }
       .panel.hidden { display: none; }
       .row { display: flex; align-items: center; gap: 8px; margin: 3px 0;
              font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
@@ -59,12 +63,23 @@
       <div class="sub">field colormap (selectable) · particle trails &amp; velocity · click a particle to inspect</div>
     </header>
     <main>
-      <div class="left">
+      <div class="top">
         <div class="stack">
           <canvas id="view" width="640" height="640"></canvas>
           <canvas id="overlay" width="640" height="640"></canvas>
         </div>
-        <div class="controls">
+        <!-- Particle inspector sits directly right of the sim box; the global
+             inspector is to its right.  Hiding one lets the other slide adjacent. -->
+        <div class="panel" id="panelParticle">
+          <h2>Particle</h2>
+          <div id="particleInfo" class="kv">click a particle to select</div>
+        </div>
+        <div class="panel" id="panelGlobal">
+          <h2>Global</h2>
+          <div id="globalInfo" class="kv">—</div>
+        </div>
+      </div>
+      <div class="controls">
           <label for="scenario">scenario</label>
           <select id="scenario"><!-- populated from /scenes/index.json --></select>
           <label for="field">field</label>
@@ -81,6 +96,8 @@
           <input id="vecspacing" type="number" min="6" max="64" step="2" value="24"
                  title="arrow grid spacing in cells (smaller = denser)"
                  style="width:54px" />
+        </div>
+        <div class="controls">
           <button id="reset">reset</button>
           <button id="pause">resume</button>
           <button id="stepFrame">step 1</button>
@@ -94,18 +111,7 @@
           <button id="savejson" title="download the current scenario as JSON">save .json</button>
           <button id="probe" title="frozen-particle stability probe">probe</button>
         </div>
-        <div id="status">initializing&hellip;</div>
-      </div>
-      <div class="right">
-        <div class="panel" id="panelGlobal">
-          <h2>Global</h2>
-          <div id="globalInfo" class="kv">—</div>
-        </div>
-        <div class="panel" id="panelParticle">
-          <h2>Particle</h2>
-          <div id="particleInfo" class="kv">click a particle to select</div>
-        </div>
-      </div>
+      <div id="status">initializing&hellip;</div>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

@@ -122,6 +122,20 @@ export class Inspector {
             sc.global.switches.particleSourceDeposition = v;
         })));
 
+        /* ---- Absorbing boundary (v42 derivative-friction taper) ---- */
+        const ab = s.global.absorber;
+        this.globalEl.appendChild(header('absorber'));
+        this.globalEl.appendChild(selRow('outer BC', ab.outerBC, ['dirichlet', 'neumann'],
+            (v) => edit((sc) => { sc.global.absorber.outerBC = v as Scenario['global']['absorber']['outerBC']; })));
+        this.globalEl.appendChild(numRow('friction floor', ab.frictionFloor, 0.001,
+            (v) => edit((sc) => { sc.global.absorber.frictionFloor = v; })));
+        this.globalEl.appendChild(numRow('friction wall', ab.frictionWall, 0.01,
+            (v) => edit((sc) => { sc.global.absorber.frictionWall = v; })));
+        this.globalEl.appendChild(numRow('friction depth', ab.frictionDepth, 1,
+            (v) => edit((sc) => { sc.global.absorber.frictionDepth = v; })));
+        this.globalEl.appendChild(checkRow('zero-mean φ', ab.zeroMeanScalar,
+            (v) => edit((sc) => { sc.global.absorber.zeroMeanScalar = v; })));
+
         /* ---- Background body (unified M, Q, Jz -- see backgroundLabel) ---- */
         const bg = s.background[0];
         this.globalEl.appendChild(header(`background — ${backgroundLabel(bg)}`));
