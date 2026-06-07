@@ -12,7 +12,8 @@
     { "file": "pic_lens", "label": "gravitational lens (EM wave through a mass)" },
     { "file": "pic_lens_double", "label": "gravitational lens — focusing/caustic (plane wave)" },
     { "file": "pic_lens_flash", "label": "microlensing flash (moving mass)" },
+    { "file": "pic_mercury", "label": "perihelion precession of Mercury (exaggerated)" },
     { "file": "pic_precession", "label": "relativistic orbit (perihelion precession)" },
-    { "file": "pic_precession_strong", "label": "strong precession (diffuse mass)" }
+    { "file": "pic_precession_strong", "label": "relativistic precession — inner vs outer orbit" }
   ]
 }

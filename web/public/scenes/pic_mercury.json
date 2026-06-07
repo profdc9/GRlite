@@ -1,0 +1,29 @@
+{
+  "program": "grlite",
+  "format": "grlite-scenario",
+  "version": 1,
+  "name": "perihelion precession of Mercury (exaggerated)",
+  "description": "The classic test of general relativity: a planet's elliptical orbit slowly rotates (the perihelion advances). This is the weak-field 1PN effect (phi/c^2 ~ 0.02 here, genuinely weak), just dialed up so you watch the ellipse turn over a handful of orbits instead of Mercury's real ~0.0001 deg/orbit (43 arcsec/century). Each orbit the perihelion advances ~18 deg. Toggle force tier to 'newtonian' and the ellipse stops precessing (a fixed Keplerian ellipse) -- the advance is purely relativistic.",
+  "grid": { "W": 256, "H": 256, "dx": 1.0, "cEff": 1.0, "cfl": 0.7071067811865476 },
+  "global": {
+    "gEff": 1.0, "kE": 1.0, "shape": "bump", "kernelRadius": 8, "forceInterp": "lewis-birdsall",
+    "forceTier": "relativistic",
+    "absorber": { "outerBC": "dirichlet", "frictionFloor": 0.0, "frictionWall": 0.02, "frictionDepth": 32, "zeroMeanScalar": false },
+    "init": { "method": "none", "settleSteps": 0 },
+    "switches": {
+      "gravitomagneticForce": false, "gravitomagneticInductive": false,
+      "emLorentz": false, "emInductive": false, "emElectrostatic": false, "emMagnetic": false,
+      "emStressEnergy": false, "emShapiro": false, "shapiroDynamic": false,
+      "fieldEvolution": false, "particleSourceDeposition": false, "esirkepov": false, "periodicBC": false
+    },
+    "rhoSmooth": 0, "jSmooth": 0, "bgMode": "analytic", "selfFieldDefault": false, "noRadiation": false
+  },
+  "background": [
+    { "x": 128.0, "y": 128.0, "GM": 0.3, "Q": 0.0, "Jz": 0.0, "gFactor": 2.0, "epsilon": 2.0 }
+  ],
+  "particles": [
+    { "x": 164.0, "y": 128.0, "vx": 0.0, "vy": 0.0645, "mass": 0.001, "charge": 0.0 }
+  ],
+  "view": { "field": 0, "showTrails": true, "showVelocity": true, "source": "background", "vectorField": 0, "vectorSpacing": 12, "tickInterval": 0,
+    "forceArrows": { "grav": false, "em": false, "spin": false, "total": false } }
+}
