@@ -81,5 +81,30 @@ client (`src/dev/bridge.ts`) is dev-only and auto-reconnects.
   URL-hash + JSON download, `public/scenes/*.json` library (selector fetches
   them, builtin fallback), full physics-switch surface exported to WASM.
   copy-link / save-.json toolbar buttons.
-- **3** ⬜ editable inspectors + live edits + undo.
+- **3** ✅ editable inspectors (global + selection panels), live edits, undo.
 - **4** ⬜ JSON + HTML test harness (reuses the bridge).
+
+## Sandbox scene construction
+
+The app is a full scene editor — build essentially any 2D fixed-field +
+particles scenario, then save/share it:
+
+- **Particles**: add (`+ particle`), delete, click-to-select, and **drag to
+  place** (drag the marker for position, Shift-drag the velocity-arrow tip for
+  the initial velocity). At t=0 a drag edits the scenario; after the run starts
+  it's a live-only nudge that `reset` reverts.
+- **Multiple background bodies** (up to 16): each is a fixed no-hair **(M, Q,
+  J)** compact source that superposes gravity (Φ_g) + frame-drag (A_g) + Coulomb
+  (φ_em) + an EM magnetic dipole (A_em, with `mu = g·(Q/2M)·J`, g=2 → the
+  Kerr–Newman analog). Add via `+ body`; select by clicking the circle or the
+  Global "background bodies" list; edit M/Q/J/g/ε/x/y in the Selection panel;
+  drag the circle to reposition (field re-derives live). This enables the
+  two-fixed-center problem, multi-lens gravitational lensing, and superposed
+  mixed fields. The `two fixed bodies + magnetic dipole` demo illustrates it.
+- **Unified selection**: one Selection panel shows whichever object is selected
+  (particle *or* background body).
+- **Scenario I/O**: a scrollable scenario picker, a JSON import/export modal
+  (validated paste), shareable URL hash, `save .json`, and named local saves.
+- **Field-accurate multi-body**: the C engine superposes the bodies' sampled
+  fields and (in analytic mode) sums their closed-form fields per particle;
+  `bg_nbody == 1` reduces exactly to the original single-body path.
