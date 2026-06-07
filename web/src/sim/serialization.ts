@@ -30,22 +30,29 @@ export function fromJSON(text: string): Scenario {
     return validate(JSON.parse(text));
 }
 
-export function encodeToHash(scn: Scenario): string {
-    return 's=' + b64urlEncode(JSON.stringify(scn));
+/* The hash carries the full scenario (s=) plus, when the run came from a named
+ * library scene, that scene's file key (f=) so a reload can re-select the right
+ * dropdown entry instead of leaving it stale. */
+export function encodeToHash(scn: Scenario, file?: string | null): string {
+    const s = 's=' + b64urlEncode(JSON.stringify(scn));
+    return file ? `${s}&f=${encodeURIComponent(file)}` : s;
 }
 
-/* Read a scenario from the current URL hash, or null if absent/invalid. */
-export function readFromHash(hash = location.hash): Scenario | null {
+/* Read the scenario (and its library file key, if any) from the current URL
+ * hash, or null if absent/invalid. */
+export function readFromHash(hash = location.hash): { scenario: Scenario; file: string | null } | null {
     const m = /[#&]s=([^&]+)/.exec(hash);
     if (!m) return null;
-    try { return validate(JSON.parse(b64urlDecode(m[1]))); }
-    catch (e) { console.warn('bad scenario in URL hash:', (e as Error).message); return null; }
+    try {
+        const scenario = validate(JSON.parse(b64urlDecode(m[1])));
+        const fm = /[#&]f=([^&]+)/.exec(hash);
+        return { scenario, file: fm ? decodeURIComponent(fm[1]) : null };
+    } catch (e) { console.warn('bad scenario in URL hash:', (e as Error).message); return null; }
 }
 
 /* Write the scenario into the URL hash without reloading or adding history. */
-export function writeToHash(scn: Scenario): void {
-    const h = '#' + encodeToHash(scn);
-    history.replaceState(null, '', h);
+export function writeToHash(scn: Scenario, file?: string | null): void {
+    history.replaceState(null, '', '#' + encodeToHash(scn, file));
 }
 
 /* Trigger a .json file download of the scenario. */

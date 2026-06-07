@@ -32,6 +32,9 @@ export interface Controls {
     setVectorSpacing: (cells: number) => void;
     setScenarios: (items: { value: string; label: string }[], selected?: string) => void;
     setScenario: (value: string) => void;
+    /* Select a synthetic "(shared)" entry for a scenario with no library file
+     * (loaded from a URL hash / edited), so the dropdown reflects what's loaded. */
+    setCustomScenario: (label: string) => void;
     setRadiation: (on: boolean) => void;
 }
 
@@ -117,5 +120,15 @@ export function wireControls(h: ControlHandlers): Controls {
             if (selected !== undefined) scenarioSel.value = selected;
         },
         setScenario: (value) => { scenarioSel.value = value; },
+        setCustomScenario: (label) => {
+            let opt = scenarioSel.querySelector('option[value="__custom__"]') as HTMLOptionElement | null;
+            if (!opt) {
+                opt = document.createElement('option');
+                opt.value = '__custom__';
+                scenarioSel.appendChild(opt);
+            }
+            opt.textContent = `(shared) ${label}`;
+            scenarioSel.value = '__custom__';
+        },
     };
 }

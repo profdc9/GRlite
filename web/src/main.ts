@@ -37,6 +37,10 @@ async function main(): Promise<void> {
     let trails!: Trails;
     let core!: GRliteCore;
     let current: Scenario = emptyScenario('—');   // placeholder until first load
+    /* Library file key of the loaded scene ('' = custom / from a shared hash).
+     * Persisted in the URL hash (f=) so a reload re-selects the right dropdown
+     * entry instead of leaving it stale. */
+    let currentFile = '';
 
     function setupGrid(g: Scenario['grid']): void {
         world = new World(core, g.W, g.H, g.dx, g.cEff, g.cfl);
@@ -69,7 +73,7 @@ async function main(): Promise<void> {
         syncViewControls();
         controls.setRadiation(scn.global.noRadiation);
         inspector.renderEditors();
-        writeToHash(scn);
+        writeToHash(scn, currentFile || null);
         console.log(`[${scn.name}] built\n` + fullReport(world));
         controls.setStatus(`paused on ${scn.name} (press resume)`);
     }
@@ -94,7 +98,7 @@ async function main(): Promise<void> {
      * is updated so the visualization choice is still shareable. */
     function applyViewEdit(mutate: (s: Scenario) => void): void {
         mutate(current);
-        writeToHash(current);
+        writeToHash(current, currentFile || null);
         inspector.renderEditors();
     }
 
@@ -104,6 +108,7 @@ async function main(): Promise<void> {
         try {
             const res = await fetch(`/scenes/${name}.json`, { cache: 'no-cache' });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            currentFile = name;                 // tag the run with its library file
             loadScenario(validate(await res.json()));
             controls.setScenario(name);
         } catch (e) {
@@ -164,24 +169,32 @@ async function main(): Promise<void> {
 
     /* Populate the scenario dropdown from the library manifest (the JSON
      * files define what's available; no hard-coded option list). */
-    {
-        let scenes: { value: string; label: string }[] = [];
-        try {
-            const res = await fetch('/scenes/index.json', { cache: 'no-cache' });
-            if (res.ok) {
-                const m = await res.json() as { scenes?: { file: string; label?: string }[] };
-                scenes = (m.scenes ?? []).map((s) => ({ value: s.file, label: s.label ?? s.file }));
-            }
-        } catch (e) { console.warn('scene manifest fetch failed:', (e as Error).message); }
-        if (scenes.length === 0) scenes = [{ value: DEFAULT_SCENARIO, label: DEFAULT_SCENARIO }];
-        controls.setScenarios(scenes, DEFAULT_SCENARIO);
-    }
+    let scenes: { value: string; label: string }[] = [];
+    try {
+        const res = await fetch('/scenes/index.json', { cache: 'no-cache' });
+        if (res.ok) {
+            const m = await res.json() as { scenes?: { file: string; label?: string }[] };
+            scenes = (m.scenes ?? []).map((s) => ({ value: s.file, label: s.label ?? s.file }));
+        }
+    } catch (e) { console.warn('scene manifest fetch failed:', (e as Error).message); }
+    if (scenes.length === 0) scenes = [{ value: DEFAULT_SCENARIO, label: DEFAULT_SCENARIO }];
+    controls.setScenarios(scenes, DEFAULT_SCENARIO);
 
-    /* Initial scenario: URL hash if present, else the default library file. */
+    /* Initial scenario: URL hash if present (shareable/reproducible state), else
+     * the default library file.  Keep the dropdown in sync with what actually
+     * loads: re-select the library file if the hash carries one, otherwise show
+     * a "(shared)" entry so the dropdown never disagrees with the view. */
     await new Promise<void>((r) => requestAnimationFrame(() => r()));
-    const hashScn = readFromHash();
-    if (hashScn) loadScenario(hashScn);
-    else await buildByName(DEFAULT_SCENARIO);
+    const hashState = readFromHash();
+    if (hashState) {
+        currentFile = (hashState.file && scenes.some((s) => s.value === hashState.file))
+            ? hashState.file : '';
+        loadScenario(hashState.scenario);
+        if (currentFile) controls.setScenario(currentFile);
+        else controls.setCustomScenario(hashState.scenario.name);
+    } else {
+        await buildByName(DEFAULT_SCENARIO);
+    }
 
     /* Debug bridge (dev only). */
     if ((import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV) {
