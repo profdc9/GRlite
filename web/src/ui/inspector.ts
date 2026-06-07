@@ -95,20 +95,23 @@ export class Inspector {
         const edit = this.h.onEdit;
         const viewEdit = this.h.onViewEdit;
 
-        /* ---- Status (read-only: title, description, live sim info) ---- */
+        /* ---- Status (read-only: title, live sim info, then description) ----
+         * Live info goes first so the step/time stay visible by default; the
+         * (potentially long) description sits below it. */
         this.statusEl.innerHTML = '';
         const title = document.createElement('div');
         title.textContent = s.name;
         title.style.cssText = 'font-weight:600;color:#cde;margin-bottom:4px;';
         this.statusEl.appendChild(title);
+        const sl = document.createElement('div'); sl.className = 'live'; sl.textContent = '—';
+        sl.style.marginTop = '0';
+        this.statusEl.appendChild(sl); this.statusLive = sl;
         if (s.description) {
             const note = document.createElement('div');
             note.className = 'hint';
             note.textContent = s.description;
             this.statusEl.appendChild(note);
         }
-        const sl = document.createElement('div'); sl.className = 'live'; sl.textContent = '—';
-        this.statusEl.appendChild(sl); this.statusLive = sl;
 
         /* ---- Global (editable config) ---- */
         this.globalEl.innerHTML = '';
