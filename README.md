@@ -7,10 +7,12 @@
 [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml).
 
 A 2D linearized General Relativity sandbox for interactive pedagogical use.
-The current authoritative spec is [`docs/gr_sandbox_v38.tex`](docs/gr_sandbox_v38.tex)
-(v32 is preserved as the original); the staged build plan is in §12 of v32 and
-the v33–v38 revisions layer subsequent work on top. The latest design state is
-captured in v38's "Parameterizable Macroparticle Kernel" section.
+The authoritative description is the technical report
+[`docs/grlite_report_v1.tex`](docs/grlite_report_v1.tex) — a three-part
+consolidation covering (I) the physics, derived in 3D and specialized to 2D;
+(II) the particle-in-cell numerical scheme; and (III) the C library and its API.
+The earlier incremental design log (`gr_sandbox_v32`–`v39` and the supporting
+papers) is retained under [`docs/legacy/`](docs/legacy/) for provenance.
 
 This README covers how to build and run what's currently implemented.
 
@@ -77,11 +79,9 @@ core/      C simulation core (compiled native for tests + WASM for the web)
   Makefile
 web/       TypeScript + Vite frontend
   src/       main.ts loads the WASM and renders the field via WebGL2
-docs/      LaTeX design documents
-  gr_sandbox_v32.tex   original spec
-  gr_sandbox_v33.tex   ... successive design revisions
-  ...
-  gr_sandbox_v38.tex   current authoritative spec
+docs/      LaTeX documentation
+  grlite_report_v1.tex   authoritative technical report (physics / PIC / C API)
+  legacy/                superseded gr_sandbox_v32..v39 design log + reference papers
 ```
 
 ## Toolchain
@@ -157,9 +157,9 @@ mingw32-make CC=clang test       # use clang instead of gcc
 ## Code conventions
 
 - **Formula traceability**: every formula or numerical method in C/TS code carries
-  a comment referencing its equation label and section in the authoritative
-  design document (currently `docs/gr_sandbox_v38.tex`; v32 references remain
-  valid as the labels are preserved across revisions).
+  a comment referencing its equation label and section in the design documents.
+  In-code references to `gr_sandbox_vNN.tex` point into `docs/legacy/`; the
+  consolidated description is `docs/grlite_report_v1.tex`.
 - **Scenarios are the single source of truth**. Tests and the web frontend both
   load scenarios by name through `gr_sim_load_scenario`; no test or UI inlines
   initial conditions directly.

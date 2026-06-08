@@ -1,0 +1,1551 @@
+% grlite_report_v1.tex
+% GRlite Technical Report, v1 -- "the receipts".
+%
+% A consolidated, three-part technical report that supersedes the incremental
+% gr_sandbox_vNN design log:
+%   Part I   -- the physics (derived in 3D, specialized to 2D as we go);
+%   Part II  -- the PIC numerical scheme built from the 2D equations;
+%   Part III -- the C library that embodies the scheme (API + correspondence).
+%
+% Built incrementally; this file currently contains the front matter and Part I.
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{xcolor}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{mdframed}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+
+% --- Notation macros (kept compatible with the gr_sandbox_vNN lineage) -------
+\newcommand{\Phig}{\Phi_g}                 % gravitoelectric scalar potential
+\newcommand{\Ag}{\mathbf{A}_g}             % gravitomagnetic vector potential
+\newcommand{\vv}[1]{\mathbf{#1}}           % 3- or 2-vector
+\newcommand{\dd}{\mathrm{d}}               % differential
+\newcommand{\dx}{\Delta x}                 % grid spacing
+\newcommand{\dt}{\Delta t}                 % time step
+\newcommand{\order}[1]{\mathcal{O}(#1)}    % order symbol
+\newcommand{\Geff}{G_{\mathrm{eff}}}
+\newcommand{\keff}{k_e}
+\newcommand{\ceff}{c}                       % c denotes the effective wave speed c_eff
+\newcommand{\clocal}{c_{\mathrm{local}}}
+\newcommand{\Bg}{\vv{B}_g}
+
+% Left-aligned fixed-width table column.
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+
+% Boxed display ("the result you implement").
+\newmdenv[linewidth=0.6pt,roundcorner=2pt,backgroundcolor=black!3,
+          innertopmargin=4pt,innerbottommargin=4pt]{eqbox}
+
+% Algorithm step list ("Step N" referenced in prose).
+\newlist{algsteps}{enumerate}{1}
+\setlist[algsteps]{label=\textbf{Step \arabic*.},leftmargin=2.6em,itemsep=4pt}
+
+% 2D-specialization callout.
+\newmdenv[linewidth=0.6pt,roundcorner=2pt,linecolor=black!40,
+          backgroundcolor=blue!4,innertopmargin=4pt,innerbottommargin=4pt,
+          skipabove=6pt,skipbelow=6pt]{twoD}
+
+\title{\textbf{GRlite}\\[2pt]
+  \large A Real-Time 2D Linearized-Gravity + Electromagnetism\\
+  Particle-in-Cell Sandbox\\[6pt]
+  \normalsize Technical Report v1}
+\author{D.\ Marks\\\small\texttt{github.com/profdc9/GRlite}}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+GRlite is an interactive sandbox that integrates \emph{linearized} general
+relativity coupled to electromagnetism on a 2D grid, in real time, in a web
+browser.  It is a particle-in-cell (PIC) field solver: massive and charged
+macroparticles source six gravito-electromagnetic potentials on a Yee lattice,
+the potentials are advanced by an explicit wave-equation leapfrog, and the
+particles are pushed by a relativistic force law gathered from those potentials.
+This report documents the simulator at the level of detail of a technical
+report, in three parts.  \textbf{Part~I} derives the physical model: linearized
+GR in the gravito-electromagnetic (GEM) form, its coupling to Maxwell
+electromagnetism, the relativistic single-particle dynamics (including
+post-Newtonian corrections, spin, and proper time), and the
+background/perturbation split.  Each result is derived in 3D and then
+specialized to the $2{+}1$ dimensions the simulator actually runs in, so the
+correspondence between the full physics and the reduced model is explicit.
+\textbf{Part~II} (separate) builds the PIC scheme from the 2D equations: Yee
+sublattices and the leapfrog field update; the CIC/TSC/bump shape functions;
+charge-conserving Esirkepov current deposition; the Lewis--Birdsall
+momentum-conserving force gather; the relativistic Boris pusher; initial-field
+generation; the absorbing boundary; and the visualization mathematics.
+\textbf{Part~III} (separate) documents the C library that implements the scheme
+and maps every public function to the step of the PIC algorithm it realizes.
+\end{abstract}
+
+\tableofcontents
+
+%====================================================================
+\section*{Conventions, units, and notation}
+\addcontentsline{toc}{section}{Conventions, units, and notation}
+%====================================================================
+
+\paragraph{Signature and indices.}
+The metric signature is $(-,+,+,+)$.  Greek indices $\mu,\nu,\dots$ run over
+$0,1,2,3$ (spacetime); Latin indices $i,j,k$ over the spatial dimensions.  Bold
+symbols ($\vv{x}$, $\vv{v}$, $\Ag$) are spatial vectors --- 3-vectors in the
+derivations of this Part, 2-vectors after the 2D reduction.
+
+\paragraph{Effective constants.}
+The simulator does not use SI values for the fundamental constants; it exposes
+\emph{tunable} effective constants so a student can dial gravity, electrostatics,
+and the wave speed independently and explore limits ($\ceff\to\infty$ recovers
+the Newtonian limit; $\Geff\to 0$ switches off gravity; etc.).  Throughout this
+report the symbols $G$, $c$, and the Coulomb constant $\keff = 1/(4\pi
+\varepsilon_0)$ denote those effective quantities $\Geff$, $c_{\mathrm{eff}}$,
+$\keff$.  We write $G$ and $c$ for readability and flag the substitution where
+it matters numerically (e.g.\ the Schwarzschild precession rate
+$\propto \Geff M / c_{\mathrm{eff}}^2$).
+
+\paragraph{The two object classes.}
+GRlite distinguishes two kinds of gravitating/charged object:
+\emph{macroparticles}, which move, deposit fields on the grid, and feel forces;
+and \emph{background bodies}, which are fixed analytic sources (a precomputed
+field that never moves and feels no back-reaction).  Part~I treats their common
+physics; the split itself is the subject of \S\ref{sec:bgsplit}.
+
+\paragraph{The six potentials.}
+The dynamical state of the field is six scalar potentials,
+\begin{equation}
+  \underbrace{\Phig,\; A_{g,x},\; A_{g,y}}_{\text{gravity (GEM)}}\,,\qquad
+  \underbrace{\phi,\; A_x,\; A_y}_{\text{electromagnetism}}\,,
+\end{equation}
+each advanced by a sourced wave equation.  Derived fields ($\vv{g}$, $\Bg$,
+$\vv{E}$, $\vv{B}$) are never stored; they are reconstructed on demand from
+finite differences of these potentials.  This ``potentials are the state''
+choice drives much of both the physics formulation (Part~I) and the numerics
+(Part~II).
+
+\part{Physical Foundations}
+
+%====================================================================
+\section{Linearized General Relativity and Gravito-electromagnetism}
+\label{sec:lingr}
+%====================================================================
+
+\subsection{Goal and regime}
+
+A full numerical-relativity evolution (e.g.\ the ADM $3{+}1$ split with a Cauchy
+boundary) is far too expensive for an interactive desktop/browser tool.  GRlite
+instead works in \emph{linearized} GR, where the metric is a small perturbation
+of flat spacetime,
+\begin{equation}
+  g_{\mu\nu} = \eta_{\mu\nu} + h_{\mu\nu}, \qquad |h_{\mu\nu}| \ll 1 .
+\end{equation}
+In the Lorenz gauge $\partial_\mu \bar h^{\mu\nu}=0$, the trace-reversed
+perturbation $\bar h^{\mu\nu} \equiv h^{\mu\nu} - \tfrac12 \eta^{\mu\nu} h$
+obeys a sourced wave equation,
+\begin{equation}
+\label{eq:hbar_wave}
+  \Box\, \bar h^{\mu\nu} = -\frac{16\pi G}{c^4}\, T^{\mu\nu}_{\mathrm{total}},
+  \qquad \Box \equiv -\frac{1}{c^2}\partial_t^2 + \nabla^2 .
+\end{equation}
+This is structurally identical to the wave equation for the electromagnetic
+4-potential, which is exactly why FDTD methods from computational
+electromagnetics carry over directly --- and why the whole simulator can treat
+gravity and electromagnetism with one field engine.
+
+\subsection{The GEM metric}
+\label{sec:gem_metric}
+
+Choosing the gravito-electromagnetic (GEM) potentials $\Phig$ (gravitoelectric
+scalar) and $\Ag$ (gravitomagnetic vector) to carry the relevant components of
+$\bar h^{\mu\nu}$, the linearized metric is
+\begin{equation}
+\label{eq:gem_metric}
+  h_{00} = -\frac{2\Phig}{c^2}, \qquad
+  h_{0i} = \frac{2 A_{g,i}}{c}, \qquad
+  h_{ij} = -\frac{2\Phig}{c^2}\,\delta_{ij},
+\end{equation}
+with line element
+\begin{equation}
+\label{eq:gem_line}
+  \dd s^2 = -\Bigl(1+\tfrac{2\Phig}{c^2}\Bigr)c^2\,\dd t^2
+            + \frac{4}{c}\,\Ag\cdot\dd\vv{x}\,\dd t
+            + \Bigl(1-\tfrac{2\Phig}{c^2}\Bigr)\bigl(\dd x^2+\dd y^2+\dd z^2\bigr).
+\end{equation}
+The trace-reversed components are $\bar h_{00} = -4\Phig/c^2$,
+$\bar h_{0i} = 4 A_{g,i}/c$, $\bar h_{ij}=0$, so
+Eq.~\eqref{eq:hbar_wave} decouples cleanly into
+$\Box\Phig \propto \rho$ and $\Box\Ag \propto \vv{J}$ with no spatial-stress
+source at this order.
+
+\paragraph{What each metric component does.}
+The three distinct pieces of Eq.~\eqref{eq:gem_metric} are responsible for
+disjoint classes of effect, and the simulator can switch them independently:
+\begin{itemize}
+  \item $h_{00}=-2\Phig/c^2$ (time--time): the Newtonian potential. Gives
+  gravitational attraction $-\nabla\Phig$, gravitational time dilation
+  ($+\Phig/c^2$ in $\dd\tau/\dd t$), the Shapiro delay, and \emph{half} of
+  light bending.
+  \item $h_{ij}=-2\Phig/c^2\,\delta_{ij}$ (spatial): no Newtonian analogue and
+  invisible to slow particles, but supplies the \emph{second half} of light
+  bending (recovering the GR $4GM/c^2 b$), the post-Newtonian force corrections
+  (\S\ref{sec:relcorr}), and hence perihelion precession.
+  \item $h_{0i}=2A_{g,i}/c$ (time--space): nonzero only for moving/rotating
+  mass currents. Produces the gravitomagnetic force, Lense--Thirring gyroscope
+  precession $\boldsymbol\Omega_{\mathrm{LT}}=\nabla\times\Ag$, the
+  gravitomagnetic clock effect (\S\ref{sec:proptime}), and frame dragging.
+\end{itemize}
+
+\subsection{GEM field equations and the Lorentz force}
+
+In the slow-motion weak-field limit the linearized equations take Maxwell form
+for a gravitoelectric field $\vv{g}$ and gravitomagnetic field $\Bg$:
+\begin{align}
+  \nabla\cdot\vv{g}   &= -4\pi G\rho, &
+  \nabla\times\vv{g}  &= -\partial_t\Bg, \\
+  \nabla\cdot\Bg      &= 0, &
+  \nabla\times\Bg     &= -\frac{4\pi G}{c^2}\vv{J} + \frac{1}{c^2}\partial_t\vv{g},
+\end{align}
+with $\vv{g}=-\nabla\Phig-\partial_t\Ag$ and $\Bg=\nabla\times\Ag$.  A test
+particle of rest mass $m$ and charge $q$ feels the combined GEM+EM Lorentz
+force
+\begin{equation}
+\label{eq:lorentz_fields}
+  \vv{F} = m\bigl(\vv{g} + 4\,\vv{v}\times\Bg\bigr)
+         + q\bigl(\vv{E} + \vv{v}\times\vv{B}\bigr).
+\end{equation}
+The factor of $4$ on the gravitomagnetic term is the fingerprint of the spin-2
+graviton (versus spin-1 photon) and is responsible for the Lense--Thirring
+rate; getting it right also fixes the metric coefficient $h_{0i}=2A_{g,i}/c$ and
+the proper-time cross term (\S\ref{sec:proptime}).
+
+\subsection{Potential-form force: what the code actually evaluates}
+\label{sec:force_potential}
+
+Because the simulator stores \emph{potentials}, not fields, it is essential to
+rewrite Eq.~\eqref{eq:lorentz_fields} so that no grid-wide curl is required.
+Using $\vv{v}\times(\nabla\times\vv{A}) = \nabla(\vv{v}\cdot\vv{A}) -
+(\vv{v}\cdot\nabla)\vv{A}$,
+\begin{align}
+  \vv{F}_{\mathrm{GEM}} &= m\bigl(-\nabla\Phig - \partial_t\Ag
+     + 4\nabla(\vv{v}\cdot\Ag) - 4(\vv{v}\cdot\nabla)\Ag\bigr),
+     \label{eq:force_gem_pot}\\
+  \vv{F}_{\mathrm{EM}}  &= q\bigl(-\nabla\phi - \partial_t\vv{A}
+     + \nabla(\vv{v}\cdot\vv{A}) - (\vv{v}\cdot\nabla)\vv{A}\bigr).
+     \label{eq:force_em_pot}
+\end{align}
+Every term is a spatial or temporal derivative of a stored potential evaluated
+at the particle. The force is gauge-invariant: under
+$\phi\to\phi-\partial_t\Lambda,\ \vv{A}\to\vv{A}+\nabla\Lambda$ the per-term
+gauge dependence cancels. These two expressions (with the relativistic
+corrections of \S\ref{sec:relcorr} added to the gravity piece) are the force law
+the pusher of Part~II implements.
+
+\begin{twoD}
+\textbf{2D specialization.} In $2{+}1$ dimensions $\vv{g}$ and $\vv{E}$ are
+2-vectors; $\Bg$ and $\vv{B}$ collapse to the single scalar curl components
+$B_{g,z}=\partial_x A_{g,y}-\partial_y A_{g,x}$ and
+$B_z=\partial_x A_y-\partial_y A_x$. Cross products become scalar multiplies,
+$(\vv{v}\times\Bg)=(v_y B_{g,z},\,-v_x B_{g,z})$, so the field-form force
+\eqref{eq:lorentz_fields} reads
+$F_x = m(g_x+4v_yB_{g,z})+q(E_x+v_yB_z)$,
+$F_y = m(g_y-4v_xB_{g,z})+q(E_y-v_xB_z)$.
+The potential-form expressions \eqref{eq:force_gem_pot}--\eqref{eq:force_em_pot}
+are unchanged in form with $\nabla=(\partial_x,\partial_y)$.
+\end{twoD}
+
+\subsection{Particle properties: mass and charge are independent}
+
+Each macroparticle carries a rest mass $m$ and an electric charge $q$ that
+couple to disjoint fields:
+\begin{itemize}
+  \item rest mass $m$ sources gravity, $\rho_{\mathrm{matter}}=\sum_i\gamma
+  m_i\,\delta(\vv{x}-\vv{x}_i)$ and $\vv{J}_{\mathrm{matter}}=\sum_i\gamma
+  m_i\vv{v}_i\,\delta(\vv{x}-\vv{x}_i)$, and sets the inertia via
+  $\vv{p}=\gamma m\vv{v}$;
+  \item charge $q$ sources EM, $\rho_q=\sum_i q_i\,\delta(\vv{x}-\vv{x}_i)$ and
+  $\vv{J}_q=\sum_i q_i\vv{v}_i\,\delta(\vv{x}-\vv{x}_i)$, and sets the response
+  to $q(\vv{E}+\vv{v}\times\vv{B})$.
+\end{itemize}
+A particle with both $m\neq0$ and $q\neq0$ contributes to all four potential
+families and feels all four force families.
+
+%====================================================================
+\section{Electromagnetism in the Linearized Background}
+\label{sec:em}
+%====================================================================
+
+\subsection{Potentials and wave equations}
+
+Maxwell's equations in the Lorenz gauge give the same wave-equation structure as
+gravity,
+\begin{equation}
+  \Box\phi = -\rho_q/\varepsilon_0, \qquad \Box\vv{A} = -\mu_0\vv{J}_q,
+\end{equation}
+with $\vv{E}=-\nabla\phi-\partial_t\vv{A}$ and $\vv{B}=\nabla\times\vv{A}$.  In
+the GRlite engine these are advanced by the \emph{same} leapfrog as the GEM
+potentials; the only difference is the source and the local wave speed below.
+
+\subsection{Shapiro delay and gravitational lensing via \texorpdfstring{$\clocal$}{c\_local}}
+\label{sec:shapiro}
+
+A photon follows a null geodesic, $\dd s^2=0$.  Substituting the line element
+\eqref{eq:gem_line} (with both the time and the spatial coefficient) and solving
+for the coordinate light speed gives
+\begin{equation}
+\label{eq:clocal}
+  \frac{\dd x}{\dd t} \approx c\Bigl(1 + \frac{2\Phig}{c^2}\Bigr) \equiv \clocal .
+\end{equation}
+The factor of $2$ comes from both metric coefficients contributing to the null
+condition; it is the same factor that doubles light bending over the Newtonian
+value.  The Shapiro time delay is $\Delta t = -\tfrac{2}{c^3}\int_{\rm
+path}\Phig\,\dd\ell$.  GRlite realizes both Shapiro delay and lensing by
+\emph{stepping the EM wave equation with $\clocal(\vv{x})$ in place of $c$};
+wavefronts slow and bend in the potential well exactly as light should.
+Crucially $\Phig$ here is the \emph{total} (background + perturbation) potential,
+so a moving deposited mass can lens an EM wave (a dynamic lens).
+
+\subsection{Electromagnetic stress-energy as a gravitational source}
+\label{sec:energy}
+
+Electromagnetic field energy gravitates. Writing $\vv{P}\equiv\nabla\phi +
+\partial_t\vv{A}=-\vv{E}$ and $\vv{C}\equiv\nabla\times\vv{A}=\vv{B}$, the EM
+contributions to the GEM source ($T^{00}$ energy density and $T^{0i}$ Poynting
+flux, divided by $c^2$) are
+\begin{align}
+  \rho_{\mathrm{EM}} &= \frac{\varepsilon_0}{2c^2}\bigl(|\vv{P}^{\rm pert}|^2 +
+     c^2|\vv{C}^{\rm pert}|^2\bigr), \label{eq:rho_em}\\
+  \vv{J}_{\mathrm{EM}} &= -\frac{1}{\mu_0 c^2}\,\vv{P}^{\rm pert}\times\vv{C}^{\rm pert}.
+     \label{eq:J_em}
+\end{align}
+Only the \emph{perturbation} potentials enter, to avoid double-counting the
+background metric.  The Maxwell spatial stress $T^{ij}$ is dropped (it would
+source $h^{ij}$, which the GEM reduction does not evolve); this is the principal
+approximation of the ``effective-source'' method and is valid when EM fields are
+not so strong or directional that $T^{ij}$ matters
+($|\vv{S}|/c \ll u_{\mathrm{EM}}$).
+
+\begin{twoD}
+\textbf{2D specialization.} The curl becomes the scalar
+$F_{12}^{\rm pert}=\partial_x A_y^{\rm pert}-\partial_y A_x^{\rm pert}$, and the
+cross product in \eqref{eq:J_em} becomes a $90^\circ$ rotation of the 2-vector
+$\vv{P}^{\rm pert}$ scaled by $F_{12}^{\rm pert}$:
+\begin{equation}
+  \rho_{\mathrm{EM}} = \frac{\varepsilon_0}{2c^2}\bigl(|\vv{P}^{\rm pert}|^2 +
+     c^2 (F_{12}^{\rm pert})^2\bigr),\quad
+  \vv{J}_{\mathrm{EM}} = -\frac{F_{12}^{\rm pert}}{\mu_0 c^2}
+     \begin{pmatrix} P_y^{\rm pert}\\ -P_x^{\rm pert}\end{pmatrix}.
+\end{equation}
+\end{twoD}
+
+%====================================================================
+\section{The Unified Six-Field System}
+\label{sec:sixfield}
+%====================================================================
+
+Collecting \S\S\ref{sec:lingr}--\ref{sec:em}, the dynamical field state and its
+sources are summarized in Table~\ref{tab:sixfield}.  All six potentials obey the
+\emph{same} wave operator; gravity and EM differ only in coupling sign/strength
+and (for EM) the use of $\clocal$.  This uniformity is what lets a single
+leapfrog kernel (Part~II) advance the entire system.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}L{2.4cm}L{4.6cm}L{2.6cm}L{3.2cm}@{}}
+\toprule
+\textbf{Potential} & \textbf{Wave equation} & \textbf{Source} & \textbf{Derived field} \\
+\midrule
+$\Phig$    & $\Box\Phig = -4\pi G\rho_{\rm eff}$              & $\rho_{\rm eff}$            & $\vv{g}=-\nabla\Phig-\partial_t\Ag$ \\
+$A_{g,x},A_{g,y}$ & $\Box\Ag = -\tfrac{4\pi G}{c^2}\vv{J}_{\rm eff}$ & $\vv{J}_{\rm eff}$ & $B_{g,z}=(\nabla\times\Ag)_z$ \\
+$\phi$     & $\Box_{\clocal}\phi = -\rho_q/\varepsilon_0$     & $\rho_q$                   & $\vv{E}=-\nabla\phi-\partial_t\vv{A}$ \\
+$A_x,A_y$  & $\Box_{\clocal}\vv{A} = -\mu_0\vv{J}_q$          & $\vv{J}_q$                 & $B_z=(\nabla\times\vv{A})_z$ \\
+\bottomrule
+\end{tabular}
+\caption{The six-potential system. $\rho_{\rm eff}=\rho_{\rm matter}+\rho_{\rm
+EM}$ and $\vv{J}_{\rm eff}=\vv{J}_{\rm matter}+\vv{J}_{\rm EM}$ fold the EM
+stress-energy \eqref{eq:rho_em}--\eqref{eq:J_em} back into the gravitational
+source. In 2D the two vector potentials per family are genuine 2-vectors and the
+curls are scalars.}
+\label{tab:sixfield}
+\end{table}
+
+%====================================================================
+\section{Relativistic Particle Dynamics}
+\label{sec:dynamics}
+%====================================================================
+
+\subsection{Relativistic momentum update}
+
+Particles are integrated through the relativistic 3-momentum $\vv{p}=\gamma
+m\vv{v}$, $\gamma = (1-v^2/c^2)^{-1/2}$:
+\begin{equation}
+\label{eq:pupdate}
+  \vv{p}\leftarrow \vv{p}+\vv{F}_{\rm total}\,\dd t, \qquad
+  \vv{v} = \frac{\vv{p}}{\sqrt{m^2+|\vv{p}|^2/c^2}}, \qquad
+  \vv{x}\leftarrow\vv{x}+\vv{v}\,\dd t .
+\end{equation}
+Pushing $\vv{p}$ (not $\vv{v}$) automatically captures the anisotropy of
+relativistic inertia (longitudinal mass $\gamma^3 m$ vs.\ transverse $\gamma
+m$).  The EM force \eqref{eq:force_em_pot} is already exactly relativistic; the
+gravitational force needs the corrections below.
+
+\subsection{Post-Newtonian (EIH) corrections}
+\label{sec:relcorr}
+
+GEM as written is a slow-motion expansion: at relativistic speed the spatial
+metric $h^{ij}$ also deflects particles (this is the missing ``second half'' of
+light bending).  The correct $\order{(v/c)^2}$ equation of motion is the
+test-particle limit of the Einstein--Infeld--Hoffmann (EIH) 1PN
+equation~\cite{Will1993,AliHaimoud2019}.  Writing $\vv{g}=-\nabla\Phig-\partial_t\Ag$
+and organizing by order in $v/c$,
+\begin{equation}
+\label{eq:geodesic_expansion}
+  \vv{a} = \underbrace{\vv{g}}_{\order{1}}
+        + \underbrace{4\,\vv{v}\times\Bg}_{\order{v/c}\ \text{(Lense--Thirring)}}
+        + \underbrace{\frac{v^2}{c^2}\vv{g} + \frac{4\Phig}{c^2}\vv{g}
+           - \frac{4(\vv{v}\cdot\vv{g})\vv{v}}{c^2}}_{\order{v^2/c^2}\ \text{(EIH 1PN)}}
+        + \order{v^3/c^3}.
+\end{equation}
+The three 1PN terms are physically distinct: $(v^2/c^2)\vv{g}$ strengthens
+deflection of fast particles (and, with the $\clocal$ spatial-metric piece,
+recovers the factor-of-2 photon deflection as $v\to c$); $(4\Phig/c^2)\vv{g}$ is
+a radial ``Shapiro'' enhancement contributing to binding energy and precession;
+and $-4(\vv{v}\cdot\vv{g})\vv{v}/c^2$ is a velocity-coupling term that does no
+net work but breaks Keplerian closure.  Integrated over a bound orbit they
+reproduce the Schwarzschild perihelion advance
+\begin{equation}
+\label{eq:precession}
+  \Delta\varphi_{\rm prec} = \frac{6\pi\,\Geff M}{c_{\rm eff}^2\,a(1-e^2)} .
+\end{equation}
+The simulator exposes these as force \emph{tiers} (Newtonian; GEM; EIH 1PN),
+selectable per scenario; Table~\ref{tab:tiers} lists them.  In implementation
+the gravitomagnetic cross product is always replaced by its potential form
+(\S\ref{sec:force_potential}), so $\Bg$ is never formed as a grid array; the
+scalar $\vv{g}$ used in the 1PN terms is evaluated on the fly from the
+potentials at the particle.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lL{8.2cm}l@{}}
+\toprule
+\textbf{Tier} & \textbf{Gravitational acceleration} & \textbf{Range} \\
+\midrule
+Newtonian & $\vv{g}$ & $v/c<0.01$ \\
+GEM       & $\vv{g}+4\,\vv{v}\times\Bg$ (potential form) & $v/c<0.1$ \\
+EIH 1PN   & GEM $+\ \tfrac{v^2}{c^2}\vv{g}+\tfrac{4\Phig}{c^2}\vv{g}-\tfrac{4(\vv{v}\cdot\vv{g})\vv{v}}{c^2}$ & $v/c\lesssim0.5$ \\
+\bottomrule
+\end{tabular}
+\caption{Gravitational force tiers. EM is exactly relativistic in all tiers; the
+momentum update \eqref{eq:pupdate} is always relativistic.}
+\label{tab:tiers}
+\end{table}
+
+\subsection{Intrinsic spin}
+\label{sec:spin}
+
+A particle with intrinsic angular momentum obeys the
+Mathisson--Papapetrou--Dixon equations; in the GEM/EM approximation these reduce
+to a 3-vector spin $\vv{S}$ integrated alongside the momentum.  The spin obeys
+the Tulczyjew--Dixon condition $S^{\mu\nu}p_\nu=0$ (note: $p^\mu$, the momentum,
+not $mU^\mu$), whose 3+1 split fixes $S^0=\vv{S}\cdot\vv{p}/(\gamma m c)$ and is
+maintained each step by the covariant projection
+\begin{equation}
+\label{eq:spin_constraint}
+  \vv{S}\leftarrow \vv{S} - \frac{\vv{S}\cdot\vv{p}}{|\vv{p}|^2+m^2c^2}\,\vv{p}.
+\end{equation}
+Spin precesses under gravitomagnetic, EM, and Thomas terms,
+\begin{equation}
+\label{eq:precession_rates}
+  \frac{\dd\vv{S}}{\dd t} = \vv{S}\times\Bigl(
+     \underbrace{\nabla\times\Ag}_{\rm grav}
+   + \underbrace{\tfrac{g_s q}{2m}\nabla\times\vv{A}}_{\rm EM}
+   + \underbrace{-\tfrac{\gamma^2}{\gamma+1}\tfrac{\vv{v}\times\vv{a}}{c^2}}_{\rm Thomas}\Bigr),
+\end{equation}
+and, being a moving dipole, sources magnetization currents (magnetic moment
+$\boldsymbol\mu=g_s(q/2m)\vv{S}$, gravitomagnetic moment $\boldsymbol\sigma =
+2\vv{S}$). A spin gradient also exerts a Stern--Gerlach force
+$\vv{F}_{\rm spin}=\nabla(\vv{S}\cdot\Bg)+\nabla(\boldsymbol\mu\cdot\vv{B})$.
+
+\begin{twoD}
+\textbf{2D specialization.} With motion in the plane and spin along $\hat z$,
+$\vv{S}$ is a single scalar $s$ (an angle $\phi_{\rm spin}$), and
+$\nabla\times\Ag,\ \nabla\times\vv{A}$ are the scalars $B_{g,z},\ B_z$.
+Precession reduces to
+$\dot\phi_{\rm spin}=B_{g,z}+\tfrac{g_s q}{2m}B_z+\Omega_{{\rm Thomas},z}$
+with $\Omega_{{\rm Thomas},z}=-\tfrac{\gamma^2}{\gamma+1}(v_xa_y-v_ya_x)/c^2$,
+the spin-gradient force becomes $s\,\nabla B_{g,z}+\mu\,\nabla B_z$, and the
+Tulczyjew--Dixon constraint \eqref{eq:spin_constraint} is satisfied
+automatically (no projection step needed).
+\end{twoD}
+
+\subsection{Proper time}
+\label{sec:proptime}
+
+Each particle integrates the proper time along its worldline from the metric
+\eqref{eq:gem_line}, $\dd\tau^2=-\dd s^2/c^2$:
+\begin{equation}
+\label{eq:proper_time}
+  \frac{\dd\tau}{\dd t} = \sqrt{\Bigl(1+\frac{2\Phig}{c^2}\Bigr)
+     - \Bigl(1-\frac{2\Phig}{c^2}\Bigr)\frac{v^2}{c^2}
+     - \frac{8\,\Ag\cdot\vv{v}}{c^2}}
+  \;\approx\; 1 + \frac{\Phig}{c^2} - \frac{v^2}{2c^2} - \frac{4\,\Ag\cdot\vv{v}}{c^2}.
+\end{equation}
+The three first-order terms are the gravitational redshift ($\Phig/c^2$, slows
+clocks in a well), the kinematic dilation ($-v^2/2c^2$), and the
+\emph{gravitomagnetic clock effect} ($-4\Ag\cdot\vv{v}/c^2$).  The cross-term
+coefficient is fixed to $8$ inside the root (equivalently $4$ at first order) by
+consistency with the factor-of-4 force law / $h_{0i}=4A_{g,i}/c$ trace-reversed
+component; this gives prograde clocks running \emph{slower} than retrograde at
+equal radius, matching the Cohen--Mashhoon Kerr
+result~\cite{CohenMashhoon1993,Mashhoon2003}. Around a closed orbit the
+prograde$-$retrograde difference is the gravitomagnetic flux,
+$\Delta\tau = -\tfrac{8}{c^2}\oint\Ag\cdot\dd\vv{x} =
+-\tfrac{8}{c^2}\!\int\Bg\cdot\dd\vv{A}$.
+The same interpolated scalar $\vv{v}\cdot\Ag$ already computed for the force is
+reused here, so a proper-time clock costs one square root per particle per step.
+
+%====================================================================
+\section{Background Spacetime and the Perturbation Split}
+\label{sec:bgsplit}
+%====================================================================
+
+\subsection{Decomposition and modes}
+
+When fixed sources dominate the field, it is wasteful to evolve them on the grid.
+GRlite splits every potential into a precomputed analytic \emph{background} and a
+time-stepped \emph{perturbation},
+\begin{equation}
+  \Phig(\vv{x},t)=\Phig^{\rm bg}(\vv{x})+\Phig^{\rm pert}(\vv{x},t),
+\end{equation}
+and likewise for $\Ag,\phi,\vv{A}$.  The force on a particle uses the sum of
+both contributions; only the perturbation is advanced by the wave solver, and it
+is sourced only by the moving macroparticles.  Three modes follow: pure
+background (test particles, zero field cost), background $+$ perturbation (a few
+interacting particles in a dominant field), and fully dynamic (no background; all
+fields evolved, e.g.\ an equal-mass binary).
+
+\subsection{The compact body: a no-hair \texorpdfstring{$(M,Q,J)$}{(M,Q,J)} source}
+\label{sec:compactbody}
+
+The canonical background is a single fixed \emph{compact body} carrying the three
+``no-hair'' charges of a stationary black hole --- mass $M$, electric charge
+$Q$, angular momentum $J_z$ --- superposed in one object.  Its analytic
+potentials are the softened point sources
+\begin{align}
+  \Phig^{\rm bg} &= -\frac{GM}{\sqrt{r^2+\varepsilon^2}}, &
+  \phi^{\rm bg}  &= +\frac{\keff Q}{\sqrt{r^2+\varepsilon^2}}, \\
+  \Ag^{\rm bg}   &= \frac{G J_z}{2c^2}\,\frac{\hat z\times\vv{r}}{(r^2+\varepsilon^2)^{3/2}}, &
+  \vv{A}^{\rm bg} &= \frac{\keff\,\mu_z}{c^2}\,\frac{\hat z\times\vv{r}}{(r^2+\varepsilon^2)^{3/2}},
+\end{align}
+where $r=|\vv{x}-\vv{x}_0|$ and $\varepsilon$ is a softening length (a few
+cells) that removes the singular core.  The special cases reproduce the
+weak-field analogues of the classical metrics: $(M,0,0)$ Schwarzschild,
+$(M,Q,0)$ Reissner--Nordstr\"om, $(M,0,J)$ Kerr, $(M,Q,J)$ Kerr--Newman.
+
+\paragraph{The magnetic dipole is fixed by the no-hair relation.}
+A spinning charge has an EM magnetic dipole moment set by the gyromagnetic
+relation
+\begin{equation}
+\label{eq:nohair_mu}
+  \mu_z = g_s\,\frac{Q}{2M}\,J_z
+        = \frac{g_s\,Q\,J_z\,\Geff}{2\,GM},
+\end{equation}
+with $g_s=2$ reproducing the Kerr--Newman value $\mu=QJ/M$.  Equation
+\eqref{eq:nohair_mu} is undefined for $M=0$, so a massless charged rotor carries
+\emph{no} EM dipole field --- the correct degenerate limit, since such an object
+is not a Kerr--Newman body.  (The gravitomagnetic dipole $\Ag^{\rm bg}$, by
+contrast, is sourced by $J_z$ alone and is mass-independent.)
+
+\paragraph{Superposition.}
+Multiple compact bodies superpose linearly: the background potential is the sum
+of each body's analytic field. This is exact in the linearized theory (the field
+equations are linear), and is the basis for multi-body scenes --- the
+two-fixed-center problem, multi-lens gravitational lensing, and mixed
+$M/Q/J$ fields. The simulator supports up to a fixed number of such bodies
+(Part~III).
+
+\subsection{The 2D Green's function choice}
+\label{sec:greens2d}
+
+In strict 2D the static Green's function of $\nabla^2$ is logarithmic, so a 2D
+point mass gives $\Phig\sim\ln r$ and $|\vv{g}|\sim 1/r$ (flat rotation curves)
+rather than the 3D $\Phig\sim 1/r$, $|\vv{g}|\sim1/r^2$:
+\begin{equation}
+  \text{3D: } \Phig\sim 1/r,\ |\vv{g}|\sim1/r^2; \qquad
+  \text{2D: } \Phig\sim\ln r,\ |\vv{g}|\sim1/r .
+\end{equation}
+GRlite makes a deliberate pedagogical choice here: the \emph{deposited}
+(perturbation) field is the honest 2D solver output (a $\ln r$ field, since it
+solves the 2D Poisson/wave equation), while the analytic \emph{background} body
+prescribes the 3D-flavored softened $1/r$ form of \S\ref{sec:compactbody}, so
+that test-particle orbits look Keplerian and the precession test
+\eqref{eq:precession} is meaningful. The FDTD perturbation solver is identical
+in either case; only the analytic background differs. This dual nature (true-2D
+deposited fields vs.\ 3D-flavored fixed sources) is intrinsic to the model and
+is flagged again where it affects the numerics (Part~II) and the visualizations.
+
+%====================================================================
+\section{What Survives in 2D: Summary}
+\label{sec:2dsummary}
+%====================================================================
+
+Table~\ref{tab:2d} consolidates the 2D reduction used throughout Part~I and
+assumed by Parts~II--III. The headline is that essentially all of the
+physically interesting GR/EM effects survive the reduction; what is lost is the
+transverse tensor (gravitational-wave $+/\times$) polarizations, which require
+two transverse spatial directions absent in $2{+}1$.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}L{4.6cm}cL{6.4cm}@{}}
+\toprule
+\textbf{Quantity / effect} & \textbf{2D?} & \textbf{Reduced form / note} \\
+\midrule
+$\vv{g},\vv{E}$               & yes & 2-vectors $(x,y)$ \\
+$\Bg,\vv{B}$                  & yes & scalars $B_{g,z},B_z$ (the curl) \\
+$\vv{v}\times\Bg$             & yes & $(v_yB_{g,z},-v_xB_{g,z})$ \\
+spin $\vv{S}$                 & yes & scalar angle $\phi_{\rm spin}$; TD constraint automatic \\
+Newtonian gravity            & yes & $\ln r$ deposited; $1/r$ available as background \\
+frame dragging               & yes & $B_{g,z}$ from spin/moving mass \\
+perihelion precession        & yes & $\order{v^2/c^2}$ EIH terms \\
+Shapiro delay / lensing      & yes & via $\clocal$ \\
+proper-time dilation         & yes & per-particle clock, Eq.~\eqref{eq:proper_time} \\
+gravitomagnetic clock effect & yes & $-8\Ag\cdot\vv{v}/c^2$ term \\
+EM--gravity coupling         & yes & $\rho_{\rm EM},\vv{J}_{\rm EM}$ \\
+GW scalar mode               & yes & propagates at $c$ \\
+GW tensor ($+,\times$) modes & \textbf{no} & require $h^{ij}$; absent in 2D GEM \\
+\bottomrule
+\end{tabular}
+\caption{The $2{+}1$ reduction at a glance.}
+\label{tab:2d}
+\end{table}
+
+\bigskip
+\noindent\textit{End of Part~I.}  Part~II builds the particle-in-cell numerical
+scheme directly on the 2D equations collected in
+Table~\ref{tab:sixfield} and \S\ref{sec:2dsummary}; Part~III documents the C
+library that implements it.
+
+\part{The Particle-in-Cell Scheme}
+
+%====================================================================
+\section{Overview: the per-step pipeline}
+\label{sec:pipeline}
+%====================================================================
+
+GRlite is a particle-in-cell (PIC) code: the continuous sources of
+Part~I are represented by a finite set of macroparticles, deposited onto grid
+arrays each step; the six potentials are advanced by an explicit wave-equation
+leapfrog; and the particles are pushed by the force gathered back from those
+potentials. The dynamical state is
+
+\begin{itemize}\setlength\itemsep{2pt}
+  \item six \textbf{potential} arrays $\{\Phig,A_{g,x},A_{g,y},\phi,A_x,A_y\}$,
+  each carrying three time levels (prev $=\,$\textsuperscript{$n-1$},
+  curr $=\,$\textsuperscript{$n$}, next $=\,$\textsuperscript{$n+1$}) on its Yee
+  sublattice (\S\ref{sec:lattice});
+  \item six \textbf{source} arrays
+  $\{\rho_{\rm matter},J_{m,x},J_{m,y},\rho_q,J_{q,x},J_{q,y}\}$ rebuilt each
+  step from the particles;
+  \item a \textbf{particle} array, each entry storing
+  $(x,y,p_x,p_y,m,q,\tau,\phi_{\rm spin},g_s,\dots)$;
+  \item optional fixed \textbf{background} fields (\S\ref{sec:bgimpl}).
+\end{itemize}
+
+One time step (the routine \texttt{gr\_sim\_step}, Part~III) executes:
+
+\begin{algsteps}
+  \item \textbf{Deposit sources.} Clear the source arrays; for each particle
+  deposit $\rho^{\,n}$ at $\vv{x}^n$ with the chosen shape (\S\ref{sec:shapes}),
+  the current $\vv{J}^{\,n-1/2}$ over the segment $\vv{x}^{n-1}\!\to\vv{x}^n$ by
+  Esirkepov (\S\ref{sec:esirkepov}), and any spin-dipole curl current. Velocity
+  is $\vv{v}=\vv{p}^{\,n-1/2}/(\gamma m)$. Optionally binomial-smooth
+  $\rho,\vv{J}$ (\S\ref{sec:esirkepov}).
+  \item \textbf{Add EM stress-energy} to the gravitational sources,
+  $\rho_{\rm matter}\!\mathrel{+}=\rho_{\rm EM}$, $\vv{J}_{\rm matter}\!\mathrel{+}=\vv{J}_{\rm EM}$
+  (Eqs.~\eqref{eq:rho_em}--\eqref{eq:J_em}).
+  \item \textbf{Refresh $\clocal$} from the current total $\Phig$ if dynamic
+  Shapiro is on (\S\ref{sec:em}).
+  \item \textbf{Advance the fields:} one leapfrog sweep of all six potentials
+  (\S\ref{sec:lattice}).
+  \item \textbf{Absorb:} apply the centered-implicit boundary friction to each
+  \texttt{next} array (\S\ref{sec:boundary}).
+  \item \textbf{Rotate} the three time-level pointers of each field.
+  \item \textbf{Gauge fixes:} optional zero-mean scalar subtraction and
+  parabolic Lorenz cleaning (\S\ref{sec:boundary}).
+  \item \textbf{Push particles:} gather the force, Boris kick--drift, then update
+  spin, proper time, and position (\S\ref{sec:pusher}).
+\end{algsteps}
+
+The leapfrog staggering puts particle momenta/velocities at half-integer times
+($\vv{p}^{\,n-1/2}$) and positions/fields at integer times; this is what makes
+the deposition velocity, the force velocity, and the current-deposition segment
+mutually consistent.
+
+%====================================================================
+\section{The Yee Lattice and the Leapfrog Field Update}
+\label{sec:lattice}
+%====================================================================
+
+\subsection{Sublattices}
+
+Each potential lives on its own staggered (Yee) sublattice so that the derived
+fields land where they are needed:
+\begin{center}
+\begin{tabular}{@{}L{4.8cm}L{3.4cm}L{4.6cm}@{}}
+\toprule
+\textbf{Potential} & \textbf{Sublattice} & \textbf{Node position} \\
+\midrule
+$\Phig,\ \phi$       & corner  & $(i,\,j)\,\dx$ \\
+$A_{g,x},\ A_x$      & $x$-edge & $(i{+}\tfrac12,\,j)\,\dx$ \\
+$A_{g,y},\ A_y$      & $y$-edge & $(i,\,j{+}\tfrac12)\,\dx$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+Curls then live at cell centers $(i{+}\tfrac12,j{+}\tfrac12)\dx$: e.g.\
+$B_{g,z}=(A_{g,y}[i{+}1,j]-A_{g,y}[i,j])/\dx - (A_{g,x}[i,j{+}1]-A_{g,x}[i,j])/\dx$,
+which the force gather evaluates on the fly (\S\ref{sec:gather}). The five-point
+Laplacian at a field's own index sums neighbors on the \emph{same} sublattice,
+so a single kernel form serves all six potentials; only the interpretation of
+$(i,j)$ differs.
+
+\subsection{The discrete update}
+
+Writing $\Box\Psi = c^{-2}\partial_t^2\Psi-\nabla^2\Psi = \mathcal S$ for any of
+the six potentials, the explicit leapfrog is
+\begin{eqbox}
+\begin{equation}
+\label{eq:leapfrog}
+  \Psi^{n+1}_{k} = 2\Psi^n_k - \Psi^{n-1}_k
+     + (c\,\dt)^2\Bigl[(\nabla_h^2\Psi^n)_k + s_\Psi\,\mathcal{S}^n_k\Bigr],
+  \quad
+  (\nabla_h^2\Psi)_k = \frac{\Psi_{k\pm1}+\Psi_{k\pm W}-4\Psi_k}{\dx^2},
+\end{equation}
+\end{eqbox}
+where $k=jW+i$ is the flat array index and $s_\Psi$ is the per-field source
+coupling: $s_{\Phig}=-4\pi G$, $s_{\Ag}=-4\pi G/c^2$ (gravity), and
+$s_{\phi}=1/\varepsilon_0$, $s_{\vv{A}}=-\mu_0$ (EM), realizing the source rows
+of Table~\ref{tab:sixfield}. The scheme is second-order in space and time and
+stable under the 2D Courant condition
+\begin{equation}
+\label{eq:cfl}
+  \frac{c\,\dt}{\dx}\le \frac{1}{\sqrt2},
+\end{equation}
+exposed as the dimensionless \texttt{cfl} parameter ($\dt = \mathrm{cfl}\cdot
+\dx/c$; the library default is $\mathrm{cfl}=1/\sqrt2$).
+
+\subsection{Kernel variants}
+
+The same recurrence \eqref{eq:leapfrog} appears in four forms, selected per run:
+\begin{itemize}\setlength\itemsep{2pt}
+  \item \textbf{undamped} (interior default): Eq.~\eqref{eq:leapfrog} verbatim;
+  \item \textbf{Shapiro} (EM fields only): $c^2$ on the Laplacian is replaced by
+  the per-cell $\clocal^2(\vv{x})$ array (\S\ref{sec:em}), while the source term
+  keeps the uniform $c^2$;
+  \item \textbf{critical damping}: with per-cell $\gamma_k=1-\sigma_k\dt$,
+  $\Psi^{n+1}_k = 2\gamma_k\Psi^n_k-\gamma_k^2\Psi^{n-1}_k+(c\dt)^2[\nabla_h^2\Psi^n+s\mathcal S]$,
+  whose double root at $\gamma_k$ gives an exact per-step decay and reduces
+  bit-for-bit to the undamped form where $\sigma_k=0$;
+  \item \textbf{periodic}: wrap-around indexing on all four edges (translation
+  invariant).
+\end{itemize}
+For the non-periodic variants an outer-boundary post-pass sets the ring either to
+zero (Dirichlet) or to its inward neighbor (Neumann); \S\ref{sec:boundary}
+discusses the choice and the separate derivative-friction absorber.
+
+%====================================================================
+\section{Shape Functions and the Macroparticle}
+\label{sec:shapes}
+%====================================================================
+
+A macroparticle replaces the point $\delta(\vv{x}-\vv{x}_p)$ of Part~I by a
+finite cloud $W(\vv{x}-\vv{x}_p)$. All deposition and interpolation use a
+separable shape $W(\vv{x})=w(x)\,w(y)$ whose 1D factor is non-negative,
+symmetric, and a partition of unity, $\sum_i w(x-x_i)=1$ for any $x$ --- the
+last property is what makes the deposited mass/charge independent of sub-cell
+position. GRlite offers three shapes, all on the corner sublattice for $\rho$
+and edge sublattices for $\vv J$:
+
+\paragraph{CIC ($W_2$, bilinear, $2{\times}2$).} With
+$\alpha=x_p/\dx-i_c$, $\beta=y_p/\dx-j_c$ the four weights are
+$(1{-}\alpha)(1{-}\beta),\ \alpha(1{-}\beta),\ (1{-}\alpha)\beta,\ \alpha\beta$,
+deposited as $\mathrm{value}\times w/\dx^2$ (so $\sum_k\!\rho_k\,\dx^2=\mathrm{value}$).
+
+\paragraph{TSC ($W_3$, quadratic B-spline, $3{\times}3$).} Anchored at the
+nearest node with $u=x_p/\dx-i_c\in[-\tfrac12,\tfrac12)$,
+\begin{equation}
+  w_{-1}=\tfrac12\bigl(\tfrac12-u\bigr)^2,\quad
+  w_{0}=\tfrac34-u^2,\quad
+  w_{+1}=\tfrac12\bigl(\tfrac12+u\bigr)^2 ,
+\end{equation}
+a smoother $9$-cell footprint with a continuous first derivative.
+
+\paragraph{Bump ($C^\infty$, radius-parameterized).} A mollifier
+\begin{equation}
+\label{eq:bump}
+  b(d,R)=\exp\!\Bigl(\frac{-1}{1-(d/R)^2}\Bigr)\ \text{for }|d|<R,\ \text{else }0,
+  \qquad w_i = \frac{b(i-u,R)}{\sum_j b(j-u,R)},
+\end{equation}
+per-axis renormalized so the weights sum to one (hence charge-conserving). The
+window half-width is $\lceil R+\tfrac12\rceil$ cells. Being $C^\infty$ with
+compact support, its Fourier transform decays sub-exponentially, suppressing the
+grid-scale aliasing that drives PIC self-heating; the production setup uses the
+bump kernel at radius $R\approx6$. The same $w_i$ are reused for interpolation,
+and the analytic derivative $\dd w_i/\dd u$ (including the renormalization
+correction) is used for the gradient gather of \S\ref{sec:gather}.
+
+\paragraph{The adjoint condition.} Deposit and gather use the \emph{same} shape;
+this Hockney--Eastwood adjoint pairing is what guarantees a particle exerts no
+net self-force in a uniform field, and underlies the momentum-conserving force
+gather (\S\ref{sec:gather}).
+
+%====================================================================
+\section{Charge-Conserving Current Deposition}
+\label{sec:esirkepov}
+%====================================================================
+
+\subsection{Why exact continuity matters}
+
+The EM (and GEM) wave solver enforces no constraint that ties $\vv J$ to
+$\partial_t\rho$. If the deposited pair violates the \emph{discrete} continuity
+equation
+\begin{equation}
+\label{eq:discrete_continuity}
+  \frac{\rho^{n}_k-\rho^{n-1}_k}{\dt} + (\nabla_h\!\cdot\vv J^{\,n-1/2})_k = 0,
+\end{equation}
+the excess charge sources a spurious longitudinal field that trails the particle
+as a self-force wake. GRlite therefore deposits $\vv J$ by the Esirkepov
+construction, which satisfies Eq.~\eqref{eq:discrete_continuity} \emph{exactly},
+to round-off, at every corner cell.
+
+\subsection{The Esirkepov split}
+
+Let $S^{n-1},S^{n}$ be the shape footprints at $\vv{x}^{n-1},\vv{x}^{n}$, each a
+product $S_x S_y$. The 2D footprint change
+$\Delta S=S^{n}_xS^{n}_y-S^{n-1}_xS^{n-1}_y$
+is split into orthogonal $x$- and $y$-flux parts
+\begin{align}
+  \Delta S^{x}_{ij} &= (S^{n}_{x,i}-S^{n-1}_{x,i})\bigl(S^{n-1}_{y,j}+\tfrac12(S^{n}_{y,j}-S^{n-1}_{y,j})\bigr),\\
+  \Delta S^{y}_{ij} &= (S^{n}_{y,j}-S^{n-1}_{y,j})\bigl(S^{n-1}_{x,i}+\tfrac12(S^{n}_{x,i}-S^{n-1}_{x,i})\bigr),
+\end{align}
+which satisfy $\Delta S^x+\Delta S^y=\Delta S$ identically. The edge currents are
+then the running sums
+\begin{equation}
+\label{eq:esirkepov_J}
+  J_{x}\big|_{i+1/2,\,j} = -\frac{\mathrm{value}}{\dt\,\dx}\sum_{k\le i}\Delta S^x_{kj},
+  \qquad
+  J_{y}\big|_{i,\,j+1/2} = -\frac{\mathrm{value}}{\dt\,\dx}\sum_{l\le j}\Delta S^y_{il},
+\end{equation}
+with $\mathrm{value}=m$ (matter current) or $q$ (charge current). Telescoping the
+sums reproduces Eq.~\eqref{eq:discrete_continuity} cell-by-cell. The trajectory
+endpoints use $\vv{x}^{n-1}=\vv{x}^n-\vv{v}^{n-1/2}\dt$, exact under the leapfrog
+drift. CIC ($2{\times}2$ footprint) and bump variants are provided; if the
+Esirkepov support is exceeded (motion $>1$ cell), the code falls back to a direct
+midpoint CIC current and flags the continuity violation.
+
+\subsection{Spin-dipole and smoothing}
+
+A spinning particle adds a divergence-free magnetization current. For a
+$z$-dipole moment $\mu$ deposited with shape $W$,
+\begin{equation}
+  J_x = +\mu\,\partial_y W,\qquad J_y = -\mu\,\partial_x W
+  \quad\Rightarrow\quad \nabla\!\cdot\vv J = 0,
+\end{equation}
+so it perturbs $\vv A$ without adding to $\rho$ (magnetic moment
+$\mu=g_s q/2m\cdot S$ for EM, gravitomagnetic moment $\sigma=2S$). Finally, an
+optional binomial filter --- the $3{\times}3$ stencil
+$\tfrac1{16}[\,1\,2\,1;\,2\,4\,2;\,1\,2\,1\,]$, applied $N$ times to $\rho$ (and
+to $\vv J$) --- damps the residual grid-scale content of the deposit, the
+canonical PIC noise-control step. It is exposed as \texttt{rhoSmooth} /
+\texttt{jSmooth} pass counts.
+
+%====================================================================
+\section{Force Gather and the Lewis--Birdsall Scheme}
+\label{sec:gather}
+%====================================================================
+
+Because the state is potentials, the force \eqref{eq:force_gem_pot}--%
+\eqref{eq:force_em_pot} is assembled at each particle from quantities gathered
+on the fly --- no $\vv g,\Bg,\vv E,\vv B$ grid arrays are ever formed:
+\begin{itemize}\setlength\itemsep{1pt}
+  \item $\nabla\Phig$ and $\nabla\phi$: gathered gradients of the corner scalars;
+  \item $\partial_t\Ag,\ \partial_t\vv A$: centered time differences of the
+  perturbation edge potentials, $(\Psi^{n+1}-\Psi^{n-1})/2\dt$;
+  \item $B_{g,z},B_z$: the Yee curl (\S\ref{sec:lattice}) evaluated at the four
+  cell centers around the particle and bilinearly interpolated;
+\end{itemize}
+each combining the analytic (or sampled) background with the grid perturbation.
+
+\subsection{Legacy vs.\ Lewis--Birdsall interpolation}
+
+Two gather styles are selectable. The \emph{legacy} style interpolates field
+values with the shape $W$ and finite-differences them. The
+\emph{Lewis--Birdsall} (LB) style instead gathers the gradient \emph{directly}
+with the analytic derivative of the same shape,
+\begin{equation}
+\label{eq:lb_grad}
+  \partial_x\Psi(\vv{x}_p) = \frac1{\dx}\sum_{i,j}
+     \frac{\dd w}{\dd u}(x_p-x_i)\,w(y_p-y_j)\,\Psi_{ij},
+\end{equation}
+and analogously for $\partial_y$ and for the edge-field gathers entering
+$\vv{v}\times\vv B$. Pairing the derivative-shape gather \eqref{eq:lb_grad} with
+the value-shape deposit is the adjoint (Hockney--Eastwood) condition at the
+gradient level: it makes the inter-particle force exactly reciprocal and cancels
+the grid self-force, so LB is the production choice. The 1PN gravitational
+vector $\vv g=-\nabla\Phig-\partial_t\Ag$ used in the EIH terms is built from the
+same gathered pieces.
+
+\subsection{The assembled 2D force}
+
+Collecting Part~I, the per-particle force the pusher applies is (relativistic
+tier; $\vv g$ from the gathers above, $B_{g,z},B_z$ from the Yee curl)
+\begin{eqbox}
+\begin{align*}
+  F_x &= m\Bigl[(1+\tfrac{v^2}{c^2}+\tfrac{4\Phig}{c^2})\,g_x
+        - \tfrac{4(\vv v\cdot\vv g)}{c^2}v_x + 4 v_y B_{g,z} - \partial_tA_{g,x}\Bigr]
+        + q\bigl[E_x + v_y B_z\bigr] + s\,\partial_x B_{g,z} + \mu\,\partial_x B_z,\\
+  F_y &= m\Bigl[(1+\tfrac{v^2}{c^2}+\tfrac{4\Phig}{c^2})\,g_y
+        - \tfrac{4(\vv v\cdot\vv g)}{c^2}v_y - 4 v_x B_{g,z} - \partial_tA_{g,y}\Bigr]
+        + q\bigl[E_y - v_x B_z\bigr] + s\,\partial_y B_{g,z} + \mu\,\partial_y B_z,
+\end{align*}
+\end{eqbox}
+with $E_\alpha=-\partial_\alpha\phi-\partial_tA_\alpha$, $\mu=g_s q/2m\cdot s$.
+Lower tiers drop the $\tfrac{v^2}{c^2},\tfrac{4\Phig}{c^2},(\vv v\cdot\vv g)$
+terms (EIH$\to$GEM) and the $v\times B_g$ term (GEM$\to$Newtonian); the
+EM and spin pieces are unaffected. Each gravitomagnetic cross product is in
+practice evaluated from the potential-form identity (\S\ref{sec:force_potential})
+so $\Bg$ is never gridded.
+
+%====================================================================
+\section{The Relativistic Boris Pusher}
+\label{sec:pusher}
+%====================================================================
+
+\subsection{Kick--drift with a velocity corrector}
+
+Particles advance by a relativistic Boris leapfrog (kick--drift):
+\begin{equation}
+  \vv p^{\,n+1/2}=\vv p^{\,n-1/2}+\vv F^{\,n}\dt,\quad
+  \vv v^{\,n+1/2}=\frac{\vv p^{\,n+1/2}}{\sqrt{m^2+|\vv p^{\,n+1/2}|^2/c^2}},\quad
+  \vv x^{\,n+1}=\vv x^{\,n}+\vv v^{\,n+1/2}\dt.
+\end{equation}
+The force depends on velocity (the $v^2/c^2$ EIH terms and the $\vv v\times\vv B$
+terms), which is not known at $t^n$. GRlite uses the lagged half-step velocity
+$\vv v^{\,n-1/2}$ as a predictor, then, whenever the force is velocity-dependent
+(relativistic tier, or $B_{g,z}\neq0$, or a charged particle in $B_z$), runs one
+corrector: predict $\vv p$, form the midpoint $\vv v_{\rm mid}=\tfrac12(\vv
+v^{\,n-1/2}+\vv v_{\rm pred})$, and re-evaluate the force there. This restores
+second-order time accuracy and the time-symmetry of the push.
+
+\subsection{Self-field subtraction}
+
+For particles that opt in (\S\ref{sec:bgimpl}), the gathered force includes the
+particle's own deposited field --- a residual grid self-force. GRlite cancels it
+by maintaining a per-particle ``self'' field set (the same deposit and leapfrog,
+sourced by that particle alone) and forming
+\begin{equation}
+\label{eq:selffield}
+  \vv F_{\rm total} = \vv F_{\rm collective} - (1+\varepsilon)\,\vv F_{\rm self},
+\end{equation}
+re-gathered through the identical chain; $\varepsilon=0$ gives exact bit-level
+cancellation of the self-interaction, leaving only the inter-particle force.
+
+\subsection{Spin, proper time, and driven sources}
+
+After the push, the scalar spin phase advances by the 2D precession rate
+(Eq.~\eqref{eq:precession_rates}, $\Omega_z=B_{g,z}+\tfrac{g_sq}{2m}B_z+
+\Omega_{{\rm Thomas},z}$ with $\Omega_{{\rm Thomas},z}=-\tfrac{\gamma^2}{\gamma+1}
+(v_xa_y-v_ya_x)/c^2$ and $\vv a=(\vv v^{\,n+1/2}-\vv v^{\,n-1/2})/\dt$), and the
+proper-time clock by
+\begin{equation}
+  \Delta\tau = \dt\sqrt{1+\tfrac{2\Phig}{c^2}-\bigl(1-\tfrac{2\Phig}{c^2}\bigr)\tfrac{v^2}{c^2}-\tfrac{8\,\Ag\cdot\vv v}{c^2}}
+\end{equation}
+(Eq.~\eqref{eq:proper_time}). Two source modes override the plain push: a
+\emph{pinned} particle (forces disabled) does not integrate the force, acting as
+a fixed emitter; a \emph{driven} particle carries a base velocity $\vv v_{\rm
+base}$ (itself evolved under the force) plus a sinusoidal modulation $\vv v=\vv
+v_{\rm base}+\vv v_{\rm drive}\cos(\omega t+\varphi)$, written into the momentum
+so the Esirkepov current stays charge-conserving. Storing the base separately is
+what prevents the oscillation from accumulating into the momentum --- the model
+for an antenna/dipole emitter.
+
+%====================================================================
+\section{Initial Conditions}
+\label{sec:init}
+%====================================================================
+
+Starting the leapfrog from zero fields with sources already present injects a
+spurious ``turn-on'' transient: the field has to radiate out to its static
+configuration, and the standing modes of a finite box are slow to leave. GRlite
+seeds a near-static initial field instead, by two ingredients:
+
+\paragraph{Liénard--Wiechert seed.} The potentials are initialized to the
+direct-sum (here static) Liénard--Wiechert superposition of the particle
+sources, with a boundary-mean taper that matches the interior solution smoothly
+to the box edge (matched to zero across the damping ring by default). This places
+the field within a small residual of the discrete static solution at $t=0$.
+
+\paragraph{Frozen-particle friction settle.} The L--W seed is then relaxed to the
+exact discrete fixed point by running $N_{\rm settle}$ steps with the particles
+\emph{frozen} (sources still deposit from the frozen state; the field still
+evolves) and the derivative-friction absorber (\S\ref{sec:boundary}) on. The
+friction drains the residual standing modes to round-off in a few hundred steps,
+leaving the field at the discrete Poisson solution of the deposited $\rho$.
+
+These compose into the scenario-level initialization choices
+\texttt{lw-settled} (seed $+$ settle, the default for interacting runs),
+\texttt{lw} (seed only), \texttt{none} (auto: settle when a perturbation is
+active, else leave at zero), and \texttt{zero} (always start from a quiet field
+--- used by wave-emission/antenna demos that must not begin with a static well).
+A direct Jacobi/Poisson relaxation of $\Phig$ is also available as an
+alternative seed.
+
+%====================================================================
+\section{Boundary Conditions and Gauge Control}
+\label{sec:boundary}
+%====================================================================
+
+\subsection{Outer boundary}
+
+The non-periodic solver applies, after each leapfrog sweep, either a
+\textbf{Dirichlet} ring ($\Psi=0$ on the outer cells: waves reflect with a sign
+flip; the discrete static state is the zero-Dirichlet Poisson solution) or a
+\textbf{Neumann} ring ($\Psi_{\rm edge}=\Psi_{\rm inward}$: reflection without
+sign flip, putting standing-mode antinodes at the wall where the absorber is
+strongest, and better approximating the 2D free-space $\ln r$ Green's function).
+A fully \textbf{periodic} variant (wrap-around indexing) is also available.
+
+\subsection{The absorbing layer}
+
+Outgoing waves are removed by a derivative-friction layer implementing the damped
+wave equation $\partial_t^2\Psi+2\gamma\,\partial_t\Psi=c^2\nabla^2\Psi+\dots$.
+The discretization is \emph{centered-implicit}: the standard leapfrog
+\texttt{next} is corrected, before the buffer rotation, by
+\begin{equation}
+\label{eq:friction}
+  \Psi^{n+1}_k \leftarrow \frac{\Psi^{n+1}_k + \beta_k\,\Psi^{n-1}_k}{1+\beta_k},
+  \qquad \beta_k=\gamma_k\,\dt .
+\end{equation}
+At the 2D Nyquist mode the recurrence roots are $-1$ (marginal) and
+$-(1-\beta)/(1+\beta)$ (stable), so \eqref{eq:friction} is stable for \emph{any}
+$\beta$ --- unlike a naive bleed on \texttt{prev}, which destabilizes the Nyquist
+mode at $\mathrm{cfl}=1/\sqrt2$. The coefficient $\beta_k$ is a cubic ramp from a
+small interior \emph{floor} (which also drains the lowest box mode) up to a
+\emph{wall} value over a taper \emph{depth} of cells at the boundary.
+
+\subsection{Gauge maintenance}
+
+Two optional fixes keep the Lorenz gauge from drifting. The \textbf{zero-mean}
+fix addresses the unconstrained DC mode of the scalar potentials under Neumann
+BC (the wave equation accelerates it whenever the source mean is nonzero):
+subtract the spatial mean from both \texttt{curr} and \texttt{prev} each step
+(equal subtraction preserves the encoded time derivative). The
+\textbf{parabolic Lorenz cleaning} subtracts a multiple of the gauge residual,
+$\phi\mathrel{-}=R\,c^2\dt\,(\nabla\!\cdot\vv A)$ (and likewise $\Phig$ with
+$\nabla\!\cdot\Ag$), bounding the drift introduced by sources whose discrete
+divergence is not exactly consistent (e.g.\ the spin-dipole curl current).
+
+%====================================================================
+\section{Background Field Installation}
+\label{sec:bgimpl}
+%====================================================================
+
+The fixed background of \S\ref{sec:bgsplit} is installed from a list of up to
+sixteen compact bodies, each with parameters $(x,y,GM,Q,J_z,g_s,\varepsilon)$.
+The list is the source of truth; the field is derived from it in one of two
+modes.
+
+\paragraph{Sampled mode.} Each body's analytic generators
+(\S\ref{sec:compactbody}) --- the softened gravitational scalar, the
+gravitomagnetic dipole, the Coulomb scalar, and (for a spinning charge) the EM
+magnetic dipole --- are sampled \emph{additively} onto the six background grid
+arrays, on each potential's own sublattice. Multiple bodies superpose by
+accumulation, which is exact in the linear theory. The force gather then reads
+these grids exactly as it reads the perturbation, and the Shapiro $\clocal$
+(Eq.~\eqref{eq:clocal}) is built from the \emph{total} $\Phig$ (sampled
+background $+$ perturbation), so a deposited mass lenses light on top of the
+fixed body.
+
+\paragraph{Analytic mode.} The closed-form fields are instead evaluated directly
+at each particle position and summed over the bodies, with no grid-sampling
+error. This eliminates the $\order{(\dx/r)^2}$ tangential-force error of the
+sampled path that would otherwise induce a slow grid precession --- so analytic
+mode is preferred for clean test-particle orbits, while sampled mode is used when
+the background must enter the gridded field evolution (e.g.\ dynamic lensing).
+Either way, a single body reduces exactly to the corresponding classical-metric
+analogue of \S\ref{sec:compactbody}.
+
+%====================================================================
+\section{Visualization Mathematics}
+\label{sec:viz}
+%====================================================================
+
+The visualization is part of the physics: a pedagogical and debugging tool only
+works if the rendered quantity is exactly the simulated one. All field views are
+computed CPU-side each frame from the potential arrays and the chosen
+\emph{source} (perturbation only, background only, or their sum).
+
+\paragraph{Field colormap.} A selectable scalar is mapped through a diverging
+colormap auto-normalized to the current frame's peak magnitude (so the scale
+tracks the dynamics). The available reductions are the stored scalars themselves
+($\Phig$, $\phi$); a \emph{curl} field
+$B_z=\partial_xA_y-\partial_yA_x$ (and $B_{g,z}$) formed from the two edge
+arrays; and a \emph{gradient magnitude} $|\nabla\Phig|$ for the field strength.
+
+\paragraph{Vector overlay (quiver).} On a coarse sub-grid the overlay draws
+either edge-potential components ($\Ag,\vv A$) or a gradient field
+($\vv g=-\nabla\Phig$, $\vv E=-\nabla\phi$), arrows normalized so the strongest
+spans $\approx0.9$ of the sample spacing, with opacity scaling by relative
+magnitude so weak regions recede.
+
+\paragraph{Per-particle overlays.} Each maps a simulated quantity to a glyph:
+\begin{itemize}\setlength\itemsep{2pt}
+  \item \textbf{velocity arrow} of pixel length $L_v\,|\vv v|$ with
+  $\vv v=\vv p/(\gamma m)$ (a fixed pixels-per-$c$ scale), brightened above
+  $|\vv v|>0.5c$;
+  \item \textbf{force arrows} for the gravitational, EM, spin, and total
+  components (the per-particle breakdown stashed by the pusher), drawn in
+  distinct colors and sharing \emph{one} auto-scale (the largest component across
+  all particles spans a fixed reference length) so magnitudes are directly
+  comparable;
+  \item \textbf{spin indicator}: a hand through the particle at angle
+  $\phi_{\rm spin}$, so Lense--Thirring/Thomas precession is literally visible;
+  \item \textbf{trajectory ticks}: along the recorded track, circles at equal
+  \emph{coordinate}-time intervals $\Delta$ and triangles at equal
+  \emph{proper}-time intervals $\Delta$ (auto-chosen to $\sim12$ ticks across the
+  trail). Where the proper-time triangles spread apart relative to the
+  coordinate circles, time dilation is being shown directly;
+  \item \textbf{proper-time clock}: a two-hand dial, one hand sweeping coordinate
+  time $t$ and one proper time $\tau$ at a common period; the opening wedge
+  between them is the accumulated dilation $t-\tau$;
+  \item \textbf{background body}: a hollow ring sized to the softening length
+  $\varepsilon$ at the body's position.
+\end{itemize}
+Every overlay is independently toggleable so a single effect can be isolated.
+
+\bigskip
+\noindent\textit{End of Part~II.}  Part~III documents the C library that
+implements the scheme above and maps each public function to the pipeline step
+(\S\ref{sec:pipeline}) it realizes.
+
+\part{The C Library}
+
+The simulation core is a freestanding C11 library (\texttt{core/}, compiled both
+natively for the test suite and to WebAssembly for the browser). It has no
+dependencies beyond \texttt{libm}. This Part documents the data structures that
+hold the state of Part~II, the source files that implement each piece of the
+scheme, and the complete public API with each function tied back to the
+algorithm step it realizes. The single public header is
+\texttt{core/include/grlite.h}; the internal state struct lives in
+\texttt{core/src/sim\_internal.h}.
+
+%====================================================================
+\section{Architecture and Data Structures}
+\label{sec:arch}
+%====================================================================
+
+\subsection{The simulation object}
+
+A run is a single opaque handle \texttt{gr\_sim\_t*}, created with the grid and
+the effective constants of Part~I:
+\begin{verbatim}
+gr_sim_t* gr_sim_create(int width, int height, float dx, float c_eff, float cfl);
+\end{verbatim}
+Internally (\texttt{struct gr\_sim}) it holds the entire state of
+\S\ref{sec:pipeline}:
+\begin{center}
+\begin{tabular}{@{}L{5.6cm}L{8.2cm}@{}}
+\toprule
+\textbf{Member} & \textbf{Role (Part~II reference)} \\
+\midrule
+\texttt{c\_eff, dt, cfl, dx} & wave speed / step / Courant ratio (Eq.~\eqref{eq:cfl}) \\
+\texttt{G\_eff, k\_e}        & effective couplings $G,\keff$ (Part~I) \\
+\texttt{fields[6]}           & the six potentials, each a \texttt{gr\_field\_state\_t} (\S\ref{sec:lattice}) \\
+\texttt{rho\_matter, J\_mx, J\_my} & gravity sources $\rho_{\rm matter},\vv J_{\rm matter}$ (\S\ref{sec:esirkepov}) \\
+\texttt{rho\_q, J\_qx, J\_qy}      & EM sources $\rho_q,\vv J_q$ \\
+\texttt{particles, n\_particles}  & the macroparticle array (\S\ref{sec:pusher}) \\
+\texttt{damping\_d, friction\_d}  & absorbing-layer arrays (\S\ref{sec:boundary}) \\
+\texttt{phi\_g\_bg, \dots, Ay\_bg} & sampled background fields (\S\ref{sec:bgimpl}) \\
+\texttt{bg\_bodies[16], bg\_nbody} & analytic compact-body list (\S\ref{sec:bgimpl}) \\
+\texttt{self\_field\_sets}         & per-particle self-field sets (Eq.~\eqref{eq:selffield}) \\
+\texttt{force\_tier, shape\_function, force\_interp} & scheme selectors (\S\S\ref{sec:shapes},\ref{sec:gather}) \\
+\texttt{*\_enabled flags}          & the physics switches (force terms, Shapiro, gauge) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Field, particle, and body records}
+
+Each potential is a three-time-level record on its Yee sublattice; the leapfrog
+\eqref{eq:leapfrog} reads \texttt{prev}/\texttt{curr}, writes \texttt{next}, and
+the step rotates the three pointers:
+\begin{verbatim}
+typedef struct { float *prev, *curr, *next;     /* Phi^{n-1}, Phi^n, Phi^{n+1} */
+                 float *source; float source_coeff; } gr_field_state_t;
+\end{verbatim}
+\texttt{source} binds to one of the six source arrays and \texttt{source\_coeff}
+is the $s_\Psi$ of Eq.~\eqref{eq:leapfrog}. A macroparticle carries the dynamical
+state of \S\ref{sec:pusher} plus per-step diagnostics:
+\begin{verbatim}
+typedef struct { float x, y, px, py;            /* position, relativistic momentum */
+                 float mass, charge, proper_time;
+                 float spin, phi_spin, g_factor; /* scalar spin (Sec. 4.3) */
+                 float fgrav_x..ftot_y;          /* force breakdown (viz, Sec. 16) */
+                 float drive_vx..drive_base_vy;  /* driven/pinned source (Sec. 12) */
+               } gr_particle_t;
+\end{verbatim}
+and a background body is the seven contiguous floats of the no-hair source
+(\S\ref{sec:compactbody}):
+\begin{verbatim}
+typedef struct { float x, y, GM, Q, Jz, g_em, eps; } gr_bg_body_t;
+\end{verbatim}
+
+\subsection{Memory layout and access}
+
+Every grid array is a flat \texttt{float[W*H]} in row-major order (index
+$k=jW+i$), matching the leapfrog indexing of Eq.~\eqref{eq:leapfrog}. All grids
+share one geometry; only the node interpretation (corner / edge) differs by
+sublattice. Because the arrays and the particle records are plain
+\texttt{float}s in a single linear heap, the WebAssembly build exposes them to
+the front end as zero-copy \texttt{Float32Array} views: \texttt{gr\_sim\_field\_ptr},
+\texttt{gr\_sim\_array\_ptr}, \texttt{gr\_sim\_background\_ptr}, and
+\texttt{gr\_sim\_get\_particle} hand back interior pointers that the visualization
+(\S\ref{sec:viz}) reads directly each frame.
+
+\subsection{Lifecycle}
+
+The driver loop is just \texttt{gr\_sim\_create} $\to$ configure $\to$ add
+particles/background $\to$ initialize fields (\S\ref{sec:init}) $\to$
+\texttt{gr\_sim\_step}/\texttt{gr\_sim\_step\_n} $\to$ \texttt{gr\_sim\_destroy}.
+The convenience entry \texttt{gr\_sim\_use\_pedagogical\_defaults} installs the
+production bundle (bump kernel, Lewis--Birdsall, deposition on, absorbing layer)
+in one call.
+
+%====================================================================
+\section{Module-by-Module Correspondence}
+\label{sec:modules}
+%====================================================================
+
+The implementation is six source files, each owning one band of Part~II
+(Table~\ref{tab:modules}).
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}L{2.4cm}L{6.4cm}L{4.6cm}@{}}
+\toprule
+\textbf{File} & \textbf{Implements (Part~II)} & \textbf{Key symbols} \\
+\midrule
+\texttt{sim.c} & lifecycle; the per-step driver (\S\ref{sec:pipeline}); init (\S\ref{sec:init}); friction taper, zero-mean (\S\ref{sec:boundary}); config & \texttt{gr\_sim\_step}, \texttt{\_create}, \texttt{\_init\_potentials\_settled}, \texttt{\_set\_volume\_friction\_taper} \\
+\texttt{field.c} & leapfrog + variants (\S\ref{sec:lattice}); parabolic gauge clean (\S\ref{sec:boundary}) & \texttt{gr\_field\_leapfrog\_step\_all}, \texttt{\_step\_self}, \texttt{gr\_field\_parabolic\_gauge\_clean} \\
+\texttt{deposit.c} & shapes (\S\ref{sec:shapes}); Esirkepov (\S\ref{sec:esirkepov}); LB gathers (\S\ref{sec:gather}); spin-dipole curl & \texttt{gr\_\{cic,tsc,bump\}\_deposit\_corner}, \texttt{gr\_\{,bump\_\}esirkepov\_deposit\_jxy}, \texttt{gr\_bump\_lb\_grad\_corner} \\
+\texttt{particle.c} & force gather (\S\ref{sec:gather}); Boris push, corrector, self-field, spin, proper time, drive (\S\ref{sec:pusher}) & \texttt{gr\_particle\_push\_all}, \texttt{gr\_phi\_g\_total\_at} \\
+\texttt{background.c} & compact-body generators + analytic evaluators (\S\ref{sec:bgimpl}); Shapiro $\clocal$ rebuild (\S\ref{sec:em}) & \texttt{gr\_sim\_\{set,add\}\_background\_body}, \texttt{gr\_bg\_eval\_*}, \texttt{gr\_em\_shapiro\_recompute\_c\_local2} \\
+\texttt{gauge.c} & Lorenz-gauge residual diagnostics (\S\ref{sec:boundary}) & \texttt{gr\_sim\_gauge\_residual\_\{grav,em\}} \\
+\bottomrule
+\end{tabular}
+\caption{Source-file to Part~II mapping.}
+\label{tab:modules}
+\end{table}
+
+Two correspondences are worth spelling out because they thread several files.
+
+\paragraph{The step driver (\texttt{sim.c} $\Rightarrow$ \S\ref{sec:pipeline}).}
+\texttt{gr\_sim\_step} executes the pipeline literally in order: it clears the
+source arrays and, per particle, calls the selected
+\texttt{gr\_*\_deposit\_corner} for $\rho^n$ and \texttt{gr\_*\_esirkepov\_deposit\_jxy}
+for $\vv J^{\,n-1/2}$ (with \texttt{gr\_*\_curl\_dipole\_deposit\_jxy} for spin),
+optionally binomial-smooths them, folds in EM stress-energy, refreshes $\clocal$
+(\texttt{background.c}), calls \texttt{gr\_field\_leapfrog\_step\_all}
+(\texttt{field.c}), applies the centered-implicit friction
+(Eq.~\eqref{eq:friction}) to each \texttt{next} before the pointer rotation, runs
+the gauge fixes, and finally calls \texttt{gr\_particle\_push\_all}
+(\texttt{particle.c}) unless the particles are frozen.
+
+\paragraph{The push (\texttt{particle.c} $\Rightarrow$ \S\S\ref{sec:gather}--\ref{sec:pusher}).}
+\texttt{gr\_particle\_push\_all} gathers each force component through the static
+evaluators (\texttt{grav\_grad\_at}/\texttt{\_lb}, \texttt{B\_g\_z\_at\_total},
+\texttt{phi\_em\_grad\_at\_total}, \texttt{dt\_A\_*\_at\_total}), assembles the
+tiered force, runs the velocity corrector, performs the self-field subtraction by
+temporarily swapping \texttt{sim->fields} for the particle's
+\texttt{self\_field\_set} and replaying the same gather, then updates momentum,
+spin phase, proper time, and position. The force-component fields it writes back
+(\texttt{fgrav/fem/fspin/ftot}) are exactly what the force-arrow overlay
+(\S\ref{sec:viz}) renders.
+
+%====================================================================
+\section{API Reference}
+\label{sec:api}
+%====================================================================
+
+The public API (\texttt{grlite.h}) is listed below by function group, each entry
+tied to the Part~II step it serves. Arguments are abbreviated; \texttt{s}
+denotes the \texttt{gr\_sim\_t*} handle. Getters that merely return the value set
+by their paired setter are folded into one row (``\,set/get\,'').
+
+\subsection{Lifecycle and time}
+\nopagebreak
+{\footnotesize
+\begin{tabular}{@{}L{6.6cm}L{5.6cm}L{1.4cm}@{}}
+\toprule
+\textbf{Function} & \textbf{Role} & \textbf{Part~II} \\
+\midrule
+\texttt{gr\_sim\_create(w,h,dx,c\_eff,cfl)} & allocate a run & \S\ref{sec:arch} \\
+\texttt{gr\_sim\_destroy(s)} & free it & \S\ref{sec:arch} \\
+\texttt{gr\_sim\_use\_pedagogical\_defaults(s)} & install production bundle & \S\ref{sec:arch} \\
+\texttt{gr\_sim\_step(s)} / \texttt{gr\_sim\_step\_n(s,n)} & advance the pipeline & \S\ref{sec:pipeline} \\
+\texttt{gr\_sim\_step\_count(s)}, \texttt{gr\_sim\_time(s)} & step index, $t=n\,\dt$ & \S\ref{sec:pipeline} \\
+\texttt{gr\_sim\_reset\_time(s)} & zero the step counter & \S\ref{sec:pipeline} \\
+\texttt{gr\_sim\_dt/dx/width/height(s)} & grid/time accessors & \S\ref{sec:lattice} \\
+\bottomrule
+\end{tabular}}
+
+\subsection{Couplings and scheme selectors}
+\nopagebreak
+{\footnotesize
+\begin{tabular}{@{}L{6.6cm}L{5.6cm}L{1.4cm}@{}}
+\toprule
+\textbf{Function} & \textbf{Role} & \textbf{Part~II} \\
+\midrule
+\texttt{gr\_sim\_set/get\_G\_eff(s,\,$\cdot$)} & gravity coupling $G$ & Part~I \\
+\texttt{gr\_sim\_set/get\_k\_e(s,\,$\cdot$)} & EM coupling $\keff$ & Part~I \\
+\texttt{gr\_sim\_set/get\_force\_tier(s,\,$\cdot$)} & Newtonian / GEM / EIH & \S\ref{sec:gather} \\
+\texttt{gr\_sim\_set/get\_shape\_function(s,\,$\cdot$)} & CIC / TSC / bump & \S\ref{sec:shapes} \\
+\texttt{gr\_sim\_set/get\_kernel\_radius(s,\,$R$)} & bump radius $R$ & \S\ref{sec:shapes} \\
+\texttt{gr\_sim\_set/get\_force\_interp(s,\,$\cdot$)} & legacy / Lewis--Birdsall & \S\ref{sec:gather} \\
+\bottomrule
+\end{tabular}}
+
+\subsection{Physics switches}
+Each toggles one term of the assembled force, source, or gauge machinery; all are
+\texttt{set/get} pairs taking \texttt{(s, enabled)}.
+\nopagebreak
+{\footnotesize
+\begin{tabular}{@{}L{7.0cm}L{5.2cm}L{1.4cm}@{}}
+\toprule
+\textbf{Function (\,\texttt{gr\_sim\_set\_}$\cdots$\texttt{\_enabled}\,)} & \textbf{Gates} & \textbf{Part~II} \\
+\midrule
+\texttt{gravitomagnetic\_force} & $4m\,\vv v\times\Bg$ & \S\ref{sec:gather} \\
+\texttt{gravitomagnetic\_inductive} & $-m\,\partial_t\Ag$ & \S\ref{sec:gather} \\
+\texttt{em\_lorentz\_force} & $q(\vv E+\vv v\times\vv B)$ & \S\ref{sec:gather} \\
+\texttt{em\_inductive} & $-q\,\partial_t\vv A$ & \S\ref{sec:gather} \\
+\texttt{em\_electrostatic} & $-q\nabla\phi$ & \S\ref{sec:gather} \\
+\texttt{em\_magnetic} & $q\,\vv v\times\vv B$ & \S\ref{sec:gather} \\
+\texttt{em\_stress\_energy} & $\rho_{\rm EM},\vv J_{\rm EM}$ source & \S\ref{sec:pipeline} \\
+\texttt{em\_shapiro} & $\clocal$ EM solve & \S\ref{sec:em} \\
+\texttt{em\_shapiro\_dynamic} & per-step $\clocal$ rebuild & \S\ref{sec:bgimpl} \\
+\texttt{parabolic\_gauge\_cleaning} & Lorenz cleaning & \S\ref{sec:boundary} \\
+\texttt{field\_evolution} & run the leapfrog at all & \S\ref{sec:lattice} \\
+\texttt{particle\_source\_deposition} & deposit particle sources & \S\ref{sec:esirkepov} \\
+\texttt{esirkepov} & charge-conserving $\vv J$ & \S\ref{sec:esirkepov} \\
+\texttt{periodic\_bc} & wrap-around boundary & \S\ref{sec:boundary} \\
+\texttt{particles\_frozen} & freeze the push (settle) & \S\ref{sec:init} \\
+\bottomrule
+\end{tabular}}
+
+\subsection{Sources and deposition}
+\nopagebreak
+{\footnotesize
+\begin{tabular}{@{}L{6.8cm}L{5.4cm}L{1.4cm}@{}}
+\toprule
+\textbf{Function} & \textbf{Role} & \textbf{Part~II} \\
+\midrule
+\texttt{gr\_sim\_clear\_sources(s)} & zero the six source arrays & \S\ref{sec:pipeline} \\
+\texttt{gr\_sim\_clear\_fields(s)} & zero all potentials & \S\ref{sec:init} \\
+\texttt{gr\_sim\_deposit\_point\_mass/charge(s,x,y,$\cdot$)} & direct $\rho$ deposit (shape) & \S\ref{sec:shapes} \\
+\texttt{gr\_sim\_deposit\_point\_particle(s,\dots)} & deposit $\rho$ and $\vv J$ & \S\ref{sec:esirkepov} \\
+\texttt{gr\_sim\_rho\_matter\_ptr/rho\_q\_ptr(s)} & source-array views & \S\ref{sec:esirkepov} \\
+\texttt{gr\_sim\_J\_mx/my/qx/qy\_ptr(s)} & current-array views & \S\ref{sec:esirkepov} \\
+\texttt{gr\_sim\_set/get\_rho\_smooth\_passes(s,n)} & $\rho$ binomial smoothing & \S\ref{sec:esirkepov} \\
+\texttt{gr\_sim\_set/get\_j\_smooth\_passes(s,n)} & $\vv J$ binomial smoothing & \S\ref{sec:esirkepov} \\
+\texttt{gr\_sim\_esirkepov\_violations(s)} & continuity-fallback count & \S\ref{sec:esirkepov} \\
+\bottomrule
+\end{tabular}}
+
+\subsection{Field / array access and gauge diagnostics}
+\nopagebreak
+{\footnotesize
+\begin{tabular}{@{}L{6.8cm}L{5.4cm}L{1.4cm}@{}}
+\toprule
+\textbf{Function} & \textbf{Role} & \textbf{Part~II} \\
+\midrule
+\texttt{gr\_sim\_field\_ptr(s,which)} & a potential array (\texttt{prev/curr}) & \S\ref{sec:lattice} \\
+\texttt{gr\_sim\_array\_ptr(s,which)} & any field/source array & \S\ref{sec:arch} \\
+\texttt{gr\_sim\_background\_ptr(s,which)} & a sampled background array & \S\ref{sec:bgimpl} \\
+\texttt{gr\_array\_lattice(which)} & sublattice of an array & \S\ref{sec:lattice} \\
+\texttt{gr\_lattice\_offset(lat,$\cdot$,$\cdot$)} & node half-cell offset & \S\ref{sec:lattice} \\
+\texttt{gr\_sim\_gauge\_residual\_grav/em(s)} & $\|\partial_\mu\bar h^{\mu\nu}\|$ monitor & \S\ref{sec:boundary} \\
+\bottomrule
+\end{tabular}}
+
+\subsection{Particles}
+\nopagebreak
+{\footnotesize
+\begin{tabular}{@{}L{6.8cm}L{5.4cm}L{1.4cm}@{}}
+\toprule
+\textbf{Function} & \textbf{Role} & \textbf{Part~II} \\
+\midrule
+\texttt{gr\_sim\_add\_particle(s,x,y,m,q,vx,vy)} & append a macroparticle & \S\ref{sec:pusher} \\
+\texttt{gr\_sim\_particle\_count(s)} & number of particles & \S\ref{sec:pusher} \\
+\texttt{gr\_sim\_get\_particle(s,idx)} & read a particle record & \S\ref{sec:viz} \\
+\texttt{gr\_sim\_clear\_particles(s)} & remove all & \S\ref{sec:pusher} \\
+\texttt{gr\_sim\_particle\_energy(s,idx)} & $\gamma m c^2$ diagnostic & \S\ref{sec:pusher} \\
+\texttt{gr\_sim\_set\_particle\_spin(s,idx,s,g)} & scalar spin + $g_s$ & \S\ref{sec:spin} \\
+\texttt{gr\_sim\_set\_particle\_phi\_spin(s,idx,$\phi$)} & spin phase & \S\ref{sec:spin} \\
+\texttt{gr\_sim\_set\_particle\_drive(s,idx,\dots)} & driven/pinned source & \S\ref{sec:pusher} \\
+\texttt{gr\_sim\_particle\_enable/disable\_self\_field(s,idx)} & toggle self-field set & Eq.~\eqref{eq:selffield} \\
+\texttt{gr\_sim\_particle\_has\_self\_field(s,idx)} & query & Eq.~\eqref{eq:selffield} \\
+\texttt{gr\_sim\_particle\_set/get\_self\_field\_epsilon(s,idx,$\cdot$)} & subtraction $\varepsilon$ & Eq.~\eqref{eq:selffield} \\
+\bottomrule
+\end{tabular}}
+
+\subsection{Initialization}
+\nopagebreak
+{\footnotesize
+\begin{tabular}{@{}L{7.4cm}L{4.8cm}L{1.4cm}@{}}
+\toprule
+\textbf{Function} & \textbf{Role} & \textbf{Part~II} \\
+\midrule
+\texttt{gr\_sim\_relax\_phi\_g\_poisson(s,n)} & Jacobi Poisson seed & \S\ref{sec:init} \\
+\texttt{gr\_sim\_init\_potentials\_lienard\_wiechert(s)} & L--W seed & \S\ref{sec:init} \\
+\texttt{gr\_sim\_init\_potentials\_lienard\_wiechert\_with\_taper(s,in,out)} & L--W seed + boundary taper & \S\ref{sec:init} \\
+\texttt{gr\_sim\_init\_potentials\_settled(s,n\_settle)} & L--W + frozen friction settle & \S\ref{sec:init} \\
+\bottomrule
+\end{tabular}}
+
+\subsection{Boundary, absorber, and damping}
+\nopagebreak
+{\footnotesize
+\begin{tabular}{@{}L{7.4cm}L{4.8cm}L{1.4cm}@{}}
+\toprule
+\textbf{Function} & \textbf{Role} & \textbf{Part~II} \\
+\midrule
+\texttt{gr\_sim\_set/get\_outer\_bc\_neumann(s,$\cdot$)} & Dirichlet vs Neumann ring & \S\ref{sec:boundary} \\
+\texttt{gr\_sim\_set\_volume\_friction\_taper(s,floor,wall,depth)} & derivative-friction absorber & \S\ref{sec:boundary} \\
+\texttt{gr\_sim\_volume\_friction\_enabled(s)} & query & \S\ref{sec:boundary} \\
+\texttt{gr\_sim\_set/get\_zero\_mean\_scalar\_potentials(s,$\cdot$)} & DC-mode gauge fix & \S\ref{sec:boundary} \\
+\texttt{gr\_sim\_set\_damping(s,n)} / \texttt{\_damping\_layers(s)} & PML width & \S\ref{sec:boundary} \\
+\texttt{gr\_sim\_set/get\_damping\_config(s,cfg)} & PML profile params & \S\ref{sec:boundary} \\
+\texttt{gr\_sim\_damping\_max\_stable\_sigma\_dt(s,form)} & stability bound & \S\ref{sec:boundary} \\
+\bottomrule
+\end{tabular}}
+
+\subsection{Background fields}
+The unified compact body and the multi-body calls implement \S\ref{sec:bgimpl};
+the uniform/linear setters are single-body isolation fixtures.
+\nopagebreak
+{\footnotesize
+\begin{tabular}{@{}L{8.2cm}L{4.0cm}L{1.4cm}@{}}
+\toprule
+\textbf{Function} & \textbf{Role} & \textbf{Part~II} \\
+\midrule
+\texttt{gr\_sim\_clear\_background(s)} & drop all background & \S\ref{sec:bgimpl} \\
+\texttt{gr\_sim\_set\_background\_body(s,x,y,GM,Q,Jz,g,eps)} & one $(M,Q,J)$ body & \S\ref{sec:compactbody} \\
+\texttt{gr\_sim\_add\_background\_body(s,\dots)} $\to$ idx & append a body (superpose) & \S\ref{sec:bgimpl} \\
+\texttt{gr\_sim\_background\_count(s)} & number of bodies & \S\ref{sec:bgimpl} \\
+\texttt{gr\_sim\_get\_background\_body\_ptr(s,i)} & body params view (7 floats) & \S\ref{sec:bgimpl} \\
+\texttt{gr\_sim\_set\_background\_body\_at(s,i,\dots)} & edit body $i$ (re-derive) & \S\ref{sec:bgimpl} \\
+\texttt{gr\_sim\_set\_background\_point\_mass/\_charge(s,\dots)} & Schwarzschild / RN special case & \S\ref{sec:compactbody} \\
+\texttt{gr\_sim\_set\_background\_spinning\_point\_mass(s,\dots)} & Kerr special case & \S\ref{sec:compactbody} \\
+\texttt{gr\_sim\_set\_background\_uniform\_gravitomagnetic/\_magnetic/\_electric(s,\dots)} & uniform test fields & \S\ref{sec:bgimpl} \\
+\texttt{gr\_sim\_set\_background\_linear\_magnetic(s,\dots)} & $B_z(x)$ gradient fixture & \S\ref{sec:bgimpl} \\
+\texttt{gr\_sim\_set/get\_bg\_mode(s,$\cdot$)} & sampled vs analytic & \S\ref{sec:bgimpl} \\
+\texttt{gr\_sim\_get\_bg\_kind(s)} & installed background kind & \S\ref{sec:bgimpl} \\
+\bottomrule
+\end{tabular}}
+
+\subsection{Scenario registry}
+\nopagebreak
+{\footnotesize
+\begin{tabular}{@{}L{7.4cm}L{4.8cm}L{1.4cm}@{}}
+\toprule
+\textbf{Function} & \textbf{Role} & \textbf{Part~II} \\
+\midrule
+\texttt{gr\_sim\_load\_scenario(s,name,params,n)} & build a registered C scenario & \S\ref{sec:pipeline} \\
+\texttt{gr\_scenario\_register(def)} & register one & --- \\
+\texttt{gr\_scenarios\_init()} & populate the registry & --- \\
+\bottomrule
+\end{tabular}}
+
+%====================================================================
+\section{The Scenario Layer and Web Front End}
+\label{sec:scenario}
+%====================================================================
+
+A run's initial conditions can be assembled two ways, both built on the API of
+\S\ref{sec:api}. The native path is the C \emph{scenario registry}
+(\texttt{gr\_sim\_load\_scenario}): each test in the suite is a registered
+scenario plus an analytic assertion, which is how the physics of Parts~I--II is
+regression-checked.
+
+The browser path is declarative: a JSON object ---
+\texttt{\{program, format, version, grid, global, background, particles, view\}}
+--- is the single source of truth, and the front end's \texttt{applyScenario}
+routine maps it onto exactly the calls documented above:
+\begin{center}
+\begin{tabular}{@{}L{5.0cm}L{8.6cm}@{}}
+\toprule
+\textbf{JSON field} & \textbf{API calls} \\
+\midrule
+\texttt{grid}                & \texttt{gr\_sim\_create} (W,H,dx,cEff,cfl) \\
+\texttt{global.gEff/kE/\dots}  & couplings + scheme selectors (\S\ref{sec:api}) \\
+\texttt{global.switches.*}    & the physics-switch setters (one-to-one) \\
+\texttt{global.absorber/init} & friction taper + the \texttt{init\_potentials\_*} calls \\
+\texttt{background[\,]}        & \texttt{gr\_sim\_clear\_background} + \texttt{gr\_sim\_add\_background\_body} per body \\
+\texttt{particles[\,]}        & \texttt{gr\_sim\_add\_particle} + \texttt{set\_particle\_spin/drive}, self-field \\
+\texttt{view}                & front-end visualization only (\S\ref{sec:viz}) \\
+\bottomrule
+\end{tabular}
+\end{center}
+The JSON is thus a thin, validated, shareable wrapper over the same C entry
+points; a scenario fully and reproducibly determines a run. A debug bridge
+additionally exposes the API over a local socket, returning \emph{computed}
+diagnostics (field statistics, conservation residuals, per-particle state) so the
+simulation can be driven and checked programmatically.
+
+%====================================================================
+\section{Conclusion}
+%====================================================================
+
+The three parts form one chain of custody for the model. Part~I states the
+physics --- linearized GR in GEM form coupled to electromagnetism, with
+relativistic, spin, and proper-time dynamics --- deriving each result in 3D and
+specializing it to the $2{+}1$ dimensions the code runs in. Part~II discretizes
+those 2D equations into an explicit Yee-lattice PIC scheme: leapfrog field
+advance, shape-function deposition, Esirkepov charge conservation,
+Lewis--Birdsall force gather, a relativistic Boris push, and the initial-field,
+boundary, background, and visualization machinery. Part~III ties that scheme to
+the C library, member by member and function by function. The cross-references
+run the full length: an equation label in Part~I, an algorithm step in Part~II,
+and a function in Part~III name the same object at three levels of description.
+That is the intent --- for a simulator that borders on research work, the work is
+shown.
+
+\bigskip
+\noindent\textit{End of report.}
+
+%====================================================================
+\begin{thebibliography}{9}
+\addcontentsline{toc}{section}{References}
+%====================================================================
+\bibitem{Will1993} C.~M.~Will, \textit{Theory and Experiment in Gravitational
+  Physics}, Cambridge University Press (1993), \S6.2.
+\bibitem{AliHaimoud2019} Y.~Ali-Ha\"imoud, lecture notes on post-Newtonian
+  theory (EIH equation of motion, eqs.~37, 41), 2019.
+\bibitem{CohenMashhoon1993} J.~M.~Cohen and B.~Mashhoon, ``Standard clocks,
+  interferometry, and gravitomagnetism,'' \textit{Phys.\ Lett.\ A} \textbf{181},
+  353 (1993).
+\bibitem{Mashhoon2003} B.~Mashhoon, ``Gravitoelectromagnetism: a brief review,''
+  in \textit{The Measurement of Gravitomagnetism}, arXiv:gr-qc/0311030 (2003).
+\bibitem{Iorio2001} L.~Iorio, ``Satellite gravitational orbital perturbations
+  and the gravitomagnetic clock effect,'' \textit{Int.\ J.\ Mod.\ Phys.\ D}
+  \textbf{10}, 465 (2001).
+\bibitem{Tartaglia2000} A.~Tartaglia, ``Detection of the gravitomagnetic clock
+  effect,'' \textit{Class.\ Quantum Grav.} \textbf{17}, 783 (2000).
+\end{thebibliography}
+
+\end{document}

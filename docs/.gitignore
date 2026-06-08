@@ -1,0 +1,8 @@
+# LaTeX build intermediates (the .tex and .pdf are tracked; these are not)
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fls
+*.fdb_latexmk
