@@ -71,6 +71,8 @@ const TIPS: Record<string, string> = {
     /* particle */
     'mass': 'Particle rest mass (> 0). Sets inertia and gravitational charge.',
     'charge': 'Particle electric charge (may be ±). Sources and feels EM.',
+    'spin': 'Intrinsic spin angular momentum about z. Couples to field gradients (spin-gradient force) and precesses (Larmor / Thomas / Lense–Thirring).',
+    'gFactor': 'Gyromagnetic ratio g of the particle’s spin. Sets the magnetic moment μ = g·(Q/2M)·spin. Default 2 (Dirac); 0 = no magnetic coupling.',
     'vx': 'Initial x-velocity in units of c (|v| must stay below cEff).',
     'vy': 'Initial y-velocity in units of c (|v| must stay below cEff).',
     'forces': 'Whether physical forces act on this particle. Off = pinned / pure source (a drive still applies).',
@@ -329,6 +331,14 @@ export class Inspector {
         mk('y', 'y', 1);
         mk('vx', 'vx', 0.01);
         mk('vy', 'vy', 0.01);
+
+        /* Intrinsic spin (optional). spin sets the angular momentum that feels
+         * the spin-gradient force and precesses; gFactor sets its magnetic
+         * moment μ = g·(Q/2M)·spin (default 2, Dirac).  Physics edit => rebuild. */
+        this.particleEl.appendChild(numRow('spin', s.particles[sel].spin ?? 0, 0.1,
+            (v) => edit((sc) => { sc.particles[sel].spin = v; })));
+        this.particleEl.appendChild(numRow('gFactor', s.particles[sel].gFactor ?? 2, 0.1,
+            (v) => edit((sc) => { sc.particles[sel].gFactor = v; })));
 
         /* Source / drive: per-particle sinusoidal oscillation (one antenna
          * element).  `forces` off => pinned / pure source; `amp` 0 => no drive.
