@@ -39,6 +39,25 @@
 % Left-aligned fixed-width table column.
 \newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
 
+% Function-name column: like L, but lets long monospace names break at their
+% underscores so they wrap inside the cell instead of running into the next
+% column or past the right margin (used for the API reference tables, S19).
+\newcommand{\fnbreaks}{\renewcommand{\_}{\textunderscore\discretionary{}{}{}}}
+\newcolumntype{F}[1]{>{\raggedright\arraybackslash\fnbreaks}p{#1}}
+
+% Let inline monospace function names break at their underscores too, so long
+% names in body text wrap instead of overrunning the right margin.  We patch the
+% inner worker of the (robust) \texttt so it stays robust for moving arguments
+% (ToC / PDF bookmarks); the added breaks are discretionary, so ordinary lines
+% are unaffected.
+\expandafter\let\expandafter\origtexttt\csname texttt \endcsname
+\expandafter\def\csname texttt \endcsname#1{{\fnbreaks\origtexttt{#1}}}
+
+% Code listings one size down, so the wider struct lines fit the text width.
+\makeatletter
+\renewcommand{\verbatim@font}{\normalfont\ttfamily\small}
+\makeatother
+
 % Boxed display ("the result you implement").
 \newmdenv[linewidth=0.6pt,roundcorner=2pt,backgroundcolor=black!3,
           innertopmargin=4pt,innerbottommargin=4pt]{eqbox}
@@ -1236,7 +1255,7 @@ The implementation is six source files, each owning one band of Part~II
 
 \begin{table}[h]
 \centering
-\begin{tabular}{@{}L{2.4cm}L{6.4cm}L{4.6cm}@{}}
+\begin{tabular}{@{}L{2.4cm}F{6.4cm}F{4.6cm}@{}}
 \toprule
 \textbf{File} & \textbf{Implements (Part~II)} & \textbf{Key symbols} \\
 \midrule
@@ -1290,7 +1309,7 @@ by their paired setter are folded into one row (``\,set/get\,'').
 \subsection{Lifecycle and time}
 \nopagebreak
 {\footnotesize
-\begin{tabular}{@{}L{6.6cm}L{5.6cm}L{1.4cm}@{}}
+\begin{tabular}{@{}F{8.2cm}L{4.9cm}L{1.4cm}@{}}
 \toprule
 \textbf{Function} & \textbf{Role} & \textbf{Part~II} \\
 \midrule
@@ -1307,7 +1326,7 @@ by their paired setter are folded into one row (``\,set/get\,'').
 \subsection{Couplings and scheme selectors}
 \nopagebreak
 {\footnotesize
-\begin{tabular}{@{}L{6.6cm}L{5.6cm}L{1.4cm}@{}}
+\begin{tabular}{@{}F{8.2cm}L{4.9cm}L{1.4cm}@{}}
 \toprule
 \textbf{Function} & \textbf{Role} & \textbf{Part~II} \\
 \midrule
@@ -1323,9 +1342,10 @@ by their paired setter are folded into one row (``\,set/get\,'').
 \subsection{Physics switches}
 Each toggles one term of the assembled force, source, or gauge machinery; all are
 \texttt{set/get} pairs taking \texttt{(s, enabled)}.
+
 \nopagebreak
 {\footnotesize
-\begin{tabular}{@{}L{7.0cm}L{5.2cm}L{1.4cm}@{}}
+\begin{tabular}{@{}F{8.2cm}L{4.9cm}L{1.4cm}@{}}
 \toprule
 \textbf{Function (\,\texttt{gr\_sim\_set\_}$\cdots$\texttt{\_enabled}\,)} & \textbf{Gates} & \textbf{Part~II} \\
 \midrule
@@ -1350,7 +1370,7 @@ Each toggles one term of the assembled force, source, or gauge machinery; all ar
 \subsection{Sources and deposition}
 \nopagebreak
 {\footnotesize
-\begin{tabular}{@{}L{6.8cm}L{5.4cm}L{1.4cm}@{}}
+\begin{tabular}{@{}F{8.2cm}L{4.9cm}L{1.4cm}@{}}
 \toprule
 \textbf{Function} & \textbf{Role} & \textbf{Part~II} \\
 \midrule
@@ -1369,7 +1389,7 @@ Each toggles one term of the assembled force, source, or gauge machinery; all ar
 \subsection{Field / array access and gauge diagnostics}
 \nopagebreak
 {\footnotesize
-\begin{tabular}{@{}L{6.8cm}L{5.4cm}L{1.4cm}@{}}
+\begin{tabular}{@{}F{8.2cm}L{4.9cm}L{1.4cm}@{}}
 \toprule
 \textbf{Function} & \textbf{Role} & \textbf{Part~II} \\
 \midrule
@@ -1385,7 +1405,7 @@ Each toggles one term of the assembled force, source, or gauge machinery; all ar
 \subsection{Particles}
 \nopagebreak
 {\footnotesize
-\begin{tabular}{@{}L{6.8cm}L{5.4cm}L{1.4cm}@{}}
+\begin{tabular}{@{}F{8.2cm}L{4.9cm}L{1.4cm}@{}}
 \toprule
 \textbf{Function} & \textbf{Role} & \textbf{Part~II} \\
 \midrule
@@ -1406,7 +1426,7 @@ Each toggles one term of the assembled force, source, or gauge machinery; all ar
 \subsection{Initialization}
 \nopagebreak
 {\footnotesize
-\begin{tabular}{@{}L{7.4cm}L{4.8cm}L{1.4cm}@{}}
+\begin{tabular}{@{}F{8.2cm}L{4.9cm}L{1.4cm}@{}}
 \toprule
 \textbf{Function} & \textbf{Role} & \textbf{Part~II} \\
 \midrule
@@ -1420,7 +1440,7 @@ Each toggles one term of the assembled force, source, or gauge machinery; all ar
 \subsection{Boundary, absorber, and damping}
 \nopagebreak
 {\footnotesize
-\begin{tabular}{@{}L{7.4cm}L{4.8cm}L{1.4cm}@{}}
+\begin{tabular}{@{}F{8.2cm}L{4.9cm}L{1.4cm}@{}}
 \toprule
 \textbf{Function} & \textbf{Role} & \textbf{Part~II} \\
 \midrule
@@ -1437,9 +1457,10 @@ Each toggles one term of the assembled force, source, or gauge machinery; all ar
 \subsection{Background fields}
 The unified compact body and the multi-body calls implement \S\ref{sec:bgimpl};
 the uniform/linear setters are single-body isolation fixtures.
+
 \nopagebreak
 {\footnotesize
-\begin{tabular}{@{}L{8.2cm}L{4.0cm}L{1.4cm}@{}}
+\begin{tabular}{@{}F{8.2cm}L{4.9cm}L{1.4cm}@{}}
 \toprule
 \textbf{Function} & \textbf{Role} & \textbf{Part~II} \\
 \midrule
@@ -1461,7 +1482,7 @@ the uniform/linear setters are single-body isolation fixtures.
 \subsection{Scenario registry}
 \nopagebreak
 {\footnotesize
-\begin{tabular}{@{}L{7.4cm}L{4.8cm}L{1.4cm}@{}}
+\begin{tabular}{@{}F{8.2cm}L{4.9cm}L{1.4cm}@{}}
 \toprule
 \textbf{Function} & \textbf{Role} & \textbf{Part~II} \\
 \midrule
